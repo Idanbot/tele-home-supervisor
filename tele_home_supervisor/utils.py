@@ -207,8 +207,8 @@ def list_containers_basic() -> str:
 
 def container_stats_summary() -> str:
     """Get container stats using docker stats CLI (much faster than API)."""
-    # Try common docker binary locations
-    docker_paths = ["/usr/bin/docker", "/usr/local/bin/docker", "docker"]
+    # Try common docker binary locations (prefer /usr/local/bin where we install it)
+    docker_paths = ["/usr/local/bin/docker", "/usr/bin/docker", "docker"]
     docker_cmd = None
     
     for path in docker_paths:
@@ -264,7 +264,7 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
     """Get recent logs from a container."""
     try:
         out = subprocess.check_output(
-            ["/usr/bin/docker", "logs", "--tail", str(lines), container_name],
+            ["/usr/local/bin/docker", "logs", "--tail", str(lines), container_name],
             text=True,
             stderr=subprocess.STDOUT,
             timeout=10,

@@ -26,16 +26,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Runtime deps (keep minimal). We still install curl and iproute2 so
 # runtime checks (ip, curl) work inside the container.
-# Also install docker CLI (for docker stats/logs commands) and git (for version info)
+# Also install git (for version info) and download docker CLI binary directly
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl iproute2 tzdata git ca-certificates gnupg lsb-release \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
-    && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends docker-ce-cli \
+      curl iproute2 tzdata git ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
+    && ARCH=$(dpkg --print-architecture) \
+    && if [ "$ARCH" = "arm64" ]; then DOCKER_ARCH="aarch64"; else DOCKER_ARCH="$ARCH"; fi \
+    && echo "Downloading Docker CLI for architecture: $DOCKER_ARCH" \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-25.0.3.tgz" -o docker.tgz \
+    && tar -xzf docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
+    && rm docker.tgz \
+    && chmod +x /usr/local/bin/docker \
     && docker --version
 
 WORKDIR /app
