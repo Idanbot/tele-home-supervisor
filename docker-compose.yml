@@ -33,6 +33,7 @@ services:
       - WATCHTOWER_POLL_INTERVAL=300 # check every 5 minutes
       - WATCHTOWER_INCLUDE_STOPPED=true
       - WATCHTOWER_UPDATE_ON_START=true # also check immediately on startup
+      - DOCKER_API_VERSION=1.44 #Docker v29 raised the minimum API version to 1.44
 
     # Only update this specific container
     command:
