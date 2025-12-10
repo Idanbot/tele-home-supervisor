@@ -23,17 +23,11 @@ for part in os.environ.get("ALLOWED_CHAT_IDS", "").replace(" ", "").split(","):
         ALLOWED.add(int(part))
 
 SHOW_WAN = os.environ.get("SHOW_WAN", "false").lower() in {"1", "true", "yes"}
-WATCH_PATHS = [
-    p.strip()
-    for p in os.environ.get("WATCH_PATHS", "/,/srv/media").split(",")
-    if p.strip()
-]
+WATCH_PATHS = [p.strip() for p in os.environ.get("WATCH_PATHS", "/,/srv/media").split(",") if p.strip()]
 
 if not ALLOWED:
     # Fail-closed: no one is allowed until ALLOWED_CHAT_IDS is configured.
-    print(
-        "WARNING: ALLOWED_CHAT_IDS is empty; all guarded commands will be unauthorized."
-    )
+    print("WARNING: ALLOWED_CHAT_IDS is empty; all guarded commands will be unauthorized.")
 
 client = docker.from_env()
 
@@ -116,10 +110,7 @@ def get_wan_ip() -> str:
 def get_temp() -> str:
     # Raspberry Pi thermal (multiple fallbacks)
     # 1) sysfs
-    for path in [
-        "/sys/class/thermal/thermal_zone0/temp",
-        "/sys/class/thermal/thermal_zone1/temp",
-    ]:
+    for path in ["/sys/class/thermal/thermal_zone0/temp", "/sys/class/thermal/thermal_zone1/temp"]:
         try:
             with open(path) as f:
                 t = f.read().strip()
@@ -162,10 +153,7 @@ def host_health() -> str:
     for path in WATCH_PATHS:
         try:
             du = psutil.disk_usage(path)
-            disks.append(
-                f"{path}: {
-                    fmt_bytes(du.used)}/{fmt_bytes(du.total)} ({du.percent:.0f}%)"
-            )
+            disks.append(f"{path}: {fmt_bytes(du.used)}/{fmt_bytes(du.total)} ({du.percent:.0f}%)")
         except Exception:
             disks.append(f"{path}: n/a")
     temp = get_temp()
@@ -188,11 +176,9 @@ def host_health() -> str:
         lines.append(f"<b>WAN IP:</b> <code>{wan_ip}</code>")
     lines.extend(
         [
-            f"<b>Uptime:</b> {human_uptime()
-                              } | <b>Load:</b> {load1:.2f} {load5:.2f} {load15:.2f}",
+            f"<b>Uptime:</b> {human_uptime()} | <b>Load:</b> {load1:.2f} {load5:.2f} {load15:.2f}",
             f"<b>CPU:</b> {cpu_pct:.0f}% | "
-            f"<b>Mem:</b> {fmt_bytes(v.used)}/{fmt_bytes(v.total)
-                                               } ({v.percent:.0f}%) | "
+            f"<b>Mem:</b> {fmt_bytes(v.used)}/{fmt_bytes(v.total)} ({v.percent:.0f}%) | "
             f"<b>Temp:</b> {html.escape(temp)}",
             f"<b>Disks:</b> {disks_html}",
         ]
@@ -227,20 +213,12 @@ def list_containers_basic() -> str:
     for c in cs:
         try:
             name = html.escape(c.name)
-            image = html.escape(
-                c.image.tags[0] if c.image.tags else c.image.short_id)
+            image = html.escape(c.image.tags[0] if c.image.tags else c.image.short_id)
             status = html.escape(c.status)
-            ports = html.escape(
-                format_ports(c.attrs.get("NetworkSettings", {}).get("Ports"))
-            )
-            lines.append(
-                f"<code>{name}</code> • {status} • <code>{image}</code> • {ports}"
-            )
+            ports = html.escape(format_ports(c.attrs.get("NetworkSettings", {}).get("Ports")))
+            lines.append(f"<code>{name}</code> • {status} • <code>{image}</code> • {ports}")
         except Exception as e:
-            lines.append(
-                f"<code>{html.escape(
-                    c.name)}</code> • error: <code>{html.escape(str(e))}</code>"
-            )
+            lines.append(f"<code>{html.escape(c.name)}</code> • error: <code>{html.escape(str(e))}</code>")
     return "\n".join(lines)
 
 
@@ -289,10 +267,7 @@ def container_stats_summary() -> str:
                 f"MEM {mem_pct:5.1f}% ({mem_usage_h}/{mem_limit_h})"
             )
         except Exception as e:
-            lines.append(
-                f"<code>{html.escape(
-                    c.name)}</code> stats error: <code>{html.escape(str(e))}</code>"
-            )
+            lines.append(f"<code>{html.escape(c.name)}</code> stats error: <code>{html.escape(str(e))}</code>")
 
     return "\n".join(lines)
 
@@ -322,8 +297,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c = update.effective_chat
     u = update.effective_user
-    msg = f"chat_id: {c.id}\nchat_type: {
-        c.type}\nuser: @{getattr(u, 'username', None)}"
+    msg = (
+        f"chat_id: {c.id}\n"
+        f"chat_type: {c.type}\n"
+        f"user: @{getattr(u, 'username', None)}"
+    )
     await update.message.reply_text(msg)
 
 
