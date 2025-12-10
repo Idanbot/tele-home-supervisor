@@ -1,3 +1,15 @@
+# Ignore Python cache and local env
+__pycache__
+*.py[cod]
+.venv
+venv
+env
+
+# Git
+.git
+
+# Ignore wheel cache
+/wheels
 __pycache__/
 *.py[cod]
 .git

@@ -5,26 +5,32 @@ This module contains repeatable code and calculations used by the handlers.
 from __future__ import annotations
 
 import html
+import os
 import socket
 import subprocess
 import time
 import platform
 from datetime import datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING
 import logging
 
 import psutil
 import docker
 
+if TYPE_CHECKING:
+    # Import DockerClient only for type checking; runtime import may not be
+    # available in some static analysis environments.
+    from docker.client import DockerClient  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 # docker client (shared)
-client = docker.from_env()
+client: "DockerClient" = docker.from_env()
 
 
-def chunk(msg: str, size: int = 3500) -> List[str]:
+def chunk(msg: str, size: int = 3500) -> list[str]:
     lines = msg.splitlines()
-    chunks: List[str] = []
+    chunks: list[str] = []
     current = ""
     for line in lines:
         added_length = len(line) + (1 if current else 0)
@@ -113,18 +119,18 @@ def human_uptime() -> str:
     return f"{d}d {h}h {m}m"
 
 
-def host_health(show_wan: bool = False, watch_paths: Optional[List[str]] = None) -> str:
+def host_health(show_wan: bool = False, watch_paths: list[str] | None = None) -> str:
     cpu_pct = psutil.cpu_percent(interval=0.5)
     v = psutil.virtual_memory()
     try:
-        load1, load5, load15 = os.getloadavg()  # type: ignore
-    except Exception:
+        load1, load5, load15 = os.getloadavg()
+    except (OSError, AttributeError):
         load1 = load5 = load15 = 0.0
 
     if watch_paths is None:
         watch_paths = ["/", "/srv/media"]
 
-    disks = []
+    disks: list[str] = []
     for path in watch_paths:
         try:
             du = psutil.disk_usage(path)
@@ -161,10 +167,10 @@ def host_health(show_wan: bool = False, watch_paths: Optional[List[str]] = None)
     return "\n".join(lines)
 
 
-def format_ports(pmap) -> str:
+def format_ports(pmap: dict[str, list[dict[str, str]] | None] | None) -> str:
     if not pmap:
         return "-"
-    items = []
+    items: list[str] = []
     for k, v in pmap.items():
         if v is None:
             items.append(k)
@@ -200,55 +206,151 @@ def list_containers_basic() -> str:
 
 
 def container_stats_summary() -> str:
+    """Get container stats using docker stats CLI (much faster than API)."""
     try:
-        cs = client.containers.list()
+        # Use docker stats --no-stream for a single snapshot (fast)
+        out = subprocess.check_output(
+            ["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}"],
+            text=True,
+            timeout=5,
+        ).strip()
+        if not out:
+            return "<i>No running containers.</i>"
+        
+        lines = ["<b>Container stats:</b>"]
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 4:
+                name, cpu, mem_pct, mem_usage = parts
+                lines.append(
+                    f"<code>{html.escape(name)}</code> "
+                    f"CPU {html.escape(cpu)} MEM {html.escape(mem_pct)} ({html.escape(mem_usage)})"
+                )
+        return "\n".join(lines)
+    except subprocess.TimeoutExpired:
+        logger.error("docker stats command timed out")
+        return "<i>Docker stats timed out</i>"
+    except FileNotFoundError:
+        logger.error("docker command not found in PATH")
+        return "<i>Docker CLI not available</i>"
     except Exception as e:
-        logger.exception("Docker API error while getting stats")
-        return f"<i>Docker API error:</i> <code>{html.escape(str(e))}</code>"
+        logger.exception("Error running docker stats")
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
 
-    if not cs:
-        return "<i>No running containers.</i>"
+def get_container_logs(container_name: str, lines: int = 50) -> str:
+    """Get recent logs from a container."""
+    try:
+        out = subprocess.check_output(
+            ["docker", "logs", "--tail", str(lines), container_name],
+            text=True,
+            stderr=subprocess.STDOUT,
+            timeout=10,
+        ).strip()
+        if not out:
+            return f"<i>No logs for container {html.escape(container_name)}</i>"
+        # Limit output to avoid message size issues
+        if len(out) > 3500:
+            out = out[-3500:]
+            out = "...\n" + out
+        return f"<b>Logs for {html.escape(container_name)}:</b>\n<pre>{html.escape(out)}</pre>"
+    except subprocess.TimeoutExpired:
+        return f"<i>Timeout getting logs for {html.escape(container_name)}</i>"
+    except subprocess.CalledProcessError as e:
+        return f"<i>Error:</i> <code>{html.escape(e.stderr or str(e))}</code>"
+    except Exception as e:
+        logger.exception("Error getting container logs")
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
 
-    lines = ["<b>Container stats (no-stream):</b>"]
-    for c in cs:
-        try:
-            s = c.stats(stream=False)
-            cpu_stats = s.get("cpu_stats", {}) or {}
-            precpu = s.get("precpu_stats", {}) or {}
 
-            cpu_total = cpu_stats.get("cpu_usage", {}).get("total_usage", 0)
-            precpu_total = precpu.get("cpu_usage", {}).get("total_usage", 0)
-            cpu_delta = cpu_total - precpu_total
+def get_top_processes() -> str:
+    """Get top processes using ps command."""
+    try:
+        out = subprocess.check_output(
+            ["ps", "aux", "--sort=-%cpu"],
+            text=True,
+            timeout=5,
+        ).strip()
+        lines = out.splitlines()[:11]  # Header + top 10
+        return f"<b>Top Processes:</b>\n<pre>{html.escape(chr(10).join(lines))}</pre>"
+    except Exception as e:
+        logger.exception("Error getting top processes")
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
 
-            system_cpu = cpu_stats.get("system_cpu_usage", 0)
-            pre_system_cpu = precpu.get("system_cpu_usage", 0)
-            system_delta = system_cpu - pre_system_cpu
 
-            percpu = cpu_stats.get("cpu_usage", {}).get("percpu_usage") or []
-            online = cpu_stats.get("online_cpus") or len(percpu) or 1
+def get_uptime_info() -> str:
+    """Get simple uptime information."""
+    return f"<b>Uptime:</b> {human_uptime()}"
 
-            cpu_pct = 0.0
-            if cpu_delta > 0 and system_delta > 0:
-                cpu_pct = (cpu_delta / system_delta) * online * 100.0
 
-            mem_stats = s.get("memory_stats", {}) or {}
-            mem_usage = float(mem_stats.get("usage", 0.0))
-            mem_limit = float(mem_stats.get("limit", 1.0)) or 1.0
-            mem_pct = (mem_usage / mem_limit) * 100.0
+def get_neofetch_output() -> str:
+    """Get neofetch output if available."""
+    try:
+        out = subprocess.check_output(
+            ["neofetch", "--stdout"],
+            text=True,
+            timeout=10,
+        ).strip()
+        if not out:
+            return "<i>neofetch produced no output</i>"
+        return f"<pre>{html.escape(out)}</pre>"
+    except FileNotFoundError:
+        return "<i>neofetch is not installed</i>"
+    except subprocess.TimeoutExpired:
+        return "<i>neofetch timed out</i>"
+    except Exception as e:
+        logger.exception("Error running neofetch")
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
 
-            name = html.escape(c.name)
-            mem_usage_h = fmt_bytes(int(mem_usage))
-            mem_limit_h = fmt_bytes(int(mem_limit))
 
-            lines.append(
-                f"<code>{name}</code> CPU {cpu_pct:5.1f}%  "
-                f"MEM {mem_pct:5.1f}% ({mem_usage_h}/{mem_limit_h})"
-            )
-        except Exception:
-            logger.exception("Error computing stats for container %s", getattr(c, 'name', '<unknown>'))
-            lines.append(f"<code>{html.escape(getattr(c, 'name', 'unknown'))}</code> stats error")
-
+def get_version_info() -> str:
+    """Get version and build information."""
+    lines = ["<b>Version Info:</b>"]
+    
+    # Try to get image creation date from Docker
+    try:
+        out = subprocess.check_output(
+            ["docker", "inspect", "--format", "{{.Created}}", "$(hostname)"],
+            text=True,
+            shell=True,
+            timeout=3,
+        ).strip()
+        if out:
+            # Parse and format the timestamp
+            from datetime import datetime
+            try:
+                dt = datetime.fromisoformat(out.replace('Z', '+00:00'))
+                formatted_date = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                lines.append(f"<b>Image Built:</b> {formatted_date}")
+            except Exception:
+                lines.append(f"<b>Image Built:</b> {html.escape(out)}")
+    except Exception:
+        pass
+    
+    # Try to get image ID/tag
+    try:
+        out = subprocess.check_output(
+            ["docker", "inspect", "--format", "{{.Config.Image}}", "$(hostname)"],
+            text=True,
+            shell=True,
+            timeout=3,
+        ).strip()
+        if out:
+            lines.append(f"<b>Image:</b> <code>{html.escape(out)}</code>")
+    except Exception:
+        pass
+    
+    # Python version
+    import sys
+    lines.append(f"<b>Python:</b> {sys.version.split()[0]}")
+    
+    # Package info
+    lines.append("<b>Package:</b> tele-home-supervisor")
+    
+    if len(lines) == 1:
+        return "<i>Version information not available</i>"
+    
     return "\n".join(lines)
+
 
 __all__ = [
     "chunk",
@@ -261,4 +363,9 @@ __all__ = [
     "format_ports",
     "list_containers_basic",
     "container_stats_summary",
+    "get_container_logs",
+    "get_top_processes",
+    "get_uptime_info",
+    "get_neofetch_output",
+    "get_version_info",
 ]

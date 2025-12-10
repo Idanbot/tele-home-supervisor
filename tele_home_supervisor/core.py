@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import logging
-from typing import Any
+from typing import Callable, Awaitable
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +28,24 @@ SHOW_WAN = os.environ.get("SHOW_WAN", "false").lower() in {"1", "true", "yes"}
 WATCH_PATHS = [p.strip() for p in os.environ.get("WATCH_PATHS", "/,/srv/media").split(",") if p.strip()]
 
 
-def _delegate(name: str) -> Any:
+def _validate_config() -> None:
+    """Validate configuration at module load and log warnings/errors."""
+    if TOKEN is None:
+        logger.error("BOT_TOKEN environment variable is not set")
+    if not ALLOWED:
+        logger.warning("ALLOWED_CHAT_IDS is empty; all guarded commands will be unauthorized")
+    if not WATCH_PATHS:
+        logger.warning("WATCH_PATHS is empty; disk usage monitoring disabled")
+
+
+_validate_config()
+
+
+def _delegate(name: str) -> Callable[["telegram.Update", "telegram.ext.ContextTypes.DEFAULT_TYPE"], Awaitable[None]]:
     """Return a thin wrapper that imports and returns the named callable.
 
-    Used by the telegram registration to avoid importing the full
-    `api_functions` module at import time.
+    The return type matches the expected telegram handler signature so
+    type-checkers (Pylance/pyright) understand the API without using Any.
     """
 
     async def wrapper(update, context):
@@ -52,6 +65,11 @@ cmd_health = _delegate("cmd_health")
 cmd_docker = _delegate("cmd_docker")
 cmd_dockerstats = _delegate("cmd_dockerstats")
 cmd_whoami = _delegate("cmd_whoami")
+cmd_logs = _delegate("cmd_logs")
+cmd_ps = _delegate("cmd_ps")
+cmd_uptime = _delegate("cmd_uptime")
+cmd_neofetch = _delegate("cmd_neofetch")
+cmd_version = _delegate("cmd_version")
 
 __all__ = [
     "TOKEN",
@@ -65,4 +83,9 @@ __all__ = [
     "cmd_docker",
     "cmd_dockerstats",
     "cmd_whoami",
+    "cmd_logs",
+    "cmd_ps",
+    "cmd_uptime",
+    "cmd_neofetch",
+    "cmd_version",
 ]

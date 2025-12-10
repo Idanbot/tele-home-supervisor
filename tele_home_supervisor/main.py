@@ -5,12 +5,8 @@ This module wires up the Application, registers handlers and runs polling.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-# The telegram package is an external dependency; Pylance in CI/editors
-# may not have the packages installed. Silence unresolved-import errors
-# here and avoid strict typing of `Application` to keep diagnostics clean.
-from telegram.ext import Application, CommandHandler  # type: ignore[import]
+from telegram.ext import Application, CommandHandler
 
 from .logger import setup_logging
 from . import core
@@ -18,7 +14,7 @@ from . import core
 logger = logging.getLogger(__name__)
 
 
-def build_application() -> Any:
+def build_application() -> Application:
     if core.TOKEN is None:
         raise RuntimeError("BOT_TOKEN environment variable is not set")
 
@@ -31,11 +27,16 @@ def build_application() -> Any:
     app.add_handler(CommandHandler(["health"], core.cmd_health))
     app.add_handler(CommandHandler(["docker"], core.cmd_docker))
     app.add_handler(CommandHandler(["dockerstats"], core.cmd_dockerstats))
+    app.add_handler(CommandHandler(["logs"], core.cmd_logs))
+    app.add_handler(CommandHandler(["ps"], core.cmd_ps))
+    app.add_handler(CommandHandler(["uptime"], core.cmd_uptime))
+    app.add_handler(CommandHandler(["neofetch"], core.cmd_neofetch))
+    app.add_handler(CommandHandler(["version"], core.cmd_version))
 
     return app
 
 
-def run():
+def run() -> None:
     setup_logging()
     logger.info("Starting tele_home_supervisor")
     app = build_application()

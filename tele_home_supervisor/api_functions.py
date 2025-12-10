@@ -8,20 +8,20 @@ from __future__ import annotations
 import logging
 import html
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING
 
-# Silence unresolved-import in editors/CI where telegram package may not be
-# installed; use `Any` for runtime typing where necessary.
-from telegram import Update  # type: ignore[import]
-from telegram.constants import ParseMode  # type: ignore[import]
-from telegram.ext import ContextTypes  # type: ignore[import]
+from telegram.constants import ParseMode
+
+if TYPE_CHECKING:
+    from telegram import Update
+    from telegram.ext import ContextTypes
 
 from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-def allowed(update: Any) -> bool:
+def allowed(update: "Update") -> bool:
     # import core lazily to avoid circular imports during module import
     from . import core
 
@@ -31,7 +31,7 @@ def allowed(update: Any) -> bool:
     return chat_id in core.ALLOWED
 
 
-async def guard(update: Any, context: Any) -> bool:
+async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
     if allowed(update):
         return True
     if update and update.effective_chat:
@@ -39,7 +39,7 @@ async def guard(update: Any, context: Any) -> bool:
     return False
 
 
-async def cmd_start(update: Any, context: Any):
+async def cmd_start(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     if not await guard(update, context):
         return
     text = (
@@ -48,29 +48,35 @@ async def cmd_start(update: Any, context: Any):
         "/health – CPU/RAM/disk/load/uptime (and WAN if enabled)\n"
         "/docker – list containers, status, ports\n"
         "/dockerstats – CPU/MEM per running container\n"
+        "/logs <container> – recent logs from container\n"
+        "/ps – top processes\n"
+        "/uptime – system uptime\n"
+        "/neofetch – system info (neofetch)\n"
+        "/version – bot version and build info\n"
         "/help – this menu"
     )
     await update.message.reply_text(text)
 
 
-async def cmd_whoami(update: Any, context: Any):
+async def cmd_whoami(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     c = update.effective_chat
     u = update.effective_user
+    username = f"@{u.username}" if u and u.username else "(no username)"
     msg = (
         f"chat_id: {c.id}\n"
         f"chat_type: {c.type}\n"
-        f"user: @{getattr(u, 'username', None)}"
+        f"user: {username}"
     )
     await update.message.reply_text(msg)
 
 
-async def cmd_help(update: Any, context: Any):
+async def cmd_help(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     if not await guard(update, context):
         return
     await cmd_start(update, context)
 
 
-async def cmd_ip(update: Any, context: Any):
+async def cmd_ip(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     if not await guard(update, context):
         return
     lan = html.escape(utils.get_primary_ip())
@@ -81,10 +87,10 @@ async def cmd_ip(update: Any, context: Any):
     if core.SHOW_WAN:
         wan = html.escape(utils.get_wan_ip())
         msg_lines.append(f"<b>WAN IP:</b> <code>{wan}</code>")
-    await update.message.reply_text("\n".join(msg_lines), parse_mode="HTML")
+    await update.message.reply_text("\n".join(msg_lines), parse_mode=ParseMode.HTML)
 
 
-async def cmd_health(update: Any, context: Any):
+async def cmd_health(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     if not await guard(update, context):
         return
     from . import core
@@ -93,7 +99,7 @@ async def cmd_health(update: Any, context: Any):
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_docker(update: Any, context: Any):
+async def cmd_docker(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     if not await guard(update, context):
         return
     msg = await asyncio.to_thread(utils.list_containers_basic)
@@ -101,12 +107,62 @@ async def cmd_docker(update: Any, context: Any):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
-async def cmd_dockerstats(update: Any, context: Any):
+async def cmd_dockerstats(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     if not await guard(update, context):
         return
     msg = await asyncio.to_thread(utils.container_stats_summary)
     for part in utils.chunk(msg):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+
+
+async def cmd_logs(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    if not await guard(update, context):
+        return
+    # Extract container name from command args
+    if not context.args or len(context.args) == 0:
+        await update.message.reply_text(
+            "Usage: /logs <container_name> [lines]\nExample: /logs my-container 100",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    container_name = context.args[0]
+    lines = 50
+    if len(context.args) > 1 and context.args[1].isdigit():
+        lines = min(int(context.args[1]), 200)  # Cap at 200 lines
+    
+    msg = await asyncio.to_thread(utils.get_container_logs, container_name, lines)
+    for part in utils.chunk(msg, size=4000):
+        await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+
+
+async def cmd_ps(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    if not await guard(update, context):
+        return
+    msg = await asyncio.to_thread(utils.get_top_processes)
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_uptime(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    if not await guard(update, context):
+        return
+    msg = await asyncio.to_thread(utils.get_uptime_info)
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_neofetch(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    if not await guard(update, context):
+        return
+    msg = await asyncio.to_thread(utils.get_neofetch_output)
+    for part in utils.chunk(msg, size=4000):
+        await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+
+
+async def cmd_version(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    if not await guard(update, context):
+        return
+    msg = await asyncio.to_thread(utils.get_version_info)
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
 __all__ = [
@@ -117,4 +173,9 @@ __all__ = [
     "cmd_docker",
     "cmd_dockerstats",
     "cmd_whoami",
+    "cmd_logs",
+    "cmd_ps",
+    "cmd_uptime",
+    "cmd_neofetch",
+    "cmd_version",
 ]
