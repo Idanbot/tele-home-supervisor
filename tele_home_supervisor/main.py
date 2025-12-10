@@ -39,10 +39,25 @@ def build_application() -> Application:
     return app
 
 
+async def post_init(app: Application) -> None:
+    """Send startup notification to all allowed chat IDs."""
+    startup_msg = f"🤖 Bot is deployed at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S')}"
+    for chat_id in core.ALLOWED:
+        try:
+            await app.bot.send_message(chat_id=chat_id, text=startup_msg)
+            logger.info(f"Sent startup notification to chat_id {chat_id}")
+        except Exception as e:
+            logger.warning(f"Failed to send startup notification to chat_id {chat_id}: {e}")
+
+
 def run() -> None:
     setup_logging()
     logger.info("Starting tele_home_supervisor")
     app = build_application()
+    
+    # Register post_init callback to send startup notification
+    app.post_init = post_init
+    
     # run polling; keep the stop_signals None so container shutdown behaves normally
     app.run_polling(stop_signals=None)
 

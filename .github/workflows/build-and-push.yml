@@ -51,3 +51,33 @@ jobs:
           platforms: linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Send Telegram Notification
+        if: always() # Ensures this runs even if previous steps fail
+        env:
+          # Make sure these secrets are set in your repo settings
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Pass the workflow status to the script
+          STATUS: ${{ job.status }}
+        run: |
+          # 1. Define messages/icons based on status
+          if [ "$STATUS" == "success" ]; then
+            EMOJI="✅"
+            TEXT="Succeeded"
+          elif [ "$STATUS" == "failure" ]; then
+            EMOJI="❌"
+            TEXT="Failed"
+          else
+            EMOJI="⚠️"
+            TEXT="Cancelled"
+          fi
+
+          # 2. Construct the message
+          MESSAGE="$EMOJI **Workflow $TEXT**%0ARepository: ${{ github.repository }}%0ABranch: ${{ github.ref_name }}%0A[View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+
+          # 3. Send via Curl
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d chat_id="$TELEGRAM_CHAT_ID" \
+            -d text="$MESSAGE" \
+            -d parse_mode="Markdown"
