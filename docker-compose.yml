@@ -1,0 +1,39 @@
+services:
+  rpi_telebot:
+    image: ghcr.io/idanbot/tele-home-supervisor:latest
+    container_name: rpi-telebot
+
+    network_mode: host
+
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ALLOWED_CHAT_IDS=${ALLOWED_CHAT_IDS}
+      - WATCH_PATHS=/,/srv/media
+      - SHOW_WAN=false
+      - TZ=Asia/Jerusalem
+      - DOCKER_HOST=unix:///var/run/docker.sock
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/media:/srv/media:ro
+
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    environment:
+      - TZ=Asia/Jerusalem
+      - WATCHTOWER_CLEANUP=true # remove old images
+      - WATCHTOWER_POLL_INTERVAL=300 # check every 5 minutes
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_UPDATE_ON_START=true # also check immediately on startup
+
+    # Only update this specific container
+    command:
+      - rpi-telebot
