@@ -43,7 +43,7 @@ jobs:
             type=raw,value=latest
             type=sha
 
-      - name: Build and push multi-arch image
+      - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .

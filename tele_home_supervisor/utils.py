@@ -16,6 +16,8 @@ import logging
 
 import psutil
 import docker
+import shutil
+import json
 
 if TYPE_CHECKING:
     # Import DockerClient only for type checking; runtime import may not be
@@ -229,6 +231,57 @@ def container_stats_summary() -> str:
     if not docker_cmd:
         # Only log once at warning level to avoid spam
         return "<i>Docker CLI not available in container</i>"
+
+
+def get_docker_cmd() -> str | None:
+    """Return the path to the docker CLI binary if available."""
+    candidates = ["/usr/local/bin/docker", "/usr/bin/docker"]
+    for p in candidates:
+        if os.path.exists(p) and os.access(p, os.X_OK):
+            return p
+    # fall back to PATH
+    which = shutil.which("docker")
+    return which
+
+
+def container_stats_rich() -> str:
+    """Return extended container stats using `docker stats --no-stream`.
+
+    Includes net IO and block IO if available.
+    """
+    docker_cmd = get_docker_cmd()
+    if not docker_cmd:
+        return "<i>Docker CLI not available in container</i>"
+
+    fmt = "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}"
+    try:
+        out = subprocess.check_output(
+            [docker_cmd, "stats", "--no-stream", "--format", fmt],
+            text=True,
+            timeout=5,
+        ).strip()
+        if not out:
+            return "<i>No running containers.</i>"
+        lines = ["<b>Container Detailed Stats:</b>"]
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 7:
+                name, cpu, mem_pct, mem_usage, netio, blockio, pids = parts[:7]
+                lines.append(
+                    f"<code>{html.escape(name)}</code> "
+                    f"CPU {html.escape(cpu)} MEM {html.escape(mem_pct)} ({html.escape(mem_usage)})\n"
+                    f"Net I/O: {html.escape(netio)} Block I/O: {html.escape(blockio)} PIDs: {html.escape(pids)}"
+                )
+        return "\n\n".join(lines)
+    except subprocess.TimeoutExpired:
+        logger.error("docker stats command timed out")
+        return "<i>Docker stats timed out</i>"
+    except subprocess.CalledProcessError as e:
+        logger.exception("docker stats command failed")
+        return f"<i>Docker stats error:</i> <code>{html.escape(str(e))}</code>"
+    except Exception as e:
+        logger.exception("Error running docker stats rich")
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
     
     try:
         # Use docker stats --no-stream for a single snapshot (fast)
@@ -287,6 +340,67 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
         return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
     except Exception as e:
         logger.exception("Error getting container logs")
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
+
+
+def healthcheck_container(container_name: str) -> str:
+    """Check container health/status via `docker inspect`.
+
+    Returns Health.Status if present, otherwise container State/status.
+    """
+    docker_cmd = get_docker_cmd()
+    if not docker_cmd:
+        return "<i>Docker CLI not available in container</i>"
+    try:
+        out = subprocess.check_output(
+            [docker_cmd, "inspect", "--format", "{{json .State}}", container_name],
+            text=True,
+            timeout=4,
+        ).strip()
+        state = json.loads(out)
+        health = state.get("Health")
+        if health:
+            status = health.get("Status", "unknown")
+            log = health.get("Log", [])
+            return f"<b>Container:</b> <code>{html.escape(container_name)}</code>\n<b>Health:</b> {html.escape(status)}"
+        # Fallback to general state fields
+        status = state.get("Status") or ("running" if state.get("Running") else "stopped")
+        exit_code = state.get("ExitCode")
+        s = f"<b>Container:</b> <code>{html.escape(container_name)}</code>\n<b>Status:</b> {html.escape(str(status))}"
+        if exit_code is not None:
+            s += f"\n<b>ExitCode:</b> {exit_code}"
+        return s
+    except subprocess.CalledProcessError as e:
+        err = (e.output or str(e))
+        if "No such object" in err or "No such container" in err:
+            return f"<i>Container {html.escape(container_name)} not found</i>"
+        logger.exception("Error inspecting container %s", container_name)
+        return f"<i>Error:</i> <code>{html.escape(str(err))}</code>"
+    except Exception as e:
+        logger.exception("Error running healthcheck for %s", container_name)
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
+
+
+def ping_host(host: str, count: int = 3) -> str:
+    """Ping an IP or hostname and return a short summary."""
+    ping_bin = shutil.which("ping") or "/bin/ping"
+    if not ping_bin or not os.path.exists(ping_bin):
+        return "<i>ping command not available in container</i>"
+    try:
+        proc = subprocess.run([
+            ping_bin, "-c", str(count), "-W", "2", host
+        ], capture_output=True, text=True, timeout=10)
+        out = proc.stdout.strip()
+        if not out:
+            return "<i>No output from ping</i>"
+        # Return the last 6 lines (summary + a few samples)
+        lines = out.splitlines()
+        sample = "\n".join(lines[-6:])
+        return f"<b>Ping {html.escape(host)}:</b>\n<pre>{html.escape(sample)}</pre>"
+    except subprocess.TimeoutExpired:
+        return f"<i>Ping to {html.escape(host)} timed out</i>"
+    except Exception as e:
+        logger.exception("Error pinging %s", host)
         return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
 
 

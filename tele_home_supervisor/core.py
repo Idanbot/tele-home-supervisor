@@ -69,6 +69,9 @@ cmd_logs = _delegate("cmd_logs")
 cmd_ps = _delegate("cmd_ps")
 cmd_uptime = _delegate("cmd_uptime")
 cmd_version = _delegate("cmd_version")
+cmd_dstats_rich = _delegate("cmd_dstats_rich")
+cmd_dhealth = _delegate("cmd_dhealth")
+cmd_ping = _delegate("cmd_ping")
 
 __all__ = [
     "TOKEN",
@@ -81,6 +84,9 @@ __all__ = [
     "cmd_health",
     "cmd_docker",
     "cmd_dockerstats",
+    "cmd_dstats_rich",
+    "cmd_dhealth",
+    "cmd_ping",
     "cmd_whoami",
     "cmd_logs",
     "cmd_ps",
