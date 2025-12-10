@@ -208,20 +208,27 @@ def list_containers_basic() -> str:
 def container_stats_summary() -> str:
     """Get container stats using docker stats CLI (much faster than API)."""
     # Try common docker binary locations
-    docker_paths = ["/usr/bin/docker", "docker"]
+    docker_paths = ["/usr/bin/docker", "/usr/local/bin/docker", "docker"]
     docker_cmd = None
     
     for path in docker_paths:
         try:
-            subprocess.run([path, "--version"], capture_output=True, timeout=1, check=True)
-            docker_cmd = path
-            break
-        except (FileNotFoundError, subprocess.SubprocessError):
+            result = subprocess.run(
+                [path, "--version"],
+                capture_output=True,
+                timeout=1,
+                check=False,
+            )
+            if result.returncode == 0:
+                docker_cmd = path
+                logger.debug(f"Found docker at {path}")
+                break
+        except (FileNotFoundError, subprocess.SubprocessError, OSError):
             continue
     
     if not docker_cmd:
-        logger.error("docker command not found in any common location")
-        return "<i>Docker CLI not available. Ensure docker is installed in the container.</i>"
+        # Only log once at warning level to avoid spam
+        return "<i>Docker CLI not available in container</i>"
     
     try:
         # Use docker stats --no-stream for a single snapshot (fast)
@@ -309,26 +316,28 @@ def get_version_info() -> str:
     """Get version and build information."""
     lines = ["<b>Version Info:</b>"]
     
-    # Try to get latest git commit date
+    # Try to get latest git commit date (suppress stderr to avoid logs when .git missing)
     try:
         out = subprocess.check_output(
             ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"],
             text=True,
             timeout=3,
             cwd="/app",
+            stderr=subprocess.DEVNULL,
         ).strip()
         if out:
             lines.append(f"<b>Last Commit:</b> {html.escape(out)}")
     except Exception:
         pass
     
-    # Try to get git commit hash
+    # Try to get git commit hash (suppress stderr)
     try:
         out = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             text=True,
             timeout=3,
             cwd="/app",
+            stderr=subprocess.DEVNULL,
         ).strip()
         if out:
             lines.append(f"<b>Commit:</b> <code>{html.escape(out)}</code>")

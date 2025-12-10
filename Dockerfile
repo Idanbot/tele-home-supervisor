@@ -28,8 +28,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # runtime checks (ip, curl) work inside the container.
 # Also install docker CLI (for docker stats/logs commands) and git (for version info)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl iproute2 tzdata docker.io git \
-    && rm -rf /var/lib/apt/lists/*
+      curl iproute2 tzdata git ca-certificates gnupg lsb-release \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version
 
 WORKDIR /app
 

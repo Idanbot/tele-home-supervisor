@@ -39,8 +39,13 @@ def build_application() -> Application:
     return app
 
 
-async def post_init(app: Application) -> None:
+async def send_startup_notification(app: Application) -> None:
     """Send startup notification to all allowed chat IDs."""
+    logger.info(f"Sending startup notification to {len(core.ALLOWED)} chat(s)")
+    if not core.ALLOWED:
+        logger.warning("No ALLOWED_CHAT_IDS configured, skipping startup notification")
+        return
+    
     startup_msg = f"🤖 Bot is deployed at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S')}"
     for chat_id in core.ALLOWED:
         try:
@@ -56,7 +61,7 @@ def run() -> None:
     app = build_application()
     
     # Register post_init callback to send startup notification
-    app.post_init = post_init
+    app.post_init = send_startup_notification
     
     # run polling; keep the stop_signals None so container shutdown behaves normally
     app.run_polling(stop_signals=None)

@@ -5,9 +5,6 @@ __pycache__
 venv
 env
 
-# Git
-.git
-
 # Ignore wheel cache
 /wheels
 __pycache__/
