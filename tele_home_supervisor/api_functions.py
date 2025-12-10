@@ -120,7 +120,7 @@ async def cmd_logs(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> No
     # Extract container name from command args
     if not context.args or len(context.args) == 0:
         await update.message.reply_text(
-            "Usage: /logs <container_name> [lines]\nExample: /logs my-container 100",
+            "<i>Usage:</i> <code>/logs &lt;container_name&gt; [lines]</code>\n<i>Example:</i> <code>/logs my-container 100</code>",
             parse_mode=ParseMode.HTML
         )
         return

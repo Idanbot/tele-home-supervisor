@@ -326,6 +326,14 @@ def get_version_info() -> str:
     # Package info
     lines.append("<b>Package:</b> tele-home-supervisor")
     
+    # Startup time
+    try:
+        from . import main
+        startup = main.STARTUP_TIME.strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"<b>Started:</b> {startup}")
+    except Exception:
+        pass
+    
     if len(lines) == 1:
         return "<i>Version information not available</i>"
     

@@ -5,8 +5,12 @@ This module wires up the Application, registers handlers and runs polling.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from telegram.ext import Application, CommandHandler
+
+# Track startup time
+STARTUP_TIME = datetime.now()
 
 from .logger import setup_logging
 from . import core

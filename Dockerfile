@@ -26,8 +26,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Runtime deps (keep minimal). We still install curl and iproute2 so
 # runtime checks (ip, curl) work inside the container.
+# Also install docker CLI (for docker stats/logs commands) and git (for version info)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl iproute2 tzdata \
+      curl iproute2 tzdata docker.io git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
