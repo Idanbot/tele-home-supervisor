@@ -31,7 +31,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler(["health"], core.cmd_health))
     app.add_handler(CommandHandler(["docker"], core.cmd_docker))
     app.add_handler(CommandHandler(["dockerstats"], core.cmd_dockerstats))
-    app.add_handler(CommandHandler(["dstats-rich"], core.cmd_dstats_rich))
+    app.add_handler(CommandHandler(["dstatsrich"], core.cmd_dstats_rich))
     app.add_handler(CommandHandler(["logs"], core.cmd_logs))
     app.add_handler(CommandHandler(["dhealth"], core.cmd_dhealth))
     app.add_handler(CommandHandler(["ping"], core.cmd_ping))

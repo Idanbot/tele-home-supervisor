@@ -48,7 +48,7 @@ async def cmd_start(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> N
         "/health – CPU/RAM/disk/load/uptime (and WAN if enabled)\n"
         "/docker – list containers, status, ports\n"
         "/dockerstats – CPU/MEM per running container\n"
-            "/dstats-rich – detailed Docker stats (net/block IO)\n"
+        "/dstatsrich – detailed Docker stats (net/block IO)\n"
         "/logs <container> – recent logs from container\n"
         "/ps – top processes\n"
         "/uptime – system uptime\n"
