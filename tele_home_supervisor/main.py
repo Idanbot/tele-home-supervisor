@@ -30,7 +30,6 @@ def build_application() -> Application:
     app.add_handler(CommandHandler(["logs"], core.cmd_logs))
     app.add_handler(CommandHandler(["ps"], core.cmd_ps))
     app.add_handler(CommandHandler(["uptime"], core.cmd_uptime))
-    app.add_handler(CommandHandler(["neofetch"], core.cmd_neofetch))
     app.add_handler(CommandHandler(["version"], core.cmd_version))
 
     return app

@@ -51,7 +51,6 @@ async def cmd_start(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> N
         "/logs <container> – recent logs from container\n"
         "/ps – top processes\n"
         "/uptime – system uptime\n"
-        "/neofetch – system info (neofetch)\n"
         "/version – bot version and build info\n"
         "/help – this menu"
     )
@@ -150,14 +149,6 @@ async def cmd_uptime(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> 
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_neofetch(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
-    if not await guard(update, context):
-        return
-    msg = await asyncio.to_thread(utils.get_neofetch_output)
-    for part in utils.chunk(msg, size=4000):
-        await update.message.reply_text(part, parse_mode=ParseMode.HTML)
-
-
 async def cmd_version(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     if not await guard(update, context):
         return
@@ -176,6 +167,5 @@ __all__ = [
     "cmd_logs",
     "cmd_ps",
     "cmd_uptime",
-    "cmd_neofetch",
     "cmd_version",
 ]

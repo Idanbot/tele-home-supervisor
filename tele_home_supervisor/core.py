@@ -68,7 +68,6 @@ cmd_whoami = _delegate("cmd_whoami")
 cmd_logs = _delegate("cmd_logs")
 cmd_ps = _delegate("cmd_ps")
 cmd_uptime = _delegate("cmd_uptime")
-cmd_neofetch = _delegate("cmd_neofetch")
 cmd_version = _delegate("cmd_version")
 
 __all__ = [
@@ -86,6 +85,5 @@ __all__ = [
     "cmd_logs",
     "cmd_ps",
     "cmd_uptime",
-    "cmd_neofetch",
     "cmd_version",
 ]

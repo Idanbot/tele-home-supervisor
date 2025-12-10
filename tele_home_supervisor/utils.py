@@ -210,7 +210,7 @@ def container_stats_summary() -> str:
     try:
         # Use docker stats --no-stream for a single snapshot (fast)
         out = subprocess.check_output(
-            ["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}"],
+            ["/usr/bin/docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}"],
             text=True,
             timeout=5,
         ).strip()
@@ -232,7 +232,7 @@ def container_stats_summary() -> str:
         return "<i>Docker stats timed out</i>"
     except FileNotFoundError:
         logger.error("docker command not found in PATH")
-        return "<i>Docker CLI not available</i>"
+        return "<i>Docker CLI not available. Install docker or use host network mode.</i>"
     except Exception as e:
         logger.exception("Error running docker stats")
         return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
@@ -241,13 +241,13 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
     """Get recent logs from a container."""
     try:
         out = subprocess.check_output(
-            ["docker", "logs", "--tail", str(lines), container_name],
+            ["/usr/bin/docker", "logs", "--tail", str(lines), container_name],
             text=True,
             stderr=subprocess.STDOUT,
             timeout=10,
         ).strip()
         if not out:
-            return f"<i>No logs for container {html.escape(container_name)}</i>"
+            return f"<i>Container {html.escape(container_name)} has no logs</i>"
         # Limit output to avoid message size issues
         if len(out) > 3500:
             out = out[-3500:]
@@ -256,7 +256,12 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
     except subprocess.TimeoutExpired:
         return f"<i>Timeout getting logs for {html.escape(container_name)}</i>"
     except subprocess.CalledProcessError as e:
-        return f"<i>Error:</i> <code>{html.escape(e.stderr or str(e))}</code>"
+        error_msg = str(e.output) if e.output else str(e)
+        if "No such container" in error_msg:
+            return f"<i>Container {html.escape(container_name)} not found</i>"
+        return f"<i>Error getting logs:</i> <code>{html.escape(error_msg)}</code>"
+    except FileNotFoundError:
+        return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
     except Exception as e:
         logger.exception("Error getting container logs")
         return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
@@ -266,12 +271,14 @@ def get_top_processes() -> str:
     """Get top processes using ps command."""
     try:
         out = subprocess.check_output(
-            ["ps", "aux", "--sort=-%cpu"],
+            ["/bin/ps", "aux", "--sort=-%cpu"],
             text=True,
             timeout=5,
         ).strip()
         lines = out.splitlines()[:11]  # Header + top 10
         return f"<b>Top Processes:</b>\n<pre>{html.escape(chr(10).join(lines))}</pre>"
+    except FileNotFoundError:
+        return "<i>ps command not found</i>"
     except Exception as e:
         logger.exception("Error getting top processes")
         return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
@@ -282,60 +289,33 @@ def get_uptime_info() -> str:
     return f"<b>Uptime:</b> {human_uptime()}"
 
 
-def get_neofetch_output() -> str:
-    """Get neofetch output if available."""
-    try:
-        out = subprocess.check_output(
-            ["neofetch", "--stdout"],
-            text=True,
-            timeout=10,
-        ).strip()
-        if not out:
-            return "<i>neofetch produced no output</i>"
-        return f"<pre>{html.escape(out)}</pre>"
-    except FileNotFoundError:
-        return "<i>neofetch is not installed</i>"
-    except subprocess.TimeoutExpired:
-        return "<i>neofetch timed out</i>"
-    except Exception as e:
-        logger.exception("Error running neofetch")
-        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
-
-
 def get_version_info() -> str:
     """Get version and build information."""
     lines = ["<b>Version Info:</b>"]
     
-    # Try to get image creation date from Docker
+    # Try to get latest git commit date
     try:
         out = subprocess.check_output(
-            ["docker", "inspect", "--format", "{{.Created}}", "$(hostname)"],
+            ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"],
             text=True,
-            shell=True,
             timeout=3,
+            cwd="/app",
         ).strip()
         if out:
-            # Parse and format the timestamp
-            from datetime import datetime
-            try:
-                dt = datetime.fromisoformat(out.replace('Z', '+00:00'))
-                formatted_date = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-                lines.append(f"<b>Image Built:</b> {formatted_date}")
-            except Exception:
-                lines.append(f"<b>Image Built:</b> {html.escape(out)}")
+            lines.append(f"<b>Last Commit:</b> {html.escape(out)}")
     except Exception:
         pass
     
-    # Try to get image ID/tag
+    # Try to get git commit hash
     try:
         out = subprocess.check_output(
-            ["docker", "inspect", "--format", "{{.Config.Image}}", "$(hostname)"],
+            ["git", "rev-parse", "--short", "HEAD"],
             text=True,
-            shell=True,
             timeout=3,
+            cwd="/app",
         ).strip()
         if out:
-            lines.append(f"<b>Image:</b> <code>{html.escape(out)}</code>")
+            lines.append(f"<b>Commit:</b> <code>{html.escape(out)}</code>")
     except Exception:
         pass
     
@@ -366,6 +346,5 @@ __all__ = [
     "get_container_logs",
     "get_top_processes",
     "get_uptime_info",
-    "get_neofetch_output",
     "get_version_info",
 ]
