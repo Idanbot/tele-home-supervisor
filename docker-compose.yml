@@ -17,6 +17,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /srv/media:/srv/media:ro
 
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
+
     restart: unless-stopped
 
   watchtower:
@@ -26,6 +32,12 @@ services:
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
 
     environment:
       - TZ=Asia/Jerusalem

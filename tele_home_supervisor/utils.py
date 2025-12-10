@@ -207,10 +207,26 @@ def list_containers_basic() -> str:
 
 def container_stats_summary() -> str:
     """Get container stats using docker stats CLI (much faster than API)."""
+    # Try common docker binary locations
+    docker_paths = ["/usr/bin/docker", "docker"]
+    docker_cmd = None
+    
+    for path in docker_paths:
+        try:
+            subprocess.run([path, "--version"], capture_output=True, timeout=1, check=True)
+            docker_cmd = path
+            break
+        except (FileNotFoundError, subprocess.SubprocessError):
+            continue
+    
+    if not docker_cmd:
+        logger.error("docker command not found in any common location")
+        return "<i>Docker CLI not available. Ensure docker is installed in the container.</i>"
+    
     try:
         # Use docker stats --no-stream for a single snapshot (fast)
         out = subprocess.check_output(
-            ["/usr/bin/docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}"],
+            [docker_cmd, "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}"],
             text=True,
             timeout=5,
         ).strip()
@@ -230,9 +246,9 @@ def container_stats_summary() -> str:
     except subprocess.TimeoutExpired:
         logger.error("docker stats command timed out")
         return "<i>Docker stats timed out</i>"
-    except FileNotFoundError:
-        logger.error("docker command not found in PATH")
-        return "<i>Docker CLI not available. Install docker or use host network mode.</i>"
+    except subprocess.CalledProcessError as e:
+        logger.exception("docker stats command failed")
+        return f"<i>Docker stats error:</i> <code>{html.escape(str(e))}</code>"
     except Exception as e:
         logger.exception("Error running docker stats")
         return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
