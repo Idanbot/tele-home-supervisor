@@ -8,16 +8,20 @@ from __future__ import annotations
 import logging
 import html
 import asyncio
-from telegram import Update
-from telegram.constants import ParseMode
-from telegram.ext import ContextTypes
+from typing import Any
+
+# Silence unresolved-import in editors/CI where telegram package may not be
+# installed; use `Any` for runtime typing where necessary.
+from telegram import Update  # type: ignore[import]
+from telegram.constants import ParseMode  # type: ignore[import]
+from telegram.ext import ContextTypes  # type: ignore[import]
 
 from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-def allowed(update: Update) -> bool:
+def allowed(update: Any) -> bool:
     # import core lazily to avoid circular imports during module import
     from . import core
 
@@ -27,7 +31,7 @@ def allowed(update: Update) -> bool:
     return chat_id in core.ALLOWED
 
 
-async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+async def guard(update: Any, context: Any) -> bool:
     if allowed(update):
         return True
     if update and update.effective_chat:
@@ -35,7 +39,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return False
 
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_start(update: Any, context: Any):
     if not await guard(update, context):
         return
     text = (
@@ -49,7 +53,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
-async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_whoami(update: Any, context: Any):
     c = update.effective_chat
     u = update.effective_user
     msg = (
@@ -60,13 +64,13 @@ async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_help(update: Any, context: Any):
     if not await guard(update, context):
         return
     await cmd_start(update, context)
 
 
-async def cmd_ip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_ip(update: Any, context: Any):
     if not await guard(update, context):
         return
     lan = html.escape(utils.get_primary_ip())
@@ -77,10 +81,10 @@ async def cmd_ip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if core.SHOW_WAN:
         wan = html.escape(utils.get_wan_ip())
         msg_lines.append(f"<b>WAN IP:</b> <code>{wan}</code>")
-    await update.message.reply_text("\n".join(msg_lines), parse_mode=ParseMode.HTML)
+    await update.message.reply_text("\n".join(msg_lines), parse_mode="HTML")
 
 
-async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_health(update: Any, context: Any):
     if not await guard(update, context):
         return
     from . import core
@@ -89,7 +93,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_docker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_docker(update: Any, context: Any):
     if not await guard(update, context):
         return
     msg = await asyncio.to_thread(utils.list_containers_basic)
@@ -97,7 +101,7 @@ async def cmd_docker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
-async def cmd_dockerstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_dockerstats(update: Any, context: Any):
     if not await guard(update, context):
         return
     msg = await asyncio.to_thread(utils.container_stats_summary)

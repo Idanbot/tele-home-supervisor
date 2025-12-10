@@ -4,10 +4,13 @@ This module wires up the Application, registers handlers and runs polling.
 """
 from __future__ import annotations
 
-import os
 import logging
+from typing import Any
 
-from telegram.ext import Application, CommandHandler
+# The telegram package is an external dependency; Pylance in CI/editors
+# may not have the packages installed. Silence unresolved-import errors
+# here and avoid strict typing of `Application` to keep diagnostics clean.
+from telegram.ext import Application, CommandHandler  # type: ignore[import]
 
 from .logger import setup_logging
 from . import core
@@ -15,7 +18,7 @@ from . import core
 logger = logging.getLogger(__name__)
 
 
-def build_application() -> Application:
+def build_application() -> Any:
     if core.TOKEN is None:
         raise RuntimeError("BOT_TOKEN environment variable is not set")
 
