@@ -28,11 +28,23 @@ except Exception:  # pragma: no cover - import-time fallbacks
 
 logger = logging.getLogger(__name__)
 
-# Load environment once at module import
-QBT_HOST: str = os.environ.get("QBT_HOST", "qbittorrent")
-QBT_PORT: int = int(os.environ.get("QBT_PORT", "8080"))
-QBT_USER: str = os.environ.get("QBT_USER", "admin")
-QBT_PASS: str = os.environ.get("QBT_PASS", "adminadmin")
+# Load environment once at module import (treat empty/blank values as unset)
+def _env_or_default(key: str, default: str) -> str:
+    v = os.environ.get(key)
+    if v is None:
+        return default
+    v = v.strip()
+    return v if len(v) >= 1 else default
+
+QBT_HOST: str = _env_or_default("QBT_HOST", "qbittorrent")
+_qbt_port_raw: str = _env_or_default("QBT_PORT", "8080")
+try:
+    _port = int(_qbt_port_raw)
+except Exception:
+    _port = 8080
+QBT_PORT: int = _port
+QBT_USER: str = _env_or_default("QBT_USER", "admin")
+QBT_PASS: str = _env_or_default("QBT_PASS", "adminadmin")
 
 
 class TorrentManager:
