@@ -76,52 +76,45 @@ jobs:
           RUN_URL: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
           # Define Icons
-          if [ "$STATUS" == "success" ]; then
-            ICON="✅"
-            STATUS_TEXT="Build Success"
-          elif [ "$STATUS" == "failure" ]; then
-            ICON="❌"
-            STATUS_TEXT="Build Failed"
-          else
-            ICON="⚠️"
-            STATUS_TEXT="Cancelled/Unknown"
-          fi
+          case "$STATUS" in
+            success) ICON="✅"; STATUS_TEXT="Build Success" ;;
+            failure) ICON="❌"; STATUS_TEXT="Build Failed" ;;
+            *)       ICON="⚠️"; STATUS_TEXT="Cancelled/Unknown" ;;
+          esac
 
-          # Pick first tag from metadata (useful fallback for digest)
+          # Helper to escape HTML characters
+          escape() { printf "%s" "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
+
+          # Prepare Variables
           TAGS="${{ steps.meta.outputs.tags }}"
-          FIRST_TAG=$(echo "$TAGS" | tr ',' '\n' | sed -n '1p')
+          FIRST_TAG=$(echo "$TAGS" | tr ',' '\n' | head -n 1)
 
-          # Escape text for HTML
-          esc() {
-          python3 - <<'PY'
-          import html, sys
-          print(html.escape(sys.stdin.read()))
-          PY
-          }
+          SAFE_REPO=$(escape "$REPO")
+          SAFE_BRANCH=$(escape "${{ github.ref_name }}")
+          SAFE_TAG=$(escape "$FIRST_TAG")
+          SAFE_AUTHOR=$(escape "$AUTHOR")
+          SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | tr '\n' ' ' | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
 
-          SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | tr '\n' ' ' | esc)
-          SAFE_REPO=$(printf "%s" "$REPO" | esc)
-          SAFE_BRANCH=$(printf "%s" "${{ github.ref_name }}" | esc)
-          SAFE_TAG=$(printf "%s" "$FIRST_TAG" | esc)
-          SAFE_AUTHOR=$(printf "%s" "$AUTHOR" | esc)
-          SAFE_URL=$(printf "%s" "$RUN_URL" | esc)
+          # Construct Message
+          TEXT="<b>${ICON} ${STATUS_TEXT}</b>
+          ------------------------------
+          📦 <b>Repo:</b> <code>${SAFE_REPO}</code>
+          🌿 <b>Branch:</b> <code>${SAFE_BRANCH}</code>"
 
-          # Construct Message (HTML)
-          TEXT="<b>${ICON} ${STATUS_TEXT}</b>%0A"
-          TEXT+="------------------------------%0A"
-          TEXT+="📦 <b>Repo:</b> <code>${SAFE_REPO}</code>%0A"
-          TEXT+="🌿 <b>Branch:</b> <code>${SAFE_BRANCH}</code>%0A"
           if [ -n "$FIRST_TAG" ]; then
-            TEXT+="🏷️ <b>Tag:</b> <code>${SAFE_TAG}</code>%0A"
+            TEXT="${TEXT}
+          🏷️ <b>Tag:</b> <code>${SAFE_TAG}</code>"
           fi
-          TEXT+="👤 <b>Author:</b> ${SAFE_AUTHOR}%0A"
-          TEXT+="📝 <b>Commit:</b> ${SAFE_MSG}%0A"
-          TEXT+="------------------------------%0A"
-          TEXT+="<a href='${SAFE_URL}'>🔍 View Logs</a>"
+
+          TEXT="${TEXT}
+          👤 <b>Author:</b> ${SAFE_AUTHOR}
+          📝 <b>Commit:</b> ${SAFE_MSG}
+          ------------------------------
+          <a href='${RUN_URL}'>🔍 View Logs</a>"
 
           # Send Request
           curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
             -d chat_id="$CHAT_ID" \
-            -d text="$TEXT" \
             -d parse_mode="HTML" \
-            -d disable_web_page_preview="true"
+            -d disable_web_page_preview="true" \
+            --data-urlencode "text=$TEXT"
