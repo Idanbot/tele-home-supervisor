@@ -8,9 +8,16 @@ from __future__ import annotations
 
 import os
 import logging
+import time
+import threading
 from typing import Callable, Awaitable
 
 logger = logging.getLogger(__name__)
+
+# Global rate limit (seconds) for all commands. Default 1s.
+RATE_LIMIT_S: float = float(os.environ.get("RATE_LIMIT_S", "1.0"))
+_last_command_ts = 0.0
+_rate_lock = threading.Lock()
 
 # Token used by `main.build_application` to construct the Application
 TOKEN: str | None = os.environ.get("BOT_TOKEN")
@@ -49,6 +56,27 @@ def _delegate(name: str) -> Callable[["telegram.Update", "telegram.ext.ContextTy
     """
 
     async def wrapper(update, context):
+        # Global rate limiting: allow at most one command per RATE_LIMIT_S seconds
+        try:
+            now = time.monotonic()
+            with _rate_lock:
+                global _last_command_ts
+                elapsed = now - _last_command_ts
+                if elapsed < RATE_LIMIT_S:
+                    # Send a short rate-limit notice and skip executing the command
+                    try:
+                        if update and getattr(update, "effective_message", None):
+                            await update.effective_message.reply_text(
+                                f"⏱ Rate limit: please wait {RATE_LIMIT_S - elapsed:.1f}s",
+                            )
+                    except Exception:
+                        # best-effort notify; ignore any errors
+                        pass
+                    return
+                _last_command_ts = now
+        except Exception:
+            # If rate-limiter itself fails, do not block command execution
+            pass
         mod = __import__("tele_home_supervisor.api_functions", fromlist=[name])
         func = getattr(mod, name)
         return await func(update, context)
@@ -66,12 +94,14 @@ cmd_docker = _delegate("cmd_docker")
 cmd_dockerstats = _delegate("cmd_dockerstats")
 cmd_whoami = _delegate("cmd_whoami")
 cmd_logs = _delegate("cmd_logs")
-cmd_ps = _delegate("cmd_ps")
 cmd_uptime = _delegate("cmd_uptime")
 cmd_version = _delegate("cmd_version")
 cmd_dstats_rich = _delegate("cmd_dstats_rich")
 cmd_dhealth = _delegate("cmd_dhealth")
 cmd_ping = _delegate("cmd_ping")
+cmd_temp = _delegate("cmd_temp")
+cmd_torrent_add = _delegate("cmd_torrent_add")
+cmd_torrent_status = _delegate("cmd_torrent_status")
 
 __all__ = [
     "TOKEN",
@@ -87,9 +117,11 @@ __all__ = [
     "cmd_dstats_rich",
     "cmd_dhealth",
     "cmd_ping",
+    "cmd_torrent_add",
+    "cmd_torrent_status",
+    "cmd_temp",
     "cmd_whoami",
     "cmd_logs",
-    "cmd_ps",
     "cmd_uptime",
     "cmd_version",
 ]

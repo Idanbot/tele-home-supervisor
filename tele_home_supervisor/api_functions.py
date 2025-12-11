@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from telegram.ext import ContextTypes
 
 from . import utils
+from . import torrent as torrent_mod
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +44,20 @@ async def cmd_start(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> N
     if not await guard(update, context):
         return
     text = (
-        "Hi! I can report this Pi's status.\n\n"
+        "Hi! I can report this Pi's status and manage qBittorrent.\n\n"
         "/ip – private LAN IP\n"
         "/health – CPU/RAM/disk/load/uptime (and WAN if enabled)\n"
         "/docker – list containers, status, ports\n"
         "/dockerstats – CPU/MEM per running container\n"
         "/dstatsrich – detailed Docker stats (net/block IO)\n"
         "/logs <container> – recent logs from container\n"
-        "/ps – top processes\n"
+        "/dhealth <container> – container health check\n"
         "/uptime – system uptime\n"
-            "/dhealth <container> – container health check\n"
-            "/ping <ip> [count] – ping an IP or hostname\n"
+        "/ping <ip> [count] – ping an IP or hostname\n"
+        "/temp – CPU temperature (reads /host_thermal/temp)\n"
+        "/tadd <magnet> [save_path] – add magnet to qBittorrent\n"
+        "/tstatus – show qBittorrent torrent status\n"
+        "/whoami – show chat and user info\n"
         "/version – bot version and build info\n"
         "/help – this menu"
     )
@@ -155,13 +159,7 @@ async def cmd_dhealth(update: "Update", context: "ContextTypes.DEFAULT_TYPE") ->
     name = context.args[0]
     msg = await asyncio.to_thread(utils.healthcheck_container, name)
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-
-
-async def cmd_ps(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
-    if not await guard(update, context):
-        return
-    msg = await asyncio.to_thread(utils.get_top_processes)
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    
 
 
 async def cmd_uptime(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
@@ -186,11 +184,60 @@ async def cmd_ping(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> No
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
+async def cmd_temp(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    if not await guard(update, context):
+        return
+    msg = await asyncio.to_thread(utils.get_cpu_temp)
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
 async def cmd_version(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
     if not await guard(update, context):
         return
     msg = await asyncio.to_thread(utils.get_version_info)
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_torrent_add(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    """Add a magnet link to qBittorrent.
+
+    Usage: /tadd <magnet_link> [save_path]
+    """
+    if not await guard(update, context):
+        return
+    if not context.args or len(context.args) == 0:
+        await update.message.reply_text("Usage: /tadd <magnet_link> [save_path]", parse_mode=ParseMode.HTML)
+        return
+    magnet = context.args[0]
+    save_path = context.args[1] if len(context.args) > 1 else "/downloads"
+
+    mgr = torrent_mod.TorrentManager()
+    connected = await asyncio.to_thread(mgr.connect)
+    if not connected:
+        await update.message.reply_text("Failed to connect to qBittorrent. Check credentials/host.", parse_mode=ParseMode.HTML)
+        return
+
+    res = await asyncio.to_thread(mgr.add_magnet, magnet, save_path)
+    await update.message.reply_text(res, parse_mode=ParseMode.HTML)
+
+
+async def cmd_torrent_status(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    """Return a formatted status of torrents in qBittorrent.
+
+    Usage: /tstatus
+    """
+    if not await guard(update, context):
+        return
+
+    mgr = torrent_mod.TorrentManager()
+    connected = await asyncio.to_thread(mgr.connect)
+    if not connected:
+        await update.message.reply_text("Failed to connect to qBittorrent. Check credentials/host.", parse_mode=ParseMode.HTML)
+        return
+
+    msg = await asyncio.to_thread(mgr.get_status)
+    for part in utils.chunk(msg, size=4000):
+        await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
 __all__ = [
@@ -202,10 +249,11 @@ __all__ = [
     "cmd_dockerstats",
     "cmd_whoami",
     "cmd_logs",
-    "cmd_ps",
     "cmd_uptime",
     "cmd_dstats_rich",
     "cmd_dhealth",
     "cmd_ping",
+    "cmd_torrent_add",
+    "cmd_torrent_status",
     "cmd_version",
 ]

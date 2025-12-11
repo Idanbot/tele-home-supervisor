@@ -112,6 +112,43 @@ def get_temp() -> str:
     return "n/a"
 
 
+def get_cpu_temp() -> str:
+    """Read CPU temperature from a mounted host path (/host_thermal/temp).
+
+    The value is expected in millidegrees (e.g. 42000), so we divide by 1000.
+    """
+    # Try mounted host thermal path first
+    paths = ["/host_thermal/temp", "/sys/class/thermal/thermal_zone0/temp", "/sys/class/thermal/thermal_zone1/temp"]
+    for p in paths:
+        try:
+            if not os.path.exists(p):
+                continue
+            with open(p, "r") as f:
+                raw = f.read().strip()
+            # Some systems provide float or integer in millidegrees
+            if not raw:
+                continue
+            # Try to parse as int (millidegrees)
+            try:
+                val = int(raw)
+                temp = val / 1000.0
+                return f"CPU Temp: {temp:.1f}°C"
+            except ValueError:
+                # Try float
+                try:
+                    temp = float(raw)
+                    # if value looks like millidegrees (>100), divide
+                    if temp > 100:
+                        temp = temp / 1000.0
+                    return f"CPU Temp: {temp:.1f}°C"
+                except ValueError:
+                    continue
+        except Exception:
+            logger.debug("Error reading temperature from %s", p, exc_info=True)
+            continue
+    return "Error: Could not read temperature."
+
+
 def human_uptime() -> str:
     boot = psutil.boot_time()
     secs = int(time.time() - boot)

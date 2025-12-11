@@ -28,7 +28,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # runtime checks (ip, curl) work inside the container.
 # Also install git (for version info) and download docker CLI binary directly
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl iproute2 tzdata git ca-certificates \
+    curl iproute2 tzdata git ca-certificates iputils-ping \
     && rm -rf /var/lib/apt/lists/* \
     && ARCH=$(dpkg --print-architecture) \
     && if [ "$ARCH" = "arm64" ]; then DOCKER_ARCH="aarch64"; else DOCKER_ARCH="$ARCH"; fi \

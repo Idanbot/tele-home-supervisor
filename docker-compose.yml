@@ -3,7 +3,8 @@ services:
     image: ghcr.io/idanbot/tele-home-supervisor:latest
     container_name: rpi-telebot
 
-    network_mode: host
+    networks:
+      - bit-net
 
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
@@ -16,6 +17,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /srv/media:/srv/media:ro
+      - /sys/class/thermal/thermal_zone0:/host_thermal:ro
 
     logging:
       driver: "json-file"
@@ -50,3 +52,6 @@ services:
     # Only update this specific container
     command:
       - rpi-telebot
+networks:
+  bit-net:
+    external: true
