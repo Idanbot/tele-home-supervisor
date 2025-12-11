@@ -3,6 +3,7 @@ name: Build & Publish Docker Image
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -18,11 +19,37 @@ env:
   IMAGE_NAME: ghcr.io/idanbot/tele-home-supervisor
 
 jobs:
-  build-and-push:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Linting Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pylint
+          pip install -r requirements.txt
+
+      - name: Run Pylint
+        run: |
+          # failing on fatal errors only for now to not break build on style issues
+          # remove --disable=all --enable=F,E to enforce all checks
+          pylint --disable=all --enable=F,E **/*.py
+
+  build-and-push:
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
+      security-events: write
 
     steps:
       - name: Checkout Code
@@ -49,19 +76,31 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix={{branch}}-
+            type=ref,event=tag
 
       - name: Build and Push
         uses: docker/build-push-action@v5
+        id: build
         with:
           context: .
           push: true
-          platforms: linux/arm64
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:latest
+          format: 'table'
+          exit-code: '0' # Don't fail build on vulnerability found, just report
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
 
       # --- Notification Step ---
       - name: Notify Telegram
