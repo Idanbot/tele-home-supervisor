@@ -93,17 +93,17 @@ jobs:
           FIRST_TAG=$(echo "$TAGS" | tr ',' '\n' | sed -n '1p')
 
           # Sanitize commit message for Telegram MarkdownV2
-          SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | tr '\n' ' ' | python3 - <<'PY'
-          import sys,re
-          s=sys.stdin.read()
-          escape_re = re.compile(r'([_*\[\]\(\)~`>#\+\-\=\|\{\}\.\!\\])')
-          print(escape_re.sub(r'\\\\\\1', s))
-          PY
-          )
+          # We check if COMMIT_MSG is empty to avoid 'tr' broken pipe errors
+          if [ -z "$COMMIT_MSG" ]; then
+            SAFE_MSG="No commit message"
+          else
+            SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | python3 -c "import sys, re; s=sys.stdin.read(); print(re.sub(r'([_*\[\]()~,>#+\-=|{}.!])', r'\\\1', s))")
+          fi
 
-          # Construct Message (include first tag if present)
+          # Construct Message
+          # NOTE: In MarkdownV2, the '-' character must be escaped as '\-'
           TEXT="*$ICON $STATUS_TEXT*%0A"
-          TEXT+="---------------------------------%0A"
+          TEXT+="\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-%0A"
           TEXT+="📦 *Repo:* \`$REPO\`%0A"
           TEXT+="🌿 *Branch:* \`${{ github.ref_name }}\`%0A"
           if [ -n "$FIRST_TAG" ]; then
@@ -111,7 +111,7 @@ jobs:
           fi
           TEXT+="👤 *Author:* $AUTHOR%0A"
           TEXT+="📝 *Commit:* _$SAFE_MSG_%0A"
-          TEXT+="---------------------------------%0A"
+          TEXT+="\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-%0A"
           TEXT+="[🔍 View Logs]($RUN_URL)"
 
           # Send Request
