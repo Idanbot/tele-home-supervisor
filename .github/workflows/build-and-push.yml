@@ -107,16 +107,16 @@ jobs:
           SAFE_URL=$(printf "%s" "$RUN_URL" | esc)
 
           # Construct Message (HTML)
-          TEXT="<b>${ICON} ${STATUS_TEXT}</b><br/>"
-          TEXT+="-----------------------------<br/>"
-          TEXT+="📦 <b>Repo:</b> <code>${SAFE_REPO}</code><br/>"
-          TEXT+="🌿 <b>Branch:</b> <code>${SAFE_BRANCH}</code><br/>"
+          TEXT="<b>${ICON} ${STATUS_TEXT}</b><br>"
+          TEXT+="-----------------------------<br>"
+          TEXT+="📦 <b>Repo:</b> <code>${SAFE_REPO}</code><br>"
+          TEXT+="🌿 <b>Branch:</b> <code>${SAFE_BRANCH}</code><br>"
           if [ -n "$FIRST_TAG" ]; then
-            TEXT+="🏷️ <b>Tag:</b> <code>${SAFE_TAG}</code><br/>"
+            TEXT+="🏷️ <b>Tag:</b> <code>${SAFE_TAG}</code><br>"
           fi
-          TEXT+="👤 <b>Author:</b> ${SAFE_AUTHOR}<br/>"
-          TEXT+="📝 <b>Commit:</b> ${SAFE_MSG}<br/>"
-          TEXT+="-----------------------------<br/>"
+          TEXT+="👤 <b>Author:</b> ${SAFE_AUTHOR}<br>"
+          TEXT+="📝 <b>Commit:</b> ${SAFE_MSG}<br>"
+          TEXT+="-----------------------------<br>"
           TEXT+="<a href='${SAFE_URL}'>🔍 View Logs</a>"
 
           # Send Request
