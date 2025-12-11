@@ -60,7 +60,6 @@ jobs:
           platforms: linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # --- Caching Configuration ---
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -92,31 +91,37 @@ jobs:
           TAGS="${{ steps.meta.outputs.tags }}"
           FIRST_TAG=$(echo "$TAGS" | tr ',' '\n' | sed -n '1p')
 
-          # Sanitize commit message for Telegram MarkdownV2
-          # We check if COMMIT_MSG is empty to avoid 'tr' broken pipe errors
-          if [ -z "$COMMIT_MSG" ]; then
-            SAFE_MSG="No commit message"
-          else
-            SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | python3 -c "import sys, re; s=sys.stdin.read(); print(re.sub(r'([_*\[\]()~,>#+\-=|{}.!])', r'\\\1', s))")
-          fi
+          # Escape text for HTML
+          esc() {
+          python3 - <<'PY'
+          import html, sys
+          print(html.escape(sys.stdin.read()))
+          PY
+          }
 
-          # Construct Message
-          # NOTE: In MarkdownV2, the '-' character must be escaped as '\-'
-          TEXT="*$ICON $STATUS_TEXT*%0A"
-          TEXT+="\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-%0A"
-          TEXT+="📦 *Repo:* \`$REPO\`%0A"
-          TEXT+="🌿 *Branch:* \`${{ github.ref_name }}\`%0A"
+          SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | tr '\n' ' ' | esc)
+          SAFE_REPO=$(printf "%s" "$REPO" | esc)
+          SAFE_BRANCH=$(printf "%s" "${{ github.ref_name }}" | esc)
+          SAFE_TAG=$(printf "%s" "$FIRST_TAG" | esc)
+          SAFE_AUTHOR=$(printf "%s" "$AUTHOR" | esc)
+          SAFE_URL=$(printf "%s" "$RUN_URL" | esc)
+
+          # Construct Message (HTML)
+          TEXT="<b>${ICON} ${STATUS_TEXT}</b><br/>"
+          TEXT+="-----------------------------<br/>"
+          TEXT+="📦 <b>Repo:</b> <code>${SAFE_REPO}</code><br/>"
+          TEXT+="🌿 <b>Branch:</b> <code>${SAFE_BRANCH}</code><br/>"
           if [ -n "$FIRST_TAG" ]; then
-            TEXT+="🏷️ *Tag:* \`$FIRST_TAG\`%0A"
+            TEXT+="🏷️ <b>Tag:</b> <code>${SAFE_TAG}</code><br/>"
           fi
-          TEXT+="👤 *Author:* $AUTHOR%0A"
-          TEXT+="📝 *Commit:* _$SAFE_MSG_%0A"
-          TEXT+="\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-%0A"
-          TEXT+="[🔍 View Logs]($RUN_URL)"
+          TEXT+="👤 <b>Author:</b> ${SAFE_AUTHOR}<br/>"
+          TEXT+="📝 <b>Commit:</b> ${SAFE_MSG}<br/>"
+          TEXT+="-----------------------------<br/>"
+          TEXT+="<a href='${SAFE_URL}'>🔍 View Logs</a>"
 
           # Send Request
           curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
             -d chat_id="$CHAT_ID" \
             -d text="$TEXT" \
-            -d parse_mode="MarkdownV2" \
+            -d parse_mode="HTML" \
             -d disable_web_page_preview="true"
