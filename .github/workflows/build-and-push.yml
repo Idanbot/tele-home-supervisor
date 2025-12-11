@@ -80,9 +80,33 @@ jobs:
             type=sha,prefix={{branch}}-
             type=ref,event=tag
 
-      - name: Build and Push
+      # --- Step 1: Build for Scan (AMD64 only, Load to Docker) ---
+      - name: Build for Scan
         uses: docker/build-push-action@v5
-        id: build
+        with:
+          context: .
+          push: false
+          load: true # Loads image into docker daemon for scanning
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_NAME }}:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --- Step 2: Run Trivy Scan ---
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:test
+          format: 'table'
+          exit-code: '0' # Set to '1' to fail build on vulnerability
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # --- Step 3: Build & Push (Multi-Arch) ---
+      # Re-uses cache from Step 1, so it's fast.
+      - name: Build and Push (Final)
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
@@ -91,16 +115,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Run Trivy Vulnerability Scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:latest
-          format: 'table'
-          exit-code: '0' # Don't fail build on vulnerability found, just report
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
 
       # --- Notification Step ---
       - name: Notify Telegram
@@ -112,6 +126,9 @@ jobs:
           REPO: ${{ github.repository }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
           AUTHOR: ${{ github.actor }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
           RUN_URL: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
           # Define Icons
@@ -121,33 +138,44 @@ jobs:
             *)       ICON="⚠️"; STATUS_TEXT="Cancelled/Unknown" ;;
           esac
 
+          # Determine Version / Identifier
+          if [ "$REF_TYPE" == "tag" ]; then
+            VERSION="$REF_NAME"
+            VERSION_LABEL="Tag"
+          else
+            # Use short SHA for commits
+            VERSION=$(echo "$SHA" | cut -c1-7)
+            VERSION_LABEL="Commit"
+          fi
+
           # Helper to escape HTML characters
           escape() { printf "%s" "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
 
-          # Prepare Variables
-          TAGS="${{ steps.meta.outputs.tags }}"
-          FIRST_TAG=$(echo "$TAGS" | tr ',' '\n' | head -n 1)
-
+          # Prepare Safe Variables
           SAFE_REPO=$(escape "$REPO")
-          SAFE_BRANCH=$(escape "${{ github.ref_name }}")
-          SAFE_TAG=$(escape "$FIRST_TAG")
+          SAFE_BRANCH=$(escape "$REF_NAME")
+          SAFE_VERSION=$(escape "$VERSION")
           SAFE_AUTHOR=$(escape "$AUTHOR")
           SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | tr '\n' ' ' | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
 
           # Construct Message
           TEXT="<b>${ICON} ${STATUS_TEXT}</b>
           ------------------------------
-          📦 <b>Repo:</b> <code>${SAFE_REPO}</code>
-          🌿 <b>Branch:</b> <code>${SAFE_BRANCH}</code>"
+          📦 <b>Repo:</b> <code>${SAFE_REPO}</code>"
 
-          if [ -n "$FIRST_TAG" ]; then
-            TEXT="${TEXT}
-          🏷️ <b>Tag:</b> <code>${SAFE_TAG}</code>"
+          # Show Tag if available, otherwise Branch + Short Hash
+          if [ "$REF_TYPE" == "tag" ]; then
+             TEXT="${TEXT}
+          🏷️ <b>Release:</b> <code>${SAFE_VERSION}</code>"
+          else
+             TEXT="${TEXT}
+          🌿 <b>Branch:</b> <code>${SAFE_BRANCH}</code>
+          🔗 <b>Commit:</b> <code>${SAFE_VERSION}</code>"
           fi
 
           TEXT="${TEXT}
           👤 <b>Author:</b> ${SAFE_AUTHOR}
-          📝 <b>Commit:</b> ${SAFE_MSG}
+          📝 <b>Message:</b> ${SAFE_MSG}
           ------------------------------
           <a href='${RUN_URL}'>🔍 View Logs</a>"
 
