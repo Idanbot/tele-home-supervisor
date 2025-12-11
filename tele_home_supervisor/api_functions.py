@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from . import utils
 from . import torrent as torrent_mod
+from . import services
 
 logger = logging.getLogger(__name__)
 
@@ -211,13 +212,7 @@ async def cmd_torrent_add(update: "Update", context: "ContextTypes.DEFAULT_TYPE"
     magnet = context.args[0]
     save_path = context.args[1] if len(context.args) > 1 else "/downloads"
 
-    mgr = torrent_mod.TorrentManager()
-    connected = await asyncio.to_thread(mgr.connect)
-    if not connected:
-        await update.message.reply_text("Failed to connect to qBittorrent. Check credentials/host.", parse_mode=ParseMode.HTML)
-        return
-
-    res = await asyncio.to_thread(mgr.add_magnet, magnet, save_path)
+    res = await asyncio.to_thread(services.torrent_add, magnet, save_path)
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
@@ -229,15 +224,39 @@ async def cmd_torrent_status(update: "Update", context: "ContextTypes.DEFAULT_TY
     if not await guard(update, context):
         return
 
-    mgr = torrent_mod.TorrentManager()
-    connected = await asyncio.to_thread(mgr.connect)
-    if not connected:
-        await update.message.reply_text("Failed to connect to qBittorrent. Check credentials/host.", parse_mode=ParseMode.HTML)
-        return
-
-    msg = await asyncio.to_thread(mgr.get_status)
+    msg = await asyncio.to_thread(services.torrent_status)
     for part in utils.chunk(msg, size=4000):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+
+
+async def cmd_torrent_stop(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    """Pause/stop torrents by name substring.
+
+    Usage: /tstop <name_substring>
+    """
+    if not await guard(update, context):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /tstop <name_substring>", parse_mode=ParseMode.HTML)
+        return
+    name = " ".join(context.args)
+    res = await asyncio.to_thread(services.torrent_stop, name)
+    await update.message.reply_text(res, parse_mode=ParseMode.HTML)
+
+
+async def cmd_torrent_start(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    """Resume/start torrents by name substring.
+
+    Usage: /tstart <name_substring>
+    """
+    if not await guard(update, context):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /tstart <name_substring>", parse_mode=ParseMode.HTML)
+        return
+    name = " ".join(context.args)
+    res = await asyncio.to_thread(services.torrent_start, name)
+    await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
 __all__ = [
@@ -255,5 +274,7 @@ __all__ = [
     "cmd_ping",
     "cmd_torrent_add",
     "cmd_torrent_status",
+    "cmd_torrent_stop",
+    "cmd_torrent_start",
     "cmd_version",
 ]

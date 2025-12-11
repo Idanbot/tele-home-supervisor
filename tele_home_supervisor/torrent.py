@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import html
 import logging
-import os
 from typing import Optional
 
 try:
@@ -26,25 +25,9 @@ try:
 except Exception:  # pragma: no cover - import-time fallbacks
     qbittorrentapi = None  # type: ignore
 
+from .config import settings
+
 logger = logging.getLogger(__name__)
-
-# Load environment once at module import (treat empty/blank values as unset)
-def _env_or_default(key: str, default: str) -> str:
-    v = os.environ.get(key)
-    if v is None:
-        return default
-    v = v.strip()
-    return v if len(v) >= 1 else default
-
-QBT_HOST: str = _env_or_default("QBT_HOST", "qbittorrent")
-_qbt_port_raw: str = _env_or_default("QBT_PORT", "8080")
-try:
-    _port = int(_qbt_port_raw)
-except Exception:
-    _port = 8080
-QBT_PORT: int = _port
-QBT_USER: str = _env_or_default("QBT_USER", "admin")
-QBT_PASS: str = _env_or_default("QBT_PASS", "adminadmin")
 
 
 class TorrentManager:
@@ -61,10 +44,10 @@ class TorrentManager:
         username: Optional[str] = None,
         password: Optional[str] = None,
     ) -> None:
-        self.host = host or QBT_HOST
-        self.port = port or QBT_PORT
-        self.username = username or QBT_USER
-        self.password = password or QBT_PASS
+        self.host = host or settings.QBT_HOST
+        self.port = port or settings.QBT_PORT
+        self.username = username or settings.QBT_USER
+        self.password = password or settings.QBT_PASS
 
         self._base_url = f"http://{self.host}:{self.port}"
         self.qbt_client: Optional["qbittorrentapi.Client"] = None
@@ -113,6 +96,99 @@ class TorrentManager:
             logger.exception("Failed to add torrent: %s", exc)
             return f"Failed to add torrent: {html.escape(str(exc))}"
 
+    def _find_torrents(self, name_substr: str) -> list[dict]:
+        """Return list of torrents matching `name_substr` (case-insensitive).
+
+        Each item is a dict with keys: `name`, `hash`, `state`.
+        """
+        if self.qbt_client is None:
+            if not self.connect():
+                return []
+        try:
+            torrents = self.qbt_client.torrents_info() or []
+            matches: list[dict] = []
+            target = name_substr.lower()
+            for t in torrents:
+                tname = getattr(t, "name", "") or ""
+                if target in tname.lower():
+                    thash = getattr(t, "hash", None) or getattr(t, "info_hash", None) or getattr(t, "hashString", None)
+                    matches.append({"name": tname, "hash": thash, "state": getattr(t, "state", "unknown")})
+            return matches
+        except Exception:
+            logger.exception("Error finding torrents by name")
+            return []
+
+    def _call_pause_resume(self, hashes: list[str], action: str) -> bool:
+        """Attempt to pause or resume torrents given their hashes.
+
+        `action` must be either 'pause' or 'resume'. Returns True on success.
+        This tries a few different qbittorrentapi method signatures for
+        compatibility across versions.
+        """
+        if not hashes:
+            return False
+        if self.qbt_client is None:
+            if not self.connect():
+                return False
+        # prepare a comma-separated string for older API variants
+        hashes_csv = ",".join(hashes)
+        try:
+            if action == "pause":
+                # try a few call signatures
+                try:
+                    self.qbt_client.torrents_pause(torrent_hashes=hashes_csv)  # type: ignore
+                except Exception:
+                    try:
+                        self.qbt_client.torrents_pause(hashes=hashes_csv)  # type: ignore
+                    except Exception:
+                        self.qbt_client.torrents_pause(hashes)  # type: ignore
+            else:
+                try:
+                    self.qbt_client.torrents_resume(torrent_hashes=hashes_csv)  # type: ignore
+                except Exception:
+                    try:
+                        self.qbt_client.torrents_resume(hashes=hashes_csv)  # type: ignore
+                    except Exception:
+                        self.qbt_client.torrents_resume(hashes)  # type: ignore
+            return True
+        except Exception:
+            logger.exception("Error calling pause/resume on torrents")
+            return False
+
+    def stop_by_name(self, name_substr: str) -> str:
+        """Stop (pause) torrents whose name includes `name_substr`.
+
+        Returns a human-readable result string.
+        """
+        matches = self._find_torrents(name_substr)
+        if not matches:
+            return "No matching torrents found."
+        hashes = [m["hash"] for m in matches if m.get("hash")]
+        if not hashes:
+            return "Found matching torrents but could not determine their hashes."
+        ok = self._call_pause_resume(hashes, "pause")
+        if ok:
+            names = ", ".join(m["name"] for m in matches)
+            return f"Paused: {html.escape(names)}"
+        return "Failed to pause torrents."
+
+    def start_by_name(self, name_substr: str) -> str:
+        """Start (resume) torrents whose name includes `name_substr`.
+
+        Returns a human-readable result string.
+        """
+        matches = self._find_torrents(name_substr)
+        if not matches:
+            return "No matching torrents found."
+        hashes = [m["hash"] for m in matches if m.get("hash")]
+        if not hashes:
+            return "Found matching torrents but could not determine their hashes."
+        ok = self._call_pause_resume(hashes, "resume")
+        if ok:
+            names = ", ".join(m["name"] for m in matches)
+            return f"Resumed: {html.escape(names)}"
+        return "Failed to resume torrents."
+
     def get_status(self) -> str:
         """Return a formatted HTML-safe status of torrents.
 
@@ -135,12 +211,12 @@ class TorrentManager:
                 progress = (getattr(t, "progress", 0.0) or 0.0) * 100.0
                 dlspeed = (getattr(t, "dlspeed", 0) or 0) / 1024.0
                 parts.append(
-                    f"<b>{name}</b><br/>"
-                    f"&nbsp;&nbsp;Status: {state}<br/>"
-                    f"&nbsp;&nbsp;Progress: {progress:.1f}%<br/>"
-                    f"&nbsp;&nbsp;Speed: {dlspeed:.1f} KiB/s"
+                    f"<b>{name}</b>\n"
+                    f"  Status: {state}\n"
+                    f"  Progress: {progress:.1f}%\n"
+                    f"  Speed: {dlspeed:.1f} KiB/s"
                 )
-            return "<br/><br/>".join(parts)
+            return "\n\n".join(parts)
         except Exception as exc:
             logger.exception("Error retrieving qBittorrent status: %s", exc)
             return f"Error retrieving status: {html.escape(str(exc))}"

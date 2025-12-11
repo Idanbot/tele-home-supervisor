@@ -18,6 +18,7 @@ import psutil
 import docker
 import shutil
 import json
+from .cli import run_cmd, get_docker_cmd
 
 if TYPE_CHECKING:
     # Import DockerClient only for type checking; runtime import may not be
@@ -58,12 +59,9 @@ def fmt_bytes(n: int) -> str:
 
 def get_primary_ip() -> str:
     try:
-        out = subprocess.check_output(
-            ["bash", "-lc", "ip route get 1.1.1.1 | awk '{print $7; exit}'"],
-            text=True,
-            timeout=2,
-        ).strip()
-        if out:
+        rc, out, err = run_cmd(["bash", "-lc", "ip route get 1.1.1.1 | awk '{print $7; exit}'"], timeout=2)
+        out = out.strip()
+        if rc == 0 and out:
             return out
     except Exception:
         logger.debug("primary ip via ip route failed", exc_info=True)
@@ -79,12 +77,11 @@ def get_primary_ip() -> str:
 
 def get_wan_ip() -> str:
     try:
-        out = subprocess.check_output(
-            ["bash", "-lc", "curl -fsS https://ipinfo.io/ip || curl -fsS https://ifconfig.me"],
-            text=True,
-            timeout=4,
-        ).strip()
-        return out
+        rc, out, err = run_cmd(["bash", "-lc", "curl -fsS https://ipinfo.io/ip || curl -fsS https://ifconfig.me"], timeout=4)
+        out = out.strip()
+        if rc == 0 and out:
+            return out
+        return "n/a"
     except Exception:
         logger.debug("WAN IP check failed", exc_info=True)
         return "n/a"
@@ -246,39 +243,12 @@ def list_containers_basic() -> str:
 
 def container_stats_summary() -> str:
     """Get container stats using docker stats CLI (much faster than API)."""
-    # Try common docker binary locations (prefer /usr/local/bin where we install it)
-    docker_paths = ["/usr/local/bin/docker", "/usr/bin/docker", "docker"]
-    docker_cmd = None
-    
-    for path in docker_paths:
-        try:
-            result = subprocess.run(
-                [path, "--version"],
-                capture_output=True,
-                timeout=1,
-                check=False,
-            )
-            if result.returncode == 0:
-                docker_cmd = path
-                logger.debug(f"Found docker at {path}")
-                break
-        except (FileNotFoundError, subprocess.SubprocessError, OSError):
-            continue
-    
+    # Use centralized docker detection and delegate to the rich formatter
+    docker_cmd = get_docker_cmd()
     if not docker_cmd:
-        # Only log once at warning level to avoid spam
         return "<i>Docker CLI not available in container</i>"
+    return container_stats_rich()
 
-
-def get_docker_cmd() -> str | None:
-    """Return the path to the docker CLI binary if available."""
-    candidates = ["/usr/local/bin/docker", "/usr/bin/docker"]
-    for p in candidates:
-        if os.path.exists(p) and os.access(p, os.X_OK):
-            return p
-    # fall back to PATH
-    which = shutil.which("docker")
-    return which
 
 
 def container_stats_rich() -> str:
@@ -291,74 +261,33 @@ def container_stats_rich() -> str:
         return "<i>Docker CLI not available in container</i>"
 
     fmt = "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}"
-    try:
-        out = subprocess.check_output(
-            [docker_cmd, "stats", "--no-stream", "--format", fmt],
-            text=True,
-            timeout=5,
-        ).strip()
-        if not out:
-            return "<i>No running containers.</i>"
-        lines = ["<b>Container Detailed Stats:</b>"]
-        for line in out.splitlines():
-            parts = line.split("\t")
-            if len(parts) >= 7:
-                name, cpu, mem_pct, mem_usage, netio, blockio, pids = parts[:7]
-                lines.append(
-                    f"<code>{html.escape(name)}</code> "
-                    f"CPU {html.escape(cpu)} MEM {html.escape(mem_pct)} ({html.escape(mem_usage)})\n"
-                    f"Net I/O: {html.escape(netio)} Block I/O: {html.escape(blockio)} PIDs: {html.escape(pids)}"
-                )
-        return "\n\n".join(lines)
-    except subprocess.TimeoutExpired:
-        logger.error("docker stats command timed out")
-        return "<i>Docker stats timed out</i>"
-    except subprocess.CalledProcessError as e:
-        logger.exception("docker stats command failed")
-        return f"<i>Docker stats error:</i> <code>{html.escape(str(e))}</code>"
-    except Exception as e:
-        logger.exception("Error running docker stats rich")
-        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
-    
-    try:
-        # Use docker stats --no-stream for a single snapshot (fast)
-        out = subprocess.check_output(
-            [docker_cmd, "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}"],
-            text=True,
-            timeout=5,
-        ).strip()
-        if not out:
-            return "<i>No running containers.</i>"
-        
-        lines = ["<b>Container stats:</b>"]
-        for line in out.splitlines():
-            parts = line.split("\t")
-            if len(parts) == 4:
-                name, cpu, mem_pct, mem_usage = parts
-                lines.append(
-                    f"<code>{html.escape(name)}</code> "
-                    f"CPU {html.escape(cpu)} MEM {html.escape(mem_pct)} ({html.escape(mem_usage)})"
-                )
-        return "\n".join(lines)
-    except subprocess.TimeoutExpired:
-        logger.error("docker stats command timed out")
-        return "<i>Docker stats timed out</i>"
-    except subprocess.CalledProcessError as e:
-        logger.exception("docker stats command failed")
-        return f"<i>Docker stats error:</i> <code>{html.escape(str(e))}</code>"
-    except Exception as e:
-        logger.exception("Error running docker stats")
-        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
+    rc, out, err = run_cmd([docker_cmd, "stats", "--no-stream", "--format", fmt], timeout=5)
+    if rc != 0:
+        logger.debug("docker stats returned non-zero: %s %s", rc, err)
+        return "<i>Docker stats error</i>"
+    out = out.strip()
+    if not out:
+        return "<i>No running containers.</i>"
+    lines = ["<b>Container Detailed Stats:</b>"]
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            name, cpu, mem_pct, mem_usage, netio, blockio, pids = parts[:7]
+            lines.append(
+                f"<code>{html.escape(name)}</code> "
+                f"CPU {html.escape(cpu)} MEM {html.escape(mem_pct)} ({html.escape(mem_usage)})\n"
+                f"Net I/O: {html.escape(netio)} Block I/O: {html.escape(blockio)} PIDs: {html.escape(pids)}"
+            )
+    return "\n\n".join(lines)
 
 def get_container_logs(container_name: str, lines: int = 50) -> str:
     """Get recent logs from a container."""
     try:
-        out = subprocess.check_output(
-            ["/usr/local/bin/docker", "logs", "--tail", str(lines), container_name],
-            text=True,
-            stderr=subprocess.STDOUT,
-            timeout=10,
-        ).strip()
+        docker_cmd = get_docker_cmd()
+        if not docker_cmd:
+            return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
+        rc, out, err = run_cmd([docker_cmd, "logs", "--tail", str(lines), container_name], timeout=10)
+        out = out.strip()
         if not out:
             return f"<i>Container {html.escape(container_name)} has no logs</i>"
         # Limit output to avoid message size issues
@@ -389,11 +318,13 @@ def healthcheck_container(container_name: str) -> str:
     if not docker_cmd:
         return "<i>Docker CLI not available in container</i>"
     try:
-        out = subprocess.check_output(
-            [docker_cmd, "inspect", "--format", "{{json .State}}", container_name],
-            text=True,
-            timeout=4,
-        ).strip()
+        rc, out, err = run_cmd([docker_cmd, "inspect", "--format", "{{json .State}}", container_name], timeout=4)
+        if rc != 0:
+            err_text = err or out
+            if "No such object" in err_text or "No such container" in err_text:
+                return f"<i>Container {html.escape(container_name)} not found</i>"
+            logger.exception("Error inspecting container %s: %s %s", container_name, rc, err_text)
+            return f"<i>Error:</i> <code>{html.escape(str(err_text))}</code>"
         state = json.loads(out)
         health = state.get("Health")
         if health:
@@ -424,18 +355,13 @@ def ping_host(host: str, count: int = 3) -> str:
     if not ping_bin or not os.path.exists(ping_bin):
         return "<i>ping command not available in container</i>"
     try:
-        proc = subprocess.run([
-            ping_bin, "-c", str(count), "-W", "2", host
-        ], capture_output=True, text=True, timeout=10)
-        out = proc.stdout.strip()
+        rc, out, err = run_cmd([ping_bin, "-c", str(count), "-W", "2", host], timeout=10)
+        out = out.strip()
         if not out:
             return "<i>No output from ping</i>"
-        # Return the last 6 lines (summary + a few samples)
         lines = out.splitlines()
         sample = "\n".join(lines[-6:])
         return f"<b>Ping {html.escape(host)}:</b>\n<pre>{html.escape(sample)}</pre>"
-    except subprocess.TimeoutExpired:
-        return f"<i>Ping to {html.escape(host)} timed out</i>"
     except Exception as e:
         logger.exception("Error pinging %s", host)
         return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
@@ -444,12 +370,10 @@ def ping_host(host: str, count: int = 3) -> str:
 def get_top_processes() -> str:
     """Get top processes using ps command."""
     try:
-        out = subprocess.check_output(
-            ["/bin/ps", "aux", "--sort=-%cpu"],
-            text=True,
-            timeout=5,
-        ).strip()
-        lines = out.splitlines()[:11]  # Header + top 10
+        rc, out, err = run_cmd(["/bin/ps", "aux", "--sort=-%cpu"], timeout=5)
+        if rc != 0:
+            return "<i>Failed to get process list</i>"
+        lines = out.splitlines()[:11]
         return f"<b>Top Processes:</b>\n<pre>{html.escape(chr(10).join(lines))}</pre>"
     except FileNotFoundError:
         return "<i>ps command not found</i>"
@@ -469,28 +393,17 @@ def get_version_info() -> str:
     
     # Try to get latest git commit date (suppress stderr to avoid logs when .git missing)
     try:
-        out = subprocess.check_output(
-            ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"],
-            text=True,
-            timeout=3,
-            cwd="/app",
-            stderr=subprocess.DEVNULL,
-        ).strip()
-        if out:
+        rc, out, err = run_cmd(["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"], timeout=3)
+        out = out.strip()
+        if rc == 0 and out:
             lines.append(f"<b>Last Commit:</b> {html.escape(out)}")
     except Exception:
         pass
-    
     # Try to get git commit hash (suppress stderr)
     try:
-        out = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            text=True,
-            timeout=3,
-            cwd="/app",
-            stderr=subprocess.DEVNULL,
-        ).strip()
-        if out:
+        rc, out, err = run_cmd(["git", "rev-parse", "--short", "HEAD"], timeout=3)
+        out = out.strip()
+        if rc == 0 and out:
             lines.append(f"<b>Commit:</b> <code>{html.escape(out)}</code>")
     except Exception:
         pass

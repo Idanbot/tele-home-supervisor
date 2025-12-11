@@ -38,6 +38,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler(["temp"], core.cmd_temp))
     app.add_handler(CommandHandler(["tadd"], core.cmd_torrent_add))
     app.add_handler(CommandHandler(["tstatus"], core.cmd_torrent_status))
+    app.add_handler(CommandHandler(["tstop"], core.cmd_torrent_stop))
+    app.add_handler(CommandHandler(["tstart"], core.cmd_torrent_start))
     app.add_handler(CommandHandler(["uptime"], core.cmd_uptime))
     app.add_handler(CommandHandler(["version"], core.cmd_version))
 

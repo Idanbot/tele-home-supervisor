@@ -6,39 +6,37 @@ thin wrappers that delegate to the real implementations in
 """
 from __future__ import annotations
 
-import os
 import logging
 import time
 import threading
 from typing import Callable, Awaitable
 
+from .config import settings
+
 logger = logging.getLogger(__name__)
 
-# Global rate limit (seconds) for all commands. Default 1s.
-RATE_LIMIT_S: float = float(os.environ.get("RATE_LIMIT_S", "1.0"))
+# Global rate limit (seconds) for all commands.
+RATE_LIMIT_S: float = settings.RATE_LIMIT_S
 _last_command_ts = 0.0
 _rate_lock = threading.Lock()
 
 # Token used by `main.build_application` to construct the Application
-TOKEN: str | None = os.environ.get("BOT_TOKEN")
+TOKEN: str | None = settings.BOT_TOKEN
 
-ALLOWED: set[int] = set()
-for part in os.environ.get("ALLOWED_CHAT_IDS", "").replace(" ", "").split(","):
-    if part.isdigit():
-        ALLOWED.add(int(part))
+# Allowed chat ids (may be empty)
+ALLOWED: set[int] = set(settings.ALLOWED_CHAT_IDS)
 
 if not ALLOWED:
     logger.warning("ALLOWED_CHAT_IDS is empty; guarded commands will be unauthorized.")
 
 # Feature flags / config used by handlers
-SHOW_WAN = os.environ.get("SHOW_WAN", "false").lower() in {"1", "true", "yes"}
-WATCH_PATHS = [p.strip() for p in os.environ.get("WATCH_PATHS", "/,/srv/media").split(",") if p.strip()]
+SHOW_WAN = settings.SHOW_WAN
+WATCH_PATHS = list(settings.WATCH_PATHS)
 
 
 def _validate_config() -> None:
-    """Validate configuration at module load and log warnings/errors."""
     if TOKEN is None:
-        logger.error("BOT_TOKEN environment variable is not set")
+        logger.error("BOT_TOKEN environment variable is not set (from config.settings)")
     if not ALLOWED:
         logger.warning("ALLOWED_CHAT_IDS is empty; all guarded commands will be unauthorized")
     if not WATCH_PATHS:
@@ -102,6 +100,8 @@ cmd_ping = _delegate("cmd_ping")
 cmd_temp = _delegate("cmd_temp")
 cmd_torrent_add = _delegate("cmd_torrent_add")
 cmd_torrent_status = _delegate("cmd_torrent_status")
+cmd_torrent_stop = _delegate("cmd_torrent_stop")
+cmd_torrent_start = _delegate("cmd_torrent_start")
 
 __all__ = [
     "TOKEN",
@@ -119,6 +119,8 @@ __all__ = [
     "cmd_ping",
     "cmd_torrent_add",
     "cmd_torrent_status",
+    "cmd_torrent_stop",
+    "cmd_torrent_start",
     "cmd_temp",
     "cmd_whoami",
     "cmd_logs",
