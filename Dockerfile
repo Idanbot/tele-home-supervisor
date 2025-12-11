@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl iproute2 tzdata git ca-certificates iputils-ping \
     && rm -rf /var/lib/apt/lists/* \
     && ARCH=$(dpkg --print-architecture) \
-    && if [ "$ARCH" = "arm64" ]; then DOCKER_ARCH="aarch64"; else DOCKER_ARCH="$ARCH"; fi \
+    && if [ "$ARCH" = "arm64" ]; then DOCKER_ARCH="aarch64"; elif [ "$ARCH" = "amd64" ]; then DOCKER_ARCH="x86_64"; else DOCKER_ARCH="$ARCH"; fi \
     && echo "Downloading Docker CLI for architecture: $DOCKER_ARCH" \
     && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-25.0.3.tgz" -o docker.tgz \
     && tar -xzf docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
