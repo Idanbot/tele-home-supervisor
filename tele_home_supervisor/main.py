@@ -9,11 +9,11 @@ from datetime import datetime
 
 from telegram.ext import Application, CommandHandler
 
-# Track startup time
-STARTUP_TIME = datetime.now()
-
 from .logger import setup_logging
 from . import core
+
+# Track startup time
+STARTUP_TIME = datetime.now()
 
 logger = logging.getLogger(__name__)
 

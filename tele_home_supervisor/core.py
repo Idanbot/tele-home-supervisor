@@ -9,9 +9,13 @@ from __future__ import annotations
 import logging
 import time
 import threading
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, TYPE_CHECKING
 
 from .config import settings
+
+if TYPE_CHECKING:
+    import telegram
+    import telegram.ext
 
 logger = logging.getLogger(__name__)
 

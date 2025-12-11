@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from . import utils
 from . import torrent as torrent_mod
-from .config import settings
 
 
 def host_health(show_wan: bool = False, watch_paths: list[str] | None = None) -> str:

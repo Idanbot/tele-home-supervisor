@@ -1,9 +1,17 @@
-name: Build & publish Docker image
+name: Build & Publish Docker Image
 
 on:
   push:
     branches: ["main"]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch: {}
+
+# Cancel previous running builds for the same branch to save resources
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -12,38 +20,39 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Set up QEMU for multi-architecture builds (e.g., ARM64 for RPi)
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
+      # Set up Docker Buildx (Required for caching)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker meta
+      - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest
-            type=sha
+            type=sha,prefix={{branch}}-
 
-      - name: Build and push image
+      - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -51,33 +60,63 @@ jobs:
           platforms: linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # --- Caching Configuration ---
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Send Telegram Notification
-        if: always() # Ensures this runs even if previous steps fail
+      # --- Notification Step ---
+      - name: Notify Telegram
+        if: always()
         env:
-          # Make sure these secrets are set in your repo settings
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Pass the workflow status to the script
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           STATUS: ${{ job.status }}
+          REPO: ${{ github.repository }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          AUTHOR: ${{ github.actor }}
+          RUN_URL: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
-          # 1. Define messages/icons based on status
+          # Define Icons
           if [ "$STATUS" == "success" ]; then
-            EMOJI="✅"
-            TEXT="Succeeded"
+            ICON="✅"
+            STATUS_TEXT="Build Success"
           elif [ "$STATUS" == "failure" ]; then
-            EMOJI="❌"
-            TEXT="Failed"
+            ICON="❌"
+            STATUS_TEXT="Build Failed"
           else
-            EMOJI="⚠️"
-            TEXT="Cancelled"
+            ICON="⚠️"
+            STATUS_TEXT="Cancelled/Unknown"
           fi
 
-          # 2. Construct the message
-          MESSAGE="$EMOJI **Workflow $TEXT**%0ARepository: ${{ github.repository }}%0ABranch: ${{ github.ref_name }}%0A[View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          # Pick first tag from metadata (useful fallback for digest)
+          TAGS="${{ steps.meta.outputs.tags }}"
+          FIRST_TAG=$(echo "$TAGS" | tr ',' '\n' | sed -n '1p')
 
-          # 3. Send via Curl
-          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-            -d chat_id="$TELEGRAM_CHAT_ID" \
-            -d text="$MESSAGE" \
-            -d parse_mode="Markdown"
+          # Sanitize commit message for Telegram MarkdownV2
+          SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | tr '\n' ' ' | python3 - <<'PY'
+          import sys,re
+          s=sys.stdin.read()
+          escape_re = re.compile(r'([_*\[\]\(\)~`>#\+\-\=\|\{\}\.\!\\])')
+          print(escape_re.sub(r'\\\\\\1', s))
+          PY
+          )
+
+          # Construct Message (include first tag if present)
+          TEXT="*$ICON $STATUS_TEXT*%0A"
+          TEXT+="---------------------------------%0A"
+          TEXT+="📦 *Repo:* \`$REPO\`%0A"
+          TEXT+="🌿 *Branch:* \`${{ github.ref_name }}\`%0A"
+          if [ -n "$FIRST_TAG" ]; then
+            TEXT+="🏷️ *Tag:* \`$FIRST_TAG\`%0A"
+          fi
+          TEXT+="👤 *Author:* $AUTHOR%0A"
+          TEXT+="📝 *Commit:* _$SAFE_MSG_%0A"
+          TEXT+="---------------------------------%0A"
+          TEXT+="[🔍 View Logs]($RUN_URL)"
+
+          # Send Request
+          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            -d chat_id="$CHAT_ID" \
+            -d text="$TEXT" \
+            -d parse_mode="MarkdownV2" \
+            -d disable_web_page_preview="true"

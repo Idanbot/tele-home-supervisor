@@ -329,7 +329,6 @@ def healthcheck_container(container_name: str) -> str:
         health = state.get("Health")
         if health:
             status = health.get("Status", "unknown")
-            log = health.get("Log", [])
             return f"<b>Container:</b> <code>{html.escape(container_name)}</code>\n<b>Health:</b> {html.escape(status)}"
         # Fallback to general state fields
         status = state.get("Status") or ("running" if state.get("Running") else "stopped")

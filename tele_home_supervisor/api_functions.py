@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from telegram.ext import ContextTypes
 
 from . import utils
-from . import torrent as torrent_mod
 from . import services
 
 logger = logging.getLogger(__name__)
@@ -155,7 +154,7 @@ async def cmd_dhealth(update: "Update", context: "ContextTypes.DEFAULT_TYPE") ->
     if not await guard(update, context):
         return
     if not context.args or len(context.args) == 0:
-        await update.message.reply_text("Usage: /dhealth <container>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("Usage: /dhealth &lt;container&gt;", parse_mode=ParseMode.HTML)
         return
     name = context.args[0]
     msg = await asyncio.to_thread(utils.healthcheck_container, name)
@@ -174,7 +173,7 @@ async def cmd_ping(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> No
     if not await guard(update, context):
         return
     if not context.args or len(context.args) == 0:
-        await update.message.reply_text("Usage: /ping <ip_or_host> [count]", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("Usage: /ping &lt;ip_or_host&gt; [count]", parse_mode=ParseMode.HTML)
         return
     host = context.args[0]
     count = 3
@@ -207,7 +206,7 @@ async def cmd_torrent_add(update: "Update", context: "ContextTypes.DEFAULT_TYPE"
     if not await guard(update, context):
         return
     if not context.args or len(context.args) == 0:
-        await update.message.reply_text("Usage: /tadd <magnet_link> [save_path]", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("Usage: /tadd &lt;magnet_link&gt; [save_path]", parse_mode=ParseMode.HTML)
         return
     magnet = context.args[0]
     save_path = context.args[1] if len(context.args) > 1 else "/downloads"
@@ -237,7 +236,7 @@ async def cmd_torrent_stop(update: "Update", context: "ContextTypes.DEFAULT_TYPE
     if not await guard(update, context):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /tstop <name_substring>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("Usage: /tstop &lt;name_substring&gt;", parse_mode=ParseMode.HTML)
         return
     name = " ".join(context.args)
     res = await asyncio.to_thread(services.torrent_stop, name)
@@ -252,7 +251,7 @@ async def cmd_torrent_start(update: "Update", context: "ContextTypes.DEFAULT_TYP
     if not await guard(update, context):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /tstart <name_substring>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("Usage: /tstart &lt;name_substring&gt;", parse_mode=ParseMode.HTML)
         return
     name = " ".join(context.args)
     res = await asyncio.to_thread(services.torrent_start, name)
