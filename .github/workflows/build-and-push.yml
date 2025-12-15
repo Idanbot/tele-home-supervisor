@@ -9,7 +9,6 @@ on:
       - 'docs/**'
   workflow_dispatch: {}
 
-# Cancel previous running builds for the same branch to save resources
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -29,23 +28,20 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install Linting Dependencies
+      - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pylint
-          pip install -r requirements.txt
+          pip install pylint -r requirements.txt
 
       - name: Run Pylint
         run: |
-          # failing on fatal errors only for now to not break build on style issues
-          # remove --disable=all --enable=F,E to enforce all checks
-          pylint --disable=all --enable=F,E **/*.py
+          pylint --disable=all --enable=F,E tele_home_supervisor/ bot.py
 
   build-and-push:
-    needs: lint
+    needs: [lint]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
@@ -55,11 +51,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Set up QEMU for multi-architecture builds (e.g., ARM64 for RPi)
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      # Set up Docker Buildx (Required for caching)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -70,7 +64,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
+      - name: Extract Docker Metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -79,6 +73,8 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix={{branch}}-
             type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Compute Build Version
         id: buildver
@@ -86,112 +82,73 @@ jobs:
           TS="$(date -u +'%Y%m%d-%H%M%S')"
           echo "version=${TS}-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
-      # --- Step 1: Build for Scan (AMD64 only, Load to Docker) ---
-      - name: Build for Scan
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          load: true # Loads image into docker daemon for scanning
-          platforms: linux/amd64
-          tags: ${{ env.IMAGE_NAME }}:test
-          build-args: |
-            BUILD_VERSION=${{ steps.buildver.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # --- Step 2: Run Trivy Scan ---
-      - name: Run Trivy Vulnerability Scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:test
-          format: 'table'
-          exit-code: '0' # Set to '1' to fail build on vulnerability
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
-
-      # --- Step 3: Build & Push (Multi-Arch) ---
-      # Re-uses cache from Step 1, so it's fast.
-      - name: Build and Push (Final)
+      # Single build step - ARM64 primary, AMD64 optional
+      - name: Build and Push
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          # ARM64 first (your primary target), AMD64 optional
+          platforms: linux/arm64,linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BUILD_VERSION=${{ steps.buildver.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Dual caching: GHA + Registry
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
+          cache-to: |
+            type=gha,mode=max
+            type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
 
-      # --- Notification Step ---
+      # Scan ARM64 (primary target) after push
+      - name: Scan ARM64 Image
+        run: |
+          # Pull ARM64 variant
+          docker pull --platform linux/arm64 ${{ env.IMAGE_NAME }}:latest
+          
+          # Scan with Trivy
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image \
+            --platform linux/arm64 \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            --format table \
+            ${{ env.IMAGE_NAME }}:latest
+
       - name: Notify Telegram
         if: always()
         env:
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           STATUS: ${{ job.status }}
-          REPO: ${{ github.repository }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-          AUTHOR: ${{ github.actor }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
-          RUN_URL: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
-          # Define Icons
+          # Status Icon
           case "$STATUS" in
-            success) ICON="✅"; STATUS_TEXT="Build Success" ;;
-            failure) ICON="❌"; STATUS_TEXT="Build Failed" ;;
-            *)       ICON="⚠️"; STATUS_TEXT="Cancelled/Unknown" ;;
+            success) ICON="✅"; TEXT="Build Success" ;;
+            failure) ICON="❌"; TEXT="Build Failed" ;;
+            *)       ICON="⚠️"; TEXT="Cancelled" ;;
           esac
 
-          # Determine Version / Identifier
+          # Version identifier
           if [ "$REF_TYPE" == "tag" ]; then
             VERSION="$REF_NAME"
-            VERSION_LABEL="Tag"
           else
-            # Use short SHA for commits
             VERSION=$(echo "$SHA" | cut -c1-7)
-            VERSION_LABEL="Commit"
           fi
 
-          # Helper to escape HTML characters
-          escape() { printf "%s" "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
-
-          # Prepare Safe Variables
-          SAFE_REPO=$(escape "$REPO")
-          SAFE_BRANCH=$(escape "$REF_NAME")
-          SAFE_VERSION=$(escape "$VERSION")
-          SAFE_AUTHOR=$(escape "$AUTHOR")
-          SAFE_MSG=$(printf "%s" "$COMMIT_MSG" | tr '\n' ' ' | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
-
-          # Construct Message
-          TEXT="<b>${ICON} ${STATUS_TEXT}</b>
-          ------------------------------
-          📦 <b>Repo:</b> <code>${SAFE_REPO}</code>"
-
-          # Show Tag if available, otherwise Branch + Short Hash
-          if [ "$REF_TYPE" == "tag" ]; then
-             TEXT="${TEXT}
-          🏷️ <b>Release:</b> <code>${SAFE_VERSION}</code>"
-          else
-             TEXT="${TEXT}
-          🌿 <b>Branch:</b> <code>${SAFE_BRANCH}</code>
-          🔗 <b>Commit:</b> <code>${SAFE_VERSION}</code>"
-          fi
-
-          TEXT="${TEXT}
-          👤 <b>Author:</b> ${SAFE_AUTHOR}
-          📝 <b>Message:</b> ${SAFE_MSG}
-          ------------------------------
-          <a href='${RUN_URL}'>🔍 View Logs</a>"
-
-          # Send Request
-          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-            -d chat_id="$CHAT_ID" \
-            -d parse_mode="HTML" \
-            -d disable_web_page_preview="true" \
-            --data-urlencode "text=$TEXT"
+          # Send notification
+          curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d @- <<EOF
+          {
+            "chat_id": "${{ secrets.TELEGRAM_CHAT_ID }}",
+            "parse_mode": "HTML",
+            "disable_web_page_preview": true,
+            "text": "<b>$ICON $TEXT</b>\n━━━━━━━━━━━━━━━━━━━━\n📦 <b>Repo:</b> <code>${{ github.repository }}</code>\n🌿 <b>Branch:</b> <code>$REF_NAME</code>\n🔗 <b>Commit:</b> <code>$VERSION</code>\n👤 <b>Author:</b> ${{ github.actor }}\n━━━━━━━━━━━━━━━━━━━━\n<a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
+          }
+          EOF
