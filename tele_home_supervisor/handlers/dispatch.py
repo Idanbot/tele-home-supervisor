@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .common import run_rate_limited
-from . import meta, system, docker, network, torrents
+from . import meta, system, docker, network, torrents, notifications
 
 
 async def cmd_start(update, context) -> None:
@@ -104,3 +104,18 @@ async def cmd_torrent_delete(update, context) -> None:
 async def cmd_subscribe(update, context) -> None:
     await run_rate_limited(update, context, torrents.cmd_subscribe)
 
+
+async def cmd_mute_epicgames(update, context) -> None:
+    await run_rate_limited(update, context, notifications.cmd_mute_epicgames)
+
+
+async def cmd_mute_hackernews(update, context) -> None:
+    await run_rate_limited(update, context, notifications.cmd_mute_hackernews)
+
+
+async def cmd_epicgames_now(update, context) -> None:
+    await run_rate_limited(update, context, notifications.cmd_epicgames_now)
+
+
+async def cmd_hackernews_now(update, context) -> None:
+    await run_rate_limited(update, context, notifications.cmd_hackernews_now)

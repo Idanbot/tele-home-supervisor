@@ -44,6 +44,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Create data directory for persistent state
+RUN mkdir -p /app/data && chmod 777 /app/data
+
 # Copy pre-built wheels from the builder stage and install from them to
 # avoid compiling in the final image (smaller, faster, deterministic).
 COPY --from=builder /wheels /wheels

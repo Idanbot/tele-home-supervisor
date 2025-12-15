@@ -6,17 +6,24 @@ import html
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from telegram.constants import ParseMode
 from telegram.ext import Application
 
 from .state import BOT_STATE_KEY, BotState
 from .torrent import TorrentManager, fmt_bytes_compact_decimal
+from . import scheduled as scheduled_fetchers
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
 _TASK_TORRENT_COMPLETION = "torrent_completion"
+_TASK_EPIC_GAMES = "epic_games_scheduler"
+_TASK_HACKERNEWS = "hackernews_scheduler"
 _POLL_INTERVAL_S = 30.0
+_ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 
 
 @dataclass(frozen=True)
@@ -30,10 +37,24 @@ class TorrentSnapshot:
 
 def ensure_started(app: Application) -> None:
     state: BotState = app.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    
+    # Load persisted state
+    state.load_state()
+    
+    # Start torrent completion loop
     task = state.tasks.get(_TASK_TORRENT_COMPLETION)
-    if isinstance(task, asyncio.Task) and not task.done():
-        return
-    state.tasks[_TASK_TORRENT_COMPLETION] = asyncio.create_task(_torrent_completion_loop(app))
+    if not isinstance(task, asyncio.Task) or task.done():
+        state.tasks[_TASK_TORRENT_COMPLETION] = asyncio.create_task(_torrent_completion_loop(app))
+    
+    # Start Epic Games scheduler
+    task = state.tasks.get(_TASK_EPIC_GAMES)
+    if not isinstance(task, asyncio.Task) or task.done():
+        state.tasks[_TASK_EPIC_GAMES] = asyncio.create_task(_epic_games_scheduler(app))
+    
+    # Start Hacker News scheduler
+    task = state.tasks.get(_TASK_HACKERNEWS)
+    if not isinstance(task, asyncio.Task) or task.done():
+        state.tasks[_TASK_HACKERNEWS] = asyncio.create_task(_hackernews_scheduler(app))
 
 
 def _get_state(app: Application) -> BotState:
@@ -167,3 +188,118 @@ async def _torrent_completion_loop(app: Application) -> None:
             logger.exception("Torrent completion loop error")
             await asyncio.sleep(_POLL_INTERVAL_S)
 
+
+def _seconds_until_time(target_hour: int, target_minute: int = 0) -> float:
+    """Calculate seconds until next occurrence of target time in Israel timezone."""
+    now = datetime.now(_ISRAEL_TZ)
+    target = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+    
+    if now >= target:
+        # Target time has passed today, schedule for tomorrow
+        target = target.replace(day=target.day + 1)
+    
+    delta = (target - now).total_seconds()
+    return max(0.0, delta)
+
+
+async def _epic_games_scheduler(app: Application) -> None:
+    """Schedule Epic Games free games notification at 8 PM Israel time daily."""
+    logger.info("Starting Epic Games scheduler (8 PM Israel time)")
+    
+    while True:
+        try:
+            # Wait until 8 PM Israel time
+            wait_seconds = _seconds_until_time(20, 0)  # 8 PM = 20:00
+            logger.info("Epic Games: waiting %.1f seconds until next run", wait_seconds)
+            await asyncio.sleep(wait_seconds)
+            
+            # Fetch and send
+            state = _get_state(app)
+            if not settings.ALLOWED_CHAT_IDS:
+                logger.warning("No allowed chat IDs configured")
+                await asyncio.sleep(3600)  # Wait 1 hour before retry
+                continue
+            
+            message, image_urls = await asyncio.to_thread(scheduled_fetchers.fetch_epic_free_games)
+            
+            for chat_id in settings.ALLOWED_CHAT_IDS:
+                if state.is_epic_games_muted(chat_id):
+                    logger.debug("Epic Games muted for chat_id=%s", chat_id)
+                    continue
+                
+                try:
+                    # Send as photo with caption if image available, otherwise text
+                    if image_urls:
+                        # Send first game with image, rest as text if multiple games
+                        await app.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=image_urls[0],
+                            caption=message,
+                            parse_mode=ParseMode.HTML,
+                        )
+                        logger.info("Sent Epic Games notification (with image) to chat_id=%s", chat_id)
+                    else:
+                        await app.bot.send_message(
+                            chat_id=chat_id,
+                            text=message,
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=True,
+                        )
+                        logger.info("Sent Epic Games notification (text only) to chat_id=%s", chat_id)
+                except Exception:
+                    logger.exception("Failed to send Epic Games notification to chat_id=%s", chat_id)
+            
+            # Wait a bit to avoid rescheduling immediately
+            await asyncio.sleep(120)
+            
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Epic Games scheduler error")
+            await asyncio.sleep(3600)  # Wait 1 hour on error
+
+
+async def _hackernews_scheduler(app: Application) -> None:
+    """Schedule Hacker News top stories at 8 AM Israel time daily."""
+    logger.info("Starting Hacker News scheduler (8 AM Israel time)")
+    
+    while True:
+        try:
+            # Wait until 8 AM Israel time
+            wait_seconds = _seconds_until_time(8, 0)  # 8 AM = 08:00
+            logger.info("Hacker News: waiting %.1f seconds until next run", wait_seconds)
+            await asyncio.sleep(wait_seconds)
+            
+            # Fetch and send
+            state = _get_state(app)
+            if not settings.ALLOWED_CHAT_IDS:
+                logger.warning("No allowed chat IDs configured")
+                await asyncio.sleep(3600)  # Wait 1 hour before retry
+                continue
+            
+            message = await asyncio.to_thread(scheduled_fetchers.fetch_hackernews_top, 3)
+            
+            for chat_id in settings.ALLOWED_CHAT_IDS:
+                if state.is_hackernews_muted(chat_id):
+                    logger.debug("Hacker News muted for chat_id=%s", chat_id)
+                    continue
+                
+                try:
+                    await app.bot.send_message(
+                        chat_id=chat_id,
+                        text=message,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                    logger.info("Sent Hacker News notification to chat_id=%s", chat_id)
+                except Exception:
+                    logger.exception("Failed to send Hacker News notification to chat_id=%s", chat_id)
+            
+            # Wait a bit to avoid rescheduling immediately
+            await asyncio.sleep(120)
+            
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Hacker News scheduler error")
+            await asyncio.sleep(3600)  # Wait 1 hour on error

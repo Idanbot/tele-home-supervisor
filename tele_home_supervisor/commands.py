@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-Group = Literal["System", "Docker", "Network", "Torrents", "Info"]
+Group = Literal["System", "Docker", "Network", "Torrents", "Notifications", "Info"]
 Needs = Literal["none", "container", "torrent"]
 
 
@@ -50,8 +50,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("tstart", (), "Torrents", "/tstart <torrent>", "resume torrent(s) by name", handler="cmd_torrent_start", needs="torrent"),
     CommandSpec("tdelete", (), "Torrents", "/tdelete <torrent> yes", "delete torrent(s) and files", handler="cmd_torrent_delete", needs="torrent"),
     CommandSpec("subscribe", (), "Torrents", "/subscribe [on|off|status]", "torrent completion notifications", handler="cmd_subscribe"),
+    # Notifications
+    CommandSpec("mute_epicgames", (), "Notifications", "/mute_epicgames", "toggle Epic Games daily notifications (8 PM)", handler="cmd_mute_epicgames"),
+    CommandSpec("mute_hackernews", (), "Notifications", "/mute_hackernews", "toggle Hacker News daily digest (8 AM)", handler="cmd_mute_hackernews"),
+    CommandSpec("epicgames", (), "Notifications", "/epicgames", "check current Epic Games free games", handler="cmd_epicgames_now"),
+    CommandSpec("hackernews", (), "Notifications", "/hackernews [n]", "show top N Hacker News stories (default: 5)", handler="cmd_hackernews_now"),
 )
 
 
-GROUP_ORDER: tuple[Group, ...] = ("System", "Docker", "Network", "Torrents", "Info")
+GROUP_ORDER: tuple[Group, ...] = ("System", "Docker", "Network", "Torrents", "Notifications", "Info")
 

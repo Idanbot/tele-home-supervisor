@@ -79,7 +79,7 @@ jobs:
       - name: Compute Build Version
         id: buildver
         run: |
-          TS="$(date -u +'%Y%m%d-%H%M%S')"
+          TS="$(date -u +'%Y.%m.%d-%H:%M:%S')"
           echo "version=${TS}-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       # Single build step - ARM64 primary, AMD64 optional
