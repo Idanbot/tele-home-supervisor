@@ -241,6 +241,23 @@ def list_containers_basic() -> str:
     return "\n".join(lines)
 
 
+def list_container_names() -> set[str]:
+    """Return container names seen via Docker API."""
+    try:
+        cs = client.containers.list(all=True)
+    except Exception:
+        logger.exception("Docker API error while listing containers (names)")
+        return set()
+    names: set[str] = set()
+    for c in cs:
+        try:
+            if c.name:
+                names.add(str(c.name))
+        except Exception:
+            continue
+    return names
+
+
 def container_stats_summary() -> str:
     """Get container stats using docker stats CLI (much faster than API)."""
     # Use centralized docker detection and delegate to the rich formatter
@@ -533,6 +550,10 @@ def get_uptime_info() -> str:
 def get_version_info() -> str:
     """Get version and build information."""
     lines = ["<b>Version Info:</b>"]
+
+    build_version = os.environ.get("TELE_HOME_SUPERVISOR_BUILD_VERSION")
+    if build_version:
+        lines.append(f"<b>Build:</b> <code>{html.escape(build_version)}</code>")
     
     # Try to get latest git commit date (suppress stderr to avoid logs when .git missing)
     try:
@@ -560,8 +581,9 @@ def get_version_info() -> str:
     
     # Startup time
     try:
-        from . import main
-        startup = main.STARTUP_TIME.strftime("%Y-%m-%d %H:%M:%S")
+        from .runtime import STARTUP_TIME
+
+        startup = STARTUP_TIME.strftime("%Y-%m-%d %H:%M:%S")
         lines.append(f"<b>Started:</b> {startup}")
     except Exception:
         pass

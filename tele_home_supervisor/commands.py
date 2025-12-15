@@ -1,0 +1,57 @@
+"""Command registry (single source of truth for help + wiring)."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+Group = Literal["System", "Docker", "Network", "Torrents", "Info"]
+Needs = Literal["none", "container", "torrent"]
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    name: str
+    aliases: tuple[str, ...]
+    group: Group
+    usage: str
+    description: str
+    handler: str
+    needs: Needs = "none"
+
+
+COMMANDS: tuple[CommandSpec, ...] = (
+    # Info
+    CommandSpec("start", (), "Info", "/start", "show help", handler="cmd_start"),
+    CommandSpec("help", (), "Info", "/help", "this menu", handler="cmd_help"),
+    CommandSpec("whoami", (), "Info", "/whoami", "show chat and user info", handler="cmd_whoami"),
+    CommandSpec("version", (), "Info", "/version", "bot version and build info", handler="cmd_version"),
+    # System
+    CommandSpec("ip", (), "System", "/ip", "private LAN IP", handler="cmd_ip"),
+    CommandSpec("health", (), "System", "/health", "CPU/RAM/disk/load/uptime (and WAN if enabled)", handler="cmd_health"),
+    CommandSpec("uptime", (), "System", "/uptime", "system uptime", handler="cmd_uptime"),
+    CommandSpec("temp", (), "System", "/temp", "CPU temperature (reads /host_thermal/temp)", handler="cmd_temp"),
+    CommandSpec("top", (), "System", "/top", "top CPU processes", handler="cmd_top"),
+    # Docker
+    CommandSpec("docker", (), "Docker", "/docker", "list containers, status, ports", handler="cmd_docker"),
+    CommandSpec("dockerstats", (), "Docker", "/dockerstats", "CPU/MEM per running container", handler="cmd_dockerstats"),
+    CommandSpec("dstatsrich", (), "Docker", "/dstatsrich", "detailed Docker stats (net/block IO)", handler="cmd_dstats_rich"),
+    CommandSpec("dlogs", (), "Docker", "/dlogs <container> [lines]", "recent logs from container", handler="cmd_dlogs", needs="container"),
+    CommandSpec("dhealth", (), "Docker", "/dhealth <container>", "container health check", handler="cmd_dhealth", needs="container"),
+    # Network
+    CommandSpec("ping", (), "Network", "/ping <ip> [count]", "ping an IP or hostname", handler="cmd_ping"),
+    CommandSpec("ports", (), "Network", "/ports", "listening ports (inside container)", handler="cmd_ports"),
+    CommandSpec("dns", (), "Network", "/dns <name>", "DNS lookup", handler="cmd_dns"),
+    CommandSpec("traceroute", (), "Network", "/traceroute <host> [max_hops]", "trace network route", handler="cmd_traceroute"),
+    CommandSpec("speedtest", (), "Network", "/speedtest [MB]", "quick download speed test", handler="cmd_speedtest"),
+    # Torrents
+    CommandSpec("tadd", (), "Torrents", "/tadd <torrent> [save_path]", "add torrent (magnet/URL)", handler="cmd_torrent_add"),
+    CommandSpec("tstatus", (), "Torrents", "/tstatus", "show torrent status", handler="cmd_torrent_status"),
+    CommandSpec("tstop", (), "Torrents", "/tstop <torrent>", "pause torrent(s) by name", handler="cmd_torrent_stop", needs="torrent"),
+    CommandSpec("tstart", (), "Torrents", "/tstart <torrent>", "resume torrent(s) by name", handler="cmd_torrent_start", needs="torrent"),
+    CommandSpec("tdelete", (), "Torrents", "/tdelete <torrent> yes", "delete torrent(s) and files", handler="cmd_torrent_delete", needs="torrent"),
+    CommandSpec("subscribe", (), "Torrents", "/subscribe [on|off|status]", "torrent completion notifications", handler="cmd_subscribe"),
+)
+
+
+GROUP_ORDER: tuple[Group, ...] = ("System", "Docker", "Network", "Torrents", "Info")
+

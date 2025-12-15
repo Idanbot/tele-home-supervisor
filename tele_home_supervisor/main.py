@@ -5,15 +5,16 @@ This module wires up the Application, registers handlers and runs polling.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 from telegram.ext import Application, CommandHandler
 
 from .logger import setup_logging
 from . import core
-
-# Track startup time
-STARTUP_TIME = datetime.now()
+from .commands import COMMANDS
+from .handlers import dispatch
+from .state import BOT_STATE_KEY, BotState
+from .background import ensure_started
+from .runtime import STARTUP_TIME
 
 logger = logging.getLogger(__name__)
 
@@ -24,31 +25,12 @@ def build_application() -> Application:
 
     app = Application.builder().token(core.TOKEN).build()
 
-    app.add_handler(CommandHandler(["start"], core.cmd_start))
-    app.add_handler(CommandHandler(["whoami"], core.cmd_whoami))
-    app.add_handler(CommandHandler(["help"], core.cmd_help))
-    app.add_handler(CommandHandler(["ip"], core.cmd_ip))
-    app.add_handler(CommandHandler(["health"], core.cmd_health))
-    app.add_handler(CommandHandler(["docker"], core.cmd_docker))
-    app.add_handler(CommandHandler(["dockerstats"], core.cmd_dockerstats))
-    app.add_handler(CommandHandler(["dstatsrich"], core.cmd_dstats_rich))
-    app.add_handler(CommandHandler(["logs"], core.cmd_logs))
-    app.add_handler(CommandHandler(["dhealth"], core.cmd_dhealth))
-    app.add_handler(CommandHandler(["ping"], core.cmd_ping))
-    app.add_handler(CommandHandler(["temp"], core.cmd_temp))
-    app.add_handler(CommandHandler(["top"], core.cmd_top))
-    app.add_handler(CommandHandler(["ports"], core.cmd_ports))
-    app.add_handler(CommandHandler(["dns"], core.cmd_dns))
-    app.add_handler(CommandHandler(["traceroute"], core.cmd_traceroute))
-    app.add_handler(CommandHandler(["speedtest"], core.cmd_speedtest))
-    app.add_handler(CommandHandler(["subscribe"], core.cmd_subscribe))
-    app.add_handler(CommandHandler(["tadd"], core.cmd_torrent_add))
-    app.add_handler(CommandHandler(["tstatus"], core.cmd_torrent_status))
-    app.add_handler(CommandHandler(["tstop"], core.cmd_torrent_stop))
-    app.add_handler(CommandHandler(["tstart"], core.cmd_torrent_start))
-    app.add_handler(CommandHandler(["tdelete"], core.cmd_torrent_delete))
-    app.add_handler(CommandHandler(["uptime"], core.cmd_uptime))
-    app.add_handler(CommandHandler(["version"], core.cmd_version))
+    app.bot_data.setdefault(BOT_STATE_KEY, BotState())
+
+    for spec in COMMANDS:
+        fn = getattr(dispatch, spec.handler)
+        triggers = [spec.name, *spec.aliases]
+        app.add_handler(CommandHandler(triggers, fn))
 
     return app
 
@@ -56,9 +38,7 @@ def build_application() -> Application:
 async def send_startup_notification(app: Application) -> None:
     """Send startup notification to all allowed chat IDs."""
     try:
-        from . import notifications
-
-        notifications.ensure_started(app)
+        ensure_started(app)
     except Exception as e:
         logger.warning("Failed to start background tasks: %s", e)
 

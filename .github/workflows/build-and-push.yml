@@ -80,6 +80,12 @@ jobs:
             type=sha,prefix={{branch}}-
             type=ref,event=tag
 
+      - name: Compute Build Version
+        id: buildver
+        run: |
+          TS="$(date -u +'%Y%m%d-%H%M%S')"
+          echo "version=${TS}-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
       # --- Step 1: Build for Scan (AMD64 only, Load to Docker) ---
       - name: Build for Scan
         uses: docker/build-push-action@v5
@@ -89,6 +95,8 @@ jobs:
           load: true # Loads image into docker daemon for scanning
           platforms: linux/amd64
           tags: ${{ env.IMAGE_NAME }}:test
+          build-args: |
+            BUILD_VERSION=${{ steps.buildver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -113,6 +121,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_VERSION=${{ steps.buildver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

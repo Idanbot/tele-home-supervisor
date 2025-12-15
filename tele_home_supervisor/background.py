@@ -1,4 +1,4 @@
-"""Background notifications (subscriptions) for the Telegram bot."""
+"""Background jobs (started once per Application)."""
 from __future__ import annotations
 
 import asyncio
@@ -10,14 +10,13 @@ from dataclasses import dataclass
 from telegram.constants import ParseMode
 from telegram.ext import Application
 
+from .state import BOT_STATE_KEY, BotState
 from .torrent import TorrentManager, fmt_bytes_compact_decimal
 
 logger = logging.getLogger(__name__)
 
-_TASK_KEY = "torrent_completion_task"
-_POLL_INTERVAL_S = 30
-
-_torrent_download_subscribers: set[int] = set()
+_TASK_TORRENT_COMPLETION = "torrent_completion"
+_POLL_INTERVAL_S = 30.0
 
 
 @dataclass(frozen=True)
@@ -29,30 +28,16 @@ class TorrentSnapshot:
     downloaded: int
 
 
-def is_torrent_download_subscribed(chat_id: int) -> bool:
-    return chat_id in _torrent_download_subscribers
-
-
-def set_torrent_download_subscription(chat_id: int, enable: bool | None) -> bool:
-    """Enable/disable (or toggle) torrent completion notifications for chat_id.
-
-    Returns the new enabled state.
-    """
-    if enable is None:
-        enable = chat_id not in _torrent_download_subscribers
-    if enable:
-        _torrent_download_subscribers.add(chat_id)
-        return True
-    _torrent_download_subscribers.discard(chat_id)
-    return False
-
-
 def ensure_started(app: Application) -> None:
-    """Start background tasks (idempotent)."""
-    task = app.bot_data.get(_TASK_KEY)
+    state: BotState = app.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    task = state.tasks.get(_TASK_TORRENT_COMPLETION)
     if isinstance(task, asyncio.Task) and not task.done():
         return
-    app.bot_data[_TASK_KEY] = asyncio.create_task(_torrent_completion_loop(app))
+    state.tasks[_TASK_TORRENT_COMPLETION] = asyncio.create_task(_torrent_completion_loop(app))
+
+
+def _get_state(app: Application) -> BotState:
+    return app.bot_data.setdefault(BOT_STATE_KEY, BotState())
 
 
 def _get_torrent_hash(torrent_obj: object) -> str | None:
@@ -65,9 +50,7 @@ def _get_torrent_hash(torrent_obj: object) -> str | None:
 
 def _snapshot_torrents() -> dict[str, TorrentSnapshot] | None:
     mgr = TorrentManager()
-    if not mgr.connect():
-        return None
-    if mgr.qbt_client is None:
+    if not mgr.connect() or mgr.qbt_client is None:
         return None
     try:
         torrents = mgr.qbt_client.torrents_info() or []
@@ -82,7 +65,6 @@ def _snapshot_torrents() -> dict[str, TorrentSnapshot] | None:
             continue
 
         name = str(getattr(t, "name", "") or "")
-
         progress_frac = getattr(t, "progress", 0.0) or 0.0
         try:
             progress_frac = float(progress_frac)
@@ -95,11 +77,7 @@ def _snapshot_torrents() -> dict[str, TorrentSnapshot] | None:
         except Exception:
             amount_left = None
 
-        is_complete = False
-        if amount_left == 0:
-            is_complete = True
-        elif progress_frac >= 0.9999:
-            is_complete = True
+        is_complete = bool(amount_left == 0 or progress_frac >= 0.9999)
 
         total_size_raw = getattr(t, "total_size", None)
         if total_size_raw is None:
@@ -170,8 +148,9 @@ async def _torrent_completion_loop(app: Application) -> None:
 
             seen_complete = current_complete
 
-            if new_completions and _torrent_download_subscribers:
-                subs = list(_torrent_download_subscribers)
+            state = _get_state(app)
+            if new_completions and state.torrent_completion_subscribers:
+                subs = list(state.torrent_completion_subscribers)
                 for t in new_completions:
                     msg = _format_completion_message(t)
                     for chat_id in subs:
@@ -181,10 +160,10 @@ async def _torrent_completion_loop(app: Application) -> None:
                             logger.exception("Failed sending torrent completion to chat_id=%s", chat_id)
 
             elapsed = time.monotonic() - start
-            sleep_for = max(0.0, _POLL_INTERVAL_S - elapsed)
-            await asyncio.sleep(sleep_for)
+            await asyncio.sleep(max(0.0, _POLL_INTERVAL_S - elapsed))
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Torrent completion loop error")
             await asyncio.sleep(_POLL_INTERVAL_S)
+

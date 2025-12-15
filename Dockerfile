@@ -24,6 +24,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TZ=Asia/Jerusalem
 
+ARG BUILD_VERSION=dev
+ENV TELE_HOME_SUPERVISOR_BUILD_VERSION=$BUILD_VERSION
+
 # Runtime deps (keep minimal). We still install curl and iproute2 so
 # runtime checks (ip, curl) work inside the container.
 # Also install git (for version info) and download docker CLI binary directly
