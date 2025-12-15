@@ -366,6 +366,150 @@ def ping_host(host: str, count: int = 3) -> str:
         return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
 
 
+def get_listening_ports() -> str:
+    """List listening TCP/UDP ports (inside the container)."""
+    ss_bin = shutil.which("ss")
+    if not ss_bin:
+        return "<i>ss command not available in container</i>"
+    try:
+        rc, out, err = run_cmd([ss_bin, "-tulpn"], timeout=6)
+        out = out.strip()
+        if rc != 0:
+            err_text = (err or out).strip() or "unknown error"
+            return f"<i>Failed to list ports:</i> <code>{html.escape(err_text)}</code>"
+        if not out:
+            return "<i>No output from ss</i>"
+        lines = out.splitlines()
+        sample = "\n".join(lines[:60])
+        return f"<b>Listening Ports:</b>\n<pre>{html.escape(sample)}</pre>"
+    except Exception as e:
+        logger.exception("Error listing ports")
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
+
+
+def dns_lookup(name: str) -> str:
+    """Resolve a hostname using the container's resolver."""
+    start = time.monotonic()
+    try:
+        infos = socket.getaddrinfo(name, None)
+    except socket.gaierror as e:
+        return f"<b>DNS {html.escape(name)}:</b> <i>{html.escape(str(e))}</i>"
+    except Exception as e:
+        logger.exception("DNS lookup error for %s", name)
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
+    elapsed_ms = (time.monotonic() - start) * 1000.0
+
+    ipv4: set[str] = set()
+    ipv6: set[str] = set()
+    for family, _socktype, _proto, _canonname, sockaddr in infos:
+        ip = sockaddr[0] if sockaddr else None
+        if not ip:
+            continue
+        if family == socket.AF_INET:
+            ipv4.add(ip)
+        elif family == socket.AF_INET6:
+            ipv6.add(ip)
+
+    lines: list[str] = [f"Lookup time: {elapsed_ms:.0f}ms"]
+    if ipv4:
+        lines.append("A:")
+        lines.extend(f"  {ip}" for ip in sorted(ipv4))
+    if ipv6:
+        lines.append("AAAA:")
+        lines.extend(f"  {ip}" for ip in sorted(ipv6))
+    if not ipv4 and not ipv6:
+        lines.append("(no addresses returned)")
+
+    return f"<b>DNS {html.escape(name)}:</b>\n<pre>{html.escape(chr(10).join(lines))}</pre>"
+
+
+def traceroute_host(host: str, max_hops: int = 20) -> str:
+    """Trace route to a host (prefers tracepath; falls back to traceroute)."""
+    tracepath_bin = shutil.which("tracepath")
+    traceroute_bin = shutil.which("traceroute")
+    cmd: list[str] | None = None
+    if tracepath_bin:
+        cmd = [tracepath_bin, "-n", "-m", str(max_hops), host]
+    elif traceroute_bin:
+        cmd = [traceroute_bin, "-n", "-m", str(max_hops), "-q", "1", "-w", "2", host]
+    if cmd is None:
+        return "<i>tracepath/traceroute not available in container</i>"
+
+    try:
+        rc, out, err = run_cmd(cmd, timeout=25)
+        out = (out or err or "").strip()
+        if not out:
+            return "<i>No output from traceroute</i>"
+        lines = out.splitlines()[:80]
+        sample = "\n".join(lines)
+        title = html.escape(host)
+        if rc != 0:
+            title = f"{title} (exit {rc})"
+        return f"<b>Traceroute {title}:</b>\n<pre>{html.escape(sample)}</pre>"
+    except Exception as e:
+        logger.exception("Error running traceroute for %s", host)
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
+
+
+def _fmt_rate_bps(bytes_per_s: float) -> str:
+    units = ["B/s", "KB/s", "MB/s", "GB/s"]
+    value = float(max(0.0, bytes_per_s))
+    unit_idx = 0
+    while value >= 1000.0 and unit_idx < len(units) - 1:
+        value /= 1000.0
+        unit_idx += 1
+    if unit_idx == 0:
+        return f"{value:.0f} {units[unit_idx]}"
+    return f"{value:.2f} {units[unit_idx]}"
+
+
+def speedtest_download(mb: int = 10) -> str:
+    """Rough download speed test using curl against Cloudflare."""
+    curl_bin = shutil.which("curl")
+    if not curl_bin:
+        return "<i>curl command not available in container</i>"
+    bytes_to_download = max(1, int(mb)) * 1_000_000
+    url = f"https://speed.cloudflare.com/__down?bytes={bytes_to_download}"
+    try:
+        rc, out, err = run_cmd(
+            [
+                curl_bin,
+                "-fsSL",
+                "--max-time",
+                "25",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{time_total} %{size_download}\n",
+                url,
+            ],
+            timeout=30,
+        )
+        out = (out or "").strip()
+        if rc != 0 or not out:
+            err_text = (err or out).strip() or f"exit {rc}"
+            return f"<i>Speedtest failed:</i> <code>{html.escape(err_text)}</code>"
+        parts = out.split()
+        if len(parts) < 2:
+            return f"<i>Speedtest parse error:</i> <code>{html.escape(out)}</code>"
+        seconds = float(parts[0])
+        downloaded_bytes = float(parts[1])
+        if seconds <= 0:
+            return "<i>Speedtest failed: invalid duration</i>"
+        bps = downloaded_bytes / seconds
+        mbps = (downloaded_bytes * 8.0) / seconds / 1_000_000.0
+        msg = (
+            "<b>Speedtest (download):</b>\n"
+            f"Size: <code>{downloaded_bytes/1_000_000.0:.1f}MB</code>\n"
+            f"Time: <code>{seconds:.2f}s</code>\n"
+            f"Rate: <code>{_fmt_rate_bps(bps)}</code> (<code>{mbps:.1f} Mbps</code>)"
+        )
+        return msg
+    except Exception as e:
+        logger.exception("Speedtest error")
+        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
+
+
 def get_top_processes() -> str:
     """Get top processes using ps command."""
     try:

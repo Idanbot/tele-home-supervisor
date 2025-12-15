@@ -59,6 +59,14 @@ def torrent_start(name_substr: str) -> str:
     return _call_with_mgr("start_by_name", name_substr)
 
 
+def torrent_preview(name_substr: str) -> str:
+    return _call_with_mgr("preview_by_name", name_substr)
+
+
+def torrent_delete(name_substr: str, delete_files: bool = True) -> str:
+    return _call_with_mgr("delete_by_name", name_substr, delete_files=delete_files)
+
+
 def _call_with_mgr(method_name: str, *args, **kwargs) -> str:
     """Create a TorrentManager, connect, and call a method on it.
 

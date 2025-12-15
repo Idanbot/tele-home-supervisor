@@ -102,10 +102,17 @@ cmd_dstats_rich = _delegate("cmd_dstats_rich")
 cmd_dhealth = _delegate("cmd_dhealth")
 cmd_ping = _delegate("cmd_ping")
 cmd_temp = _delegate("cmd_temp")
+cmd_top = _delegate("cmd_top")
+cmd_ports = _delegate("cmd_ports")
+cmd_dns = _delegate("cmd_dns")
+cmd_traceroute = _delegate("cmd_traceroute")
+cmd_speedtest = _delegate("cmd_speedtest")
+cmd_subscribe = _delegate("cmd_subscribe")
 cmd_torrent_add = _delegate("cmd_torrent_add")
 cmd_torrent_status = _delegate("cmd_torrent_status")
 cmd_torrent_stop = _delegate("cmd_torrent_stop")
 cmd_torrent_start = _delegate("cmd_torrent_start")
+cmd_torrent_delete = _delegate("cmd_torrent_delete")
 
 __all__ = [
     "TOKEN",
@@ -125,6 +132,13 @@ __all__ = [
     "cmd_torrent_status",
     "cmd_torrent_stop",
     "cmd_torrent_start",
+    "cmd_torrent_delete",
+    "cmd_top",
+    "cmd_ports",
+    "cmd_dns",
+    "cmd_traceroute",
+    "cmd_speedtest",
+    "cmd_subscribe",
     "cmd_temp",
     "cmd_whoami",
     "cmd_logs",

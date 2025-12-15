@@ -30,6 +30,19 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 
+def fmt_bytes_compact_decimal(num_bytes: int) -> str:
+    """Format bytes as a compact decimal string (e.g. 244.4MB)."""
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    value = float(max(0, num_bytes))
+    unit_idx = 0
+    while value >= 1000.0 and unit_idx < len(units) - 1:
+        value /= 1000.0
+        unit_idx += 1
+    if unit_idx == 0:
+        return f"{int(value)}{units[unit_idx]}"
+    return f"{value:.1f}{units[unit_idx]}"
+
+
 class TorrentManager:
     """Minimal wrapper around `qbittorrentapi.Client`.
 
@@ -155,6 +168,30 @@ class TorrentManager:
             logger.exception("Error calling pause/resume on torrents")
             return False
 
+    def _call_delete(self, hashes: list[str], delete_files: bool) -> bool:
+        """Attempt to delete torrents given their hashes."""
+        if not hashes:
+            return False
+        if self.qbt_client is None:
+            if not self.connect():
+                return False
+        hashes_csv = ",".join(hashes)
+        try:
+            try:
+                self.qbt_client.torrents_delete(torrent_hashes=hashes_csv, delete_files=delete_files)  # type: ignore
+            except Exception:
+                try:
+                    self.qbt_client.torrents_delete(hashes=hashes_csv, delete_files=delete_files)  # type: ignore
+                except Exception:
+                    try:
+                        self.qbt_client.torrents_delete(hashes=hashes_csv, deleteFiles=delete_files)  # type: ignore
+                    except Exception:
+                        self.qbt_client.torrents_delete(hashes, delete_files=delete_files)  # type: ignore
+            return True
+        except Exception:
+            logger.exception("Error deleting torrents")
+            return False
+
     def stop_by_name(self, name_substr: str) -> str:
         """Stop (pause) torrents whose name includes `name_substr`.
 
@@ -189,6 +226,38 @@ class TorrentManager:
             return f"Resumed: {html.escape(names)}"
         return "Failed to resume torrents."
 
+    def preview_by_name(self, name_substr: str) -> str:
+        """Preview torrents matching `name_substr`."""
+        matches = self._find_torrents(name_substr)
+        if not matches:
+            return "No matching torrents found."
+        lines = ["<b>Matching torrents:</b>"]
+        for m in matches[:25]:
+            name = html.escape(m.get("name", "unknown"))
+            state = html.escape(m.get("state", "unknown"))
+            lines.append(f"<code>{name}</code> • {state}")
+        if len(matches) > 25:
+            lines.append(f"<i>...and {len(matches) - 25} more</i>")
+        return "\n".join(lines)
+
+    def delete_by_name(self, name_substr: str, delete_files: bool = True) -> str:
+        """Delete torrents whose name includes `name_substr`.
+
+        If `delete_files` is True, also delete the content files.
+        """
+        matches = self._find_torrents(name_substr)
+        if not matches:
+            return "No matching torrents found."
+        hashes = [m["hash"] for m in matches if m.get("hash")]
+        if not hashes:
+            return "Found matching torrents but could not determine their hashes."
+        ok = self._call_delete(hashes, delete_files=delete_files)
+        if ok:
+            names = ", ".join(m["name"] for m in matches)
+            action = "Deleted (files removed)" if delete_files else "Deleted (kept files)"
+            return f"{action}: {html.escape(names)}"
+        return "Failed to delete torrents."
+
     def get_status(self) -> str:
         """Return a formatted HTML-safe status of torrents.
 
@@ -208,12 +277,43 @@ class TorrentManager:
             for t in torrents:
                 name = html.escape(getattr(t, "name", "<unknown>"))
                 state = html.escape(str(getattr(t, "state", "unknown")))
-                progress = (getattr(t, "progress", 0.0) or 0.0) * 100.0
+                progress_frac = getattr(t, "progress", 0.0) or 0.0
+                progress = progress_frac * 100.0
                 dlspeed = (getattr(t, "dlspeed", 0) or 0) / 1024.0
+
+                total_size_raw = getattr(t, "total_size", None)
+                if total_size_raw is None:
+                    total_size_raw = getattr(t, "size", None)
+                try:
+                    total_size = int(total_size_raw or 0)
+                except Exception:
+                    total_size = 0
+
+                downloaded: int | None = None
+                for attr in ("completed", "downloaded", "downloaded_session"):
+                    raw = getattr(t, attr, None)
+                    if raw is None:
+                        continue
+                    try:
+                        downloaded = int(raw)
+                        break
+                    except Exception:
+                        continue
+                if downloaded is None and total_size > 0:
+                    downloaded = int(progress_frac * total_size)
+                if downloaded is None:
+                    downloaded = 0
+                if total_size > 0:
+                    downloaded = max(0, min(downloaded, total_size))
+                    size_summary = f"{fmt_bytes_compact_decimal(downloaded)}/{fmt_bytes_compact_decimal(total_size)}"
+                    progress_line = f"  Progress: {progress:.1f}% ({size_summary})\n"
+                else:
+                    progress_line = f"  Progress: {progress:.1f}%\n"
+
                 parts.append(
                     f"<b>{name}</b>\n"
                     f"  Status: {state}\n"
-                    f"  Progress: {progress:.1f}%\n"
+                    f"{progress_line}"
                     f"  Speed: {dlspeed:.1f} KiB/s"
                 )
             return "\n\n".join(parts)

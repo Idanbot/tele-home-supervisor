@@ -36,10 +36,17 @@ def build_application() -> Application:
     app.add_handler(CommandHandler(["dhealth"], core.cmd_dhealth))
     app.add_handler(CommandHandler(["ping"], core.cmd_ping))
     app.add_handler(CommandHandler(["temp"], core.cmd_temp))
+    app.add_handler(CommandHandler(["top"], core.cmd_top))
+    app.add_handler(CommandHandler(["ports"], core.cmd_ports))
+    app.add_handler(CommandHandler(["dns"], core.cmd_dns))
+    app.add_handler(CommandHandler(["traceroute"], core.cmd_traceroute))
+    app.add_handler(CommandHandler(["speedtest"], core.cmd_speedtest))
+    app.add_handler(CommandHandler(["subscribe"], core.cmd_subscribe))
     app.add_handler(CommandHandler(["tadd"], core.cmd_torrent_add))
     app.add_handler(CommandHandler(["tstatus"], core.cmd_torrent_status))
     app.add_handler(CommandHandler(["tstop"], core.cmd_torrent_stop))
     app.add_handler(CommandHandler(["tstart"], core.cmd_torrent_start))
+    app.add_handler(CommandHandler(["tdelete"], core.cmd_torrent_delete))
     app.add_handler(CommandHandler(["uptime"], core.cmd_uptime))
     app.add_handler(CommandHandler(["version"], core.cmd_version))
 
@@ -48,6 +55,13 @@ def build_application() -> Application:
 
 async def send_startup_notification(app: Application) -> None:
     """Send startup notification to all allowed chat IDs."""
+    try:
+        from . import notifications
+
+        notifications.ensure_started(app)
+    except Exception as e:
+        logger.warning("Failed to start background tasks: %s", e)
+
     logger.info(f"Sending startup notification to {len(core.ALLOWED)} chat(s)")
     if not core.ALLOWED:
         logger.warning("No ALLOWED_CHAT_IDS configured, skipping startup notification")
