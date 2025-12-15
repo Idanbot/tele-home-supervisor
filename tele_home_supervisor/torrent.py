@@ -186,7 +186,7 @@ class TorrentManager:
                     try:
                         self.qbt_client.torrents_delete(hashes=hashes_csv, deleteFiles=delete_files)  # type: ignore
                     except Exception:
-                        self.qbt_client.torrents_delete(hashes, delete_files=delete_files)  # type: ignore
+                        self.qbt_client.torrents_delete(hashes=hashes, delete_files=delete_files)  # type: ignore
             return True
         except Exception:
             logger.exception("Error deleting torrents")
