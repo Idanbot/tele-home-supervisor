@@ -5,7 +5,7 @@ import asyncio
 from telegram.constants import ParseMode
 
 from .. import utils
-from ..state import BOT_STATE_KEY, BotState
+from ..state import BotState
 from .common import guard, get_state, reply_usage_with_suggestions
 
 
@@ -38,18 +38,45 @@ async def cmd_dstats_rich(update, context) -> None:
 
 
 async def cmd_dlogs(update, context) -> None:
+    """Fetch container logs. Supports positive (tail) and negative (head) line counts.
+    
+    Examples:
+        /dlogs mycontainer        - Last 50 lines (default)
+        /dlogs mycontainer 100    - Last 100 lines
+        /dlogs mycontainer -50    - First 50 lines
+    """
     if not await guard(update, context):
         return
+    
     state: BotState = get_state(context.application)
     state.maybe_refresh("containers")
+    
     if not context.args:
-        await reply_usage_with_suggestions(update, "/dlogs &lt;container&gt; [lines]", state.suggest("containers", limit=5))
+        await reply_usage_with_suggestions(
+            update,
+            "/dlogs &lt;container&gt; [lines]",
+            state.suggest("containers", limit=5)
+        )
         return
 
     container_name = context.args[0]
-    lines = 50
-    if len(context.args) > 1 and context.args[1].isdigit():
-        lines = min(int(context.args[1]), 200)
+    lines = 50  # Default: last 50 lines
+    
+    if len(context.args) > 1:
+        try:
+            # Parse line count (supports negative numbers for head)
+            lines = int(context.args[1])
+            # Clamp to reasonable bounds
+            if lines > 0:
+                lines = min(lines, 500)  # Max 500 lines from tail
+            else:
+                lines = max(lines, -500)  # Max 500 lines from head
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Invalid line count. Use a positive number (tail) or negative (head).\n"
+                "Example: /dlogs mycontainer -100"
+            )
+            return
 
     msg = await asyncio.to_thread(utils.get_container_logs, container_name, lines)
     for part in utils.chunk(msg, size=4000):

@@ -35,7 +35,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("docker", (), "Docker", "/docker", "list containers, status, ports", handler="cmd_docker"),
     CommandSpec("dockerstats", (), "Docker", "/dockerstats", "CPU/MEM per running container", handler="cmd_dockerstats"),
     CommandSpec("dstatsrich", (), "Docker", "/dstatsrich", "detailed Docker stats (net/block IO)", handler="cmd_dstats_rich"),
-    CommandSpec("dlogs", (), "Docker", "/dlogs <container> [lines]", "recent logs from container", handler="cmd_dlogs", needs="container"),
+    CommandSpec("dlogs", (), "Docker", "/dlogs <container> [±lines]", "container logs (+ for tail, - for head)", handler="cmd_dlogs", needs="container"),
     CommandSpec("dhealth", (), "Docker", "/dhealth <container>", "container health check", handler="cmd_dhealth", needs="container"),
     # Network
     CommandSpec("ping", (), "Network", "/ping <ip> [count]", "ping an IP or hostname", handler="cmd_ping"),

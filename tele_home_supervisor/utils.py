@@ -298,35 +298,82 @@ def container_stats_rich() -> str:
     return "\n\n".join(lines)
 
 def get_container_logs(container_name: str, lines: int = 50) -> str:
-    """Get recent logs from a container."""
+    """Get logs from a container.
+    
+    Args:
+        container_name: Name or ID of the container
+        lines: Number of lines to fetch. Positive = tail (last N lines),
+               Negative = head (first N lines). Default: 50 (last 50 lines)
+    
+    Returns:
+        Formatted HTML string with logs or error message
+    """
+    docker_cmd = get_docker_cmd()
+    if not docker_cmd:
+        return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
+    
     try:
-        docker_cmd = get_docker_cmd()
-        if not docker_cmd:
-            return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
         if lines < 0:
-            rc, out, err = run_cmd([docker_cmd, "logs", container_name, "2>&1 | head -n", str(-lines)], timeout=10)
+            # Get first N lines: fetch all logs and pipe to head
+            # Docker doesn't have a --head flag, so we fetch all and process
+            rc, out, err = run_cmd(
+                [docker_cmd, "logs", container_name],
+                timeout=15
+            )
+            if rc != 0:
+                raise subprocess.CalledProcessError(rc, "docker logs", output=err)
+            
+            # Take first N lines
+            log_lines = out.splitlines()
+            requested_lines = abs(lines)
+            out = "\n".join(log_lines[:requested_lines])
+            
+            if len(log_lines) > requested_lines:
+                out = out + f"\n...\n<i>(showing first {requested_lines} of {len(log_lines)} lines)</i>"
         else:
-            rc, out, err = run_cmd([docker_cmd, "logs", "--tail", str(lines), container_name], timeout=10)
+            # Get last N lines using --tail
+            rc, out, err = run_cmd(
+                [docker_cmd, "logs", "--tail", str(lines), container_name],
+                timeout=15
+            )
+            if rc != 0:
+                raise subprocess.CalledProcessError(rc, "docker logs", output=err)
+        
         out = out.strip()
         if not out:
             return f"<i>Container {html.escape(container_name)} has no logs</i>"
-        # Limit output to avoid message size issues
-        if len(out) > 3500:
-            out = out[-3500:]
-            out = "...\n" + out
-        return f"<b>Logs for {html.escape(container_name)}:</b>\n<pre>{html.escape(out)}</pre>"
+        
+        # Limit output to avoid Telegram message size issues
+        max_chars = 3500
+        if len(out) > max_chars:
+            if lines < 0:
+                # For head, truncate from end
+                out = out[:max_chars] + "\n...\n<i>(truncated)</i>"
+            else:
+                # For tail, truncate from beginning
+                out = "...\n" + out[-max_chars:]
+        
+        safe_name = html.escape(container_name)
+        direction = "first" if lines < 0 else "last"
+        count = abs(lines)
+        
+        return (
+            f"<b>Logs for {safe_name}</b> <i>({direction} {count} lines)</i>\n"
+            f"<pre>{html.escape(out)}</pre>"
+        )
+    
     except subprocess.TimeoutExpired:
         return f"<i>Timeout getting logs for {html.escape(container_name)}</i>"
     except subprocess.CalledProcessError as e:
-        error_msg = str(e.output) if e.output else str(e)
-        if "No such container" in error_msg:
+        error_msg = (err or str(e.output) or str(e)).strip()
+        if "No such container" in error_msg or "not found" in error_msg.lower():
             return f"<i>Container {html.escape(container_name)} not found</i>"
-        return f"<i>Error getting logs:</i> <code>{html.escape(error_msg)}</code>"
+        return f"<i>Error getting logs for {html.escape(container_name)}:</i>\n<code>{html.escape(error_msg)}</code>"
     except FileNotFoundError:
         return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
     except Exception as e:
-        logger.exception("Error getting container logs")
-        return f"<i>Error:</i> <code>{html.escape(str(e))}</code>"
+        logger.exception("Error getting container logs for %s", container_name)
+        return f"<i>Unexpected error:</i> <code>{html.escape(str(e))}</code>"
 
 
 def healthcheck_container(container_name: str) -> str:
