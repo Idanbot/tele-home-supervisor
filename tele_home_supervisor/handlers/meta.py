@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 
 from telegram.constants import ParseMode
+import logging
 
 from .. import utils
 from ..commands import COMMANDS, GROUP_ORDER
 from ..background import ensure_started
 from .common import guard
+
+logger = logging.getLogger(__name__)
 
 
 def _render_help() -> str:
@@ -31,8 +34,8 @@ async def cmd_start(update, context) -> None:
         return
     try:
         ensure_started(context.application)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("ensure_started failed: %s", e)
     await update.message.reply_text(_render_help())
 
 

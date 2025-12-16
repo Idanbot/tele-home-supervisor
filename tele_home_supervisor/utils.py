@@ -107,8 +107,8 @@ def get_temp() -> str:
                 t = f.read().strip()
             if t and t.isdigit():
                 return f"{int(t) / 1000:.1f}°C"
-        except Exception:
-            pass
+        except (OSError, ValueError) as e:
+            logger.debug("Error reading temp from %s: %s", path, e)
     try:
         out = subprocess.check_output(
             ["bash", "-lc", "vcgencmd measure_temp 2>/dev/null | cut -d= -f2"],
@@ -117,8 +117,8 @@ def get_temp() -> str:
         ).strip()
         if out:
             return out
-    except Exception:
-        pass
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.debug("vcgencmd temp read failed: %s", e)
     return "n/a"
 
 
@@ -667,25 +667,19 @@ def get_version_info() -> str:
     if build_version:
         lines.append(f"<b>Build:</b> <code>{html.escape(build_version)}</code>")
 
-    # Try to get latest git commit date (suppress stderr to avoid logs when .git missing)
-    try:
-        rc, out, err = run_cmd(
-            ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"],
-            timeout=3,
-        )
-        out = out.strip()
-        if rc == 0 and out:
-            lines.append(f"<b>Last Commit:</b> {html.escape(out)}")
-    except Exception:
-        pass
+    # Try to get latest git commit date (safely handled by run_cmd return code)
+    rc, out, err = run_cmd(
+        ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"],
+        timeout=3,
+    )
+    out = out.strip()
+    if rc == 0 and out:
+        lines.append(f"<b>Last Commit:</b> {html.escape(out)}")
     # Try to get git commit hash (suppress stderr)
-    try:
-        rc, out, err = run_cmd(["git", "rev-parse", "--short", "HEAD"], timeout=3)
-        out = out.strip()
-        if rc == 0 and out:
-            lines.append(f"<b>Commit:</b> <code>{html.escape(out)}</code>")
-    except Exception:
-        pass
+    rc, out, err = run_cmd(["git", "rev-parse", "--short", "HEAD"], timeout=3)
+    out = out.strip()
+    if rc == 0 and out:
+        lines.append(f"<b>Commit:</b> <code>{html.escape(out)}</code>")
 
     # Python version
     import sys
@@ -701,8 +695,8 @@ def get_version_info() -> str:
 
         startup = STARTUP_TIME.strftime("%Y-%m-%d %H:%M:%S")
         lines.append(f"<b>Started:</b> {startup}")
-    except Exception:
-        pass
+    except ImportError as e:
+        logger.debug("Startup time not available (runtime import failed): %s", e)
 
     if len(lines) == 1:
         return "<i>Version information not available</i>"

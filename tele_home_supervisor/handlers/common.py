@@ -7,11 +7,13 @@ import html
 import threading
 import time
 from typing import TYPE_CHECKING, Awaitable, Callable
+import logging
 
 from telegram.constants import ParseMode
 
 from .. import core
 from ..state import BOT_STATE_KEY, BotState
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from telegram import Update
@@ -58,12 +60,12 @@ async def run_rate_limited(
                         await update.effective_message.reply_text(
                             f"⏱ Rate limit: please wait {core.RATE_LIMIT_S - elapsed:.1f}s",
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("rate-limit notice failed to send: %s", e)
                 return
             _last_command_ts = now
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("rate limiter error: %s", e)
     await func(update, context)
 
 

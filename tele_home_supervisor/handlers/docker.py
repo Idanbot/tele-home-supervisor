@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 
 from telegram.constants import ParseMode
+import logging
 
 from .. import utils
 from ..state import BotState
 from .common import guard, get_state, reply_usage_with_suggestions
+
+logger = logging.getLogger(__name__)
 
 
 async def cmd_docker(update, context) -> None:
@@ -14,8 +17,8 @@ async def cmd_docker(update, context) -> None:
         return
     try:
         get_state(context.application).refresh_containers()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("refresh_containers failed: %s", e)
     msg = await asyncio.to_thread(utils.list_containers_basic)
     for part in utils.chunk(msg):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)

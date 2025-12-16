@@ -4,11 +4,14 @@ import asyncio
 import html
 
 from telegram.constants import ParseMode
+import logging
 
 from .. import services, utils
 from ..background import ensure_started
 from ..state import BotState
 from .common import guard, get_state, reply_usage_with_suggestions
+
+logger = logging.getLogger(__name__)
 
 
 async def cmd_torrent_add(update, context) -> None:
@@ -34,8 +37,8 @@ async def cmd_torrent_status(update, context) -> None:
         return
     try:
         get_state(context.application).refresh_torrents()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("refresh_torrents failed: %s", e)
     msg = await asyncio.to_thread(services.torrent_status)
     for part in utils.chunk(msg, size=4000):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
@@ -121,8 +124,8 @@ async def cmd_subscribe(update, context) -> None:
 
     try:
         ensure_started(context.application)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("ensure_started failed: %s", e)
 
     args = [a.strip().lower() for a in (context.args or []) if a.strip()]
     if args and args[0] in {"torrent", "torrents", "t"}:

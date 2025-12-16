@@ -86,14 +86,14 @@ jobs:
           fi > lint_snippet.html
           if [ -f pylint.log ]; then
             {
-              echo "\n<b>Pylint</b> (tail):\n<pre>" ;
+              echo "<b>Pylint</b> (tail):<pre>" ;
               tail -n 40 pylint.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' ;
               echo "</pre>" ;
             } >> lint_snippet.html
           fi
           if [ -f pip-audit.log ]; then
             {
-              echo "\n<b>pip-audit</b> (tail):\n<pre>" ;
+              echo "<b>pip-audit</b> (tail):<pre>" ;
               tail -n 40 pip-audit.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' ;
               echo "</pre>" ;
             } >> lint_snippet.html
@@ -101,7 +101,7 @@ jobs:
 
           if [ -f bandit.log ]; then
             {
-              echo "\n<b>Bandit</b> (tail):\n<pre>" ;
+              echo "<b>Bandit</b> (tail):<pre>" ;
               tail -n 40 bandit.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' ;
               echo "</pre>" ;
             } >> lint_snippet.html
