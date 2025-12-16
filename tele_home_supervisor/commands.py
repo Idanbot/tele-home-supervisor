@@ -219,6 +219,14 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "show top N Hacker News stories (default: 5)",
         handler="cmd_hackernews_now",
     ),
+    CommandSpec(
+        "steamfree",
+        (),
+        "Notifications",
+        "/steamfree [n]",
+        "show current Steam free-to-keep games",
+        handler="cmd_steamfree_now",
+    ),
 )
 
 

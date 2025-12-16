@@ -265,3 +265,59 @@ def fetch_hackernews_top(limit: int = 3) -> str:
     except Exception as e:
         logger.exception("Error processing Hacker News data")
         return f"❌ Error processing Hacker News data: {html.escape(str(e))}"
+
+
+def fetch_steam_free_games(limit: int = 5) -> str:
+    """Fetch currently free-to-keep Steam games (filtering for 100% discount)."""
+
+    try:
+        url = "https://store.steampowered.com/api/featuredcategories"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        specials = (data.get("specials") or {}).get("items") or []
+        freebies: list[dict[str, Any]] = []
+
+        for item in specials:
+            price = item.get("price") or {}
+            initial = price.get("initial", price.get("original_price", 0)) or 0
+            final = price.get("final", price.get("final_price", 0)) or 0
+            discount = price.get("discount_percent") or item.get("discount_percent")
+
+            # Free-to-keep if price drops to zero from a positive initial price
+            if initial > 0 and final == 0 and (discount is None or discount >= 100):
+                freebies.append(
+                    {
+                        "name": item.get("name", "Unknown"),
+                        "id": item.get("id") or item.get("appid"),
+                        "discount": discount,
+                    }
+                )
+
+        if not freebies:
+            return "🎮 <b>Steam</b>\n\nNo limited-time free-to-keep games right now."
+
+        freebies = freebies[: max(1, min(limit, 10))]
+        lines = ["🎮 <b>Steam - Free to Keep</b>\n"]
+        for idx, game in enumerate(freebies, 1):
+            name = html.escape(game["name"])
+            appid = game.get("id")
+            link = (
+                f"https://store.steampowered.com/app/{appid}"
+                if appid
+                else "https://store.steampowered.com/"
+            )
+            discount_txt = (
+                f"- {game['discount']}%" if game.get("discount") is not None else ""
+            )
+            lines.append(f"{idx}. <a href='{link}'>{name}</a> {discount_txt}")
+
+        return "\n".join(lines)
+
+    except requests.RequestException as e:
+        logger.exception("Failed to fetch Steam free games")
+        return f"❌ Failed to fetch Steam freebies: {html.escape(str(e))}"
+    except Exception as e:
+        logger.exception("Error processing Steam free games data")
+        return f"❌ Error processing Steam freebies: {html.escape(str(e))}"

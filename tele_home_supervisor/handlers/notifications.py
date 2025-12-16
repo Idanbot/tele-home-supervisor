@@ -107,3 +107,32 @@ async def cmd_hackernews_now(update, context) -> None:
         )
     except Exception as e:
         await msg.edit_text(f"❌ Error: {e}")
+
+
+async def cmd_steamfree_now(update, context) -> None:
+    """Fetch and display current Steam free-to-keep games on demand."""
+    if not await guard(update, context):
+        return
+
+    limit = 5
+    if context.args:
+        try:
+            limit = max(1, min(int(context.args[0]), 10))
+        except ValueError:
+            await update.message.reply_text(
+                "Usage: /steamfree [n]\nWhere n is between 1-10",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+    msg = await update.message.reply_text("🔄 Fetching Steam free-to-keep games...")
+
+    try:
+        result = await asyncio.to_thread(
+            scheduled_fetchers.fetch_steam_free_games, limit
+        )
+        await msg.edit_text(
+            result, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Error: {e}")
