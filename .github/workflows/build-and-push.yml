@@ -126,6 +126,7 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
+          BUILD_VERSION: ${{ steps.buildver.outputs.version }}
         run: |
           # Status Icon
           case "$STATUS" in
@@ -149,6 +150,6 @@ jobs:
             "chat_id": "${{ secrets.TELEGRAM_CHAT_ID }}",
             "parse_mode": "HTML",
             "disable_web_page_preview": true,
-            "text": "<b>$ICON $TEXT</b>\n━━━━━━━━━━━━━━━━━━━━\n📦 <b>Repo:</b> <code>${{ github.repository }}</code>\n🌿 <b>Branch:</b> <code>$REF_NAME</code>\n🔗 <b>Commit:</b> <code>$VERSION</code>\n👤 <b>Author:</b> ${{ github.actor }}\n━━━━━━━━━━━━━━━━━━━━\n<a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
+            "text": "<b>$ICON $TEXT</b>\n━━━━━━━━━━━━━━━━━━━━\n📦 <b>Repo:</b> <code>${{ github.repository }}</code>\n🌿 <b>Branch:</b> <code>$REF_NAME</code>\n🔗 <b>Commit:</b> <code>$VERSION</code>\n🏗️ <b>Build:</b> <code>$BUILD_VERSION</code>\n👤 <b>Author:</b> ${{ github.actor }}\n━━━━━━━━━━━━━━━━━━━━\n<a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
           }
           EOF
