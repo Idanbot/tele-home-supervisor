@@ -136,3 +136,67 @@ async def cmd_steamfree_now(update, context) -> None:
         )
     except Exception as e:
         await msg.edit_text(f"❌ Error: {e}")
+
+
+async def cmd_gogfree_now(update, context) -> None:
+    """Fetch and display current GOG free games on demand."""
+    if not await guard(update, context):
+        return
+
+    msg = await update.message.reply_text("🔄 Fetching GOG free games...")
+
+    try:
+        message, image_urls = await asyncio.to_thread(
+            scheduled_fetchers.fetch_gog_free_games
+        )
+
+        # Delete the "fetching" message
+        await msg.delete()
+
+        # Send as photo with caption if image available, otherwise text
+        if image_urls:
+            await update.message.reply_photo(
+                photo=image_urls[0],
+                caption=message,
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+    except Exception as e:
+        await msg.edit_text(f"❌ Error: {e}")
+
+
+async def cmd_humblefree_now(update, context) -> None:
+    """Fetch and display current Humble Bundle free games on demand."""
+    if not await guard(update, context):
+        return
+
+    msg = await update.message.reply_text("🔄 Fetching Humble Bundle free games...")
+
+    try:
+        message, image_urls = await asyncio.to_thread(
+            scheduled_fetchers.fetch_humble_free_games
+        )
+
+        # Delete the "fetching" message
+        await msg.delete()
+
+        # Send as photo with caption if image available, otherwise text
+        if image_urls:
+            await update.message.reply_photo(
+                photo=image_urls[0],
+                caption=message,
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+    except Exception as e:
+        await msg.edit_text(f"❌ Error: {e}")

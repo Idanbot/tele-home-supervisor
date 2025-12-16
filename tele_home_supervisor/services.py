@@ -87,6 +87,26 @@ def torrent_delete(name_substr: str, delete_files: bool = True) -> str:
     return _call_with_mgr("delete_by_name", name_substr, delete_files=delete_files)
 
 
+def torrent_stop_by_hash(torrent_hash: str) -> str:
+    return _call_with_mgr("stop_by_hash", torrent_hash)
+
+
+def torrent_start_by_hash(torrent_hash: str) -> str:
+    return _call_with_mgr("start_by_hash", torrent_hash)
+
+
+def torrent_info_by_hash(torrent_hash: str) -> str:
+    return _call_with_mgr("info_by_hash", torrent_hash)
+
+
+def get_torrent_list() -> list[dict]:
+    """Get list of torrents for inline keyboard."""
+    mgr = torrent_mod.TorrentManager()
+    if not mgr.connect():
+        return []
+    return mgr.get_torrent_list()
+
+
 def _call_with_mgr(method_name: str, *args, **kwargs) -> str:
     """Create a TorrentManager, connect, and call a method on it.
 

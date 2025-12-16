@@ -8,6 +8,7 @@ import logging
 from .. import utils
 from ..state import BotState
 from .common import guard, get_state, reply_usage_with_suggestions
+from .callbacks import build_docker_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -15,13 +16,28 @@ logger = logging.getLogger(__name__)
 async def cmd_docker(update, context) -> None:
     if not await guard(update, context):
         return
+    state = get_state(context.application)
     try:
-        get_state(context.application).refresh_containers()
+        state.refresh_containers()
     except Exception as e:
         logger.debug("refresh_containers failed: %s", e)
     msg = await asyncio.to_thread(utils.list_containers_basic)
-    for part in utils.chunk(msg):
-        await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+
+    # Get container names for inline keyboard
+    containers = list(state.get_cached("containers"))
+
+    # Build inline keyboard if we have containers
+    keyboard = build_docker_keyboard(containers) if containers else None
+
+    parts = list(utils.chunk(msg))
+    for i, part in enumerate(parts):
+        # Only add keyboard to the last message
+        if i == len(parts) - 1 and keyboard:
+            await update.message.reply_text(
+                part, parse_mode=ParseMode.HTML, reply_markup=keyboard
+            )
+        else:
+            await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
 async def cmd_dockerstats(update, context) -> None:

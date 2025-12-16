@@ -124,3 +124,11 @@ async def cmd_hackernews_now(update, context) -> None:
 
 async def cmd_steamfree_now(update, context) -> None:
     await run_rate_limited(update, context, notifications.cmd_steamfree_now)
+
+
+async def cmd_gogfree_now(update, context) -> None:
+    await run_rate_limited(update, context, notifications.cmd_gogfree_now)
+
+
+async def cmd_humblefree_now(update, context) -> None:
+    await run_rate_limited(update, context, notifications.cmd_humblefree_now)

@@ -227,6 +227,22 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "show current Steam free-to-keep games",
         handler="cmd_steamfree_now",
     ),
+    CommandSpec(
+        "gogfree",
+        (),
+        "Notifications",
+        "/gogfree",
+        "show current GOG free games",
+        handler="cmd_gogfree_now",
+    ),
+    CommandSpec(
+        "humblefree",
+        (),
+        "Notifications",
+        "/humblefree",
+        "show current Humble Bundle free games",
+        handler="cmd_humblefree_now",
+    ),
 )
 
 

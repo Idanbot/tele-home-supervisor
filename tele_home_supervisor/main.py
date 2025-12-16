@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import logging
 
-from telegram.ext import Application, CommandHandler
+from telegram import BotCommand
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 from .logger import setup_logging
 from . import core
-from .commands import COMMANDS
+from .commands import COMMANDS, GROUP_ORDER
 from .handlers import dispatch
+from .handlers.callbacks import handle_callback_query
 from .state import BOT_STATE_KEY, BotState
 from .background import ensure_started
 from .runtime import STARTUP_TIME
@@ -33,7 +35,25 @@ def build_application() -> Application:
         triggers = [spec.name, *spec.aliases]
         app.add_handler(CommandHandler(triggers, fn))
 
+    # Register callback query handler for inline keyboards
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
+
     return app
+
+
+async def register_bot_commands(app: Application) -> None:
+    """Register bot commands for Telegram autocomplete."""
+    try:
+        # Build command list from COMMANDS registry
+        bot_commands = []
+        for spec in COMMANDS:
+            # Skip aliases, only register primary command names
+            bot_commands.append(BotCommand(spec.name, spec.description))
+
+        await app.bot.set_my_commands(bot_commands)
+        logger.info(f"Registered {len(bot_commands)} commands for autocomplete")
+    except Exception as e:
+        logger.warning(f"Failed to register bot commands: {e}")
 
 
 async def send_startup_notification(app: Application) -> None:
@@ -42,6 +62,9 @@ async def send_startup_notification(app: Application) -> None:
         ensure_started(app)
     except Exception as e:
         logger.warning("Failed to start background tasks: %s", e)
+
+    # Register commands for autocomplete
+    await register_bot_commands(app)
 
     logger.info(f"Sending startup notification to {len(core.ALLOWED)} chat(s)")
     if not core.ALLOWED:

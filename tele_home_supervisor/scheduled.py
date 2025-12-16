@@ -321,3 +321,200 @@ def fetch_steam_free_games(limit: int = 5) -> str:
     except Exception as e:
         logger.exception("Error processing Steam free games data")
         return f"❌ Error processing Steam freebies: {html.escape(str(e))}"
+
+
+def fetch_gog_free_games() -> tuple[str, list[str]]:
+    """Fetch current GOG giveaway games.
+
+    Returns tuple of (formatted HTML message, list of image URLs).
+    """
+    try:
+        # GOG giveaway endpoint - checks for active giveaways
+        url = "https://www.gog.com/games/ajax/filtered"
+        params = {
+            "mediaType": "game",
+            "page": 1,
+            "price": "free",
+            "sort": "popularity",
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; TeleHomeSupervisor/1.0)",
+            "Accept": "application/json",
+        }
+
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+        products = data.get("products", [])
+        free_games: list[dict[str, Any]] = []
+
+        for product in products:
+            # Check if it's actually free (price is 0 or has a giveaway)
+            price = product.get("price", {})
+            is_free = price.get("isFree", False) or price.get("finalAmount") == "0.00"
+
+            if is_free:
+                title = product.get("title", "Unknown")
+                slug = product.get("slug", "")
+                image = product.get("image", "")
+
+                # Build full image URL if relative
+                if image and not image.startswith("http"):
+                    image = f"https:{image}"
+
+                free_games.append(
+                    {
+                        "title": title,
+                        "slug": slug,
+                        "image": image,
+                        "url": f"https://www.gog.com/game/{slug}" if slug else "",
+                    }
+                )
+
+        if not free_games:
+            return ("🎮 <b>GOG</b>\n\nNo free games available right now.", [])
+
+        # Limit to first 3 games
+        free_games = free_games[:3]
+
+        lines = ["🎮 <b>GOG - Free Games</b>\n"]
+        image_urls: list[str] = []
+
+        for game in free_games:
+            title = html.escape(game["title"])
+            url = game.get("url", "https://www.gog.com")
+            lines.append(f"🎁 <a href='{url}'>{title}</a>")
+
+            if game.get("image"):
+                image_urls.append(game["image"])
+
+        lines.append("")
+        lines.append(
+            '<a href="https://www.gog.com/games?price=free">View GOG Store</a>'
+        )
+        return ("\n".join(lines), image_urls[:1])
+
+    except requests.RequestException as e:
+        logger.exception("Failed to fetch GOG free games")
+        return (f"❌ Failed to fetch GOG games: {html.escape(str(e))}", [])
+    except Exception as e:
+        logger.exception("Error processing GOG data")
+        return (f"❌ Error processing GOG data: {html.escape(str(e))}", [])
+
+
+def fetch_humble_free_games() -> tuple[str, list[str]]:
+    """Fetch current Humble Bundle free games/giveaways.
+
+    Returns tuple of (formatted HTML message, list of image URLs).
+    """
+    try:
+        # Humble Bundle storefront API for free content
+        url = "https://www.humblebundle.com/store/api/search"
+        params = {
+            "sort": "discount",
+            "filter": "all",
+            "search": "",
+            "request": 1,
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; TeleHomeSupervisor/1.0)",
+            "Accept": "application/json",
+        }
+
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+        results = data.get("results", [])
+        free_games: list[dict[str, Any]] = []
+
+        for item in results:
+            # Check for 100% discount or free items
+            current_price = item.get("current_price", {})
+            price_amount = current_price.get("amount", 1)
+
+            # Also check for giveaway flag
+            is_giveaway = item.get("is_giveaway", False)
+
+            if price_amount == 0 or is_giveaway:
+                title = item.get("human_name", "Unknown")
+                slug = item.get("human_url", "")
+                icon = item.get("icon", "")
+
+                # Build full image URL
+                if icon and not icon.startswith("http"):
+                    icon = f"https://hb.imgix.net{icon}"
+
+                free_games.append(
+                    {
+                        "title": title,
+                        "url": (
+                            f"https://www.humblebundle.com/store/{slug}"
+                            if slug
+                            else "https://www.humblebundle.com/store"
+                        ),
+                        "image": icon,
+                    }
+                )
+
+        # Also check the main page for featured freebies
+        if not free_games:
+            # Try fetching the main page for giveaways
+            giveaway_url = "https://www.humblebundle.com/store/api/lookup"
+            giveaway_params = {"products[]": "mosaic"}
+            try:
+                gw_resp = requests.get(
+                    giveaway_url,
+                    params=giveaway_params,
+                    headers=headers,
+                    timeout=10,
+                )
+                if gw_resp.status_code == 200:
+                    gw_data = gw_resp.json()
+                    for key, item in gw_data.items():
+                        if isinstance(item, dict):
+                            price = item.get("current_price", {}).get("amount", 1)
+                            if price == 0:
+                                free_games.append(
+                                    {
+                                        "title": item.get("human_name", "Unknown"),
+                                        "url": f"https://www.humblebundle.com/store/{item.get('human_url', '')}",
+                                        "image": item.get("icon", ""),
+                                    }
+                                )
+            except Exception:
+                pass  # Fallback failed, continue with empty list
+
+        if not free_games:
+            return (
+                "🎮 <b>Humble Bundle</b>\n\nNo free games available right now.",
+                [],
+            )
+
+        # Limit to first 3 games
+        free_games = free_games[:3]
+
+        lines = ["🎮 <b>Humble Bundle - Free Games</b>\n"]
+        image_urls: list[str] = []
+
+        for game in free_games:
+            title = html.escape(game["title"])
+            url = game.get("url", "https://www.humblebundle.com/store")
+            lines.append(f"🎁 <a href='{url}'>{title}</a>")
+
+            if game.get("image"):
+                image_urls.append(game["image"])
+
+        lines.append("")
+        lines.append(
+            '<a href="https://www.humblebundle.com/store/search?sort=discount&filter=all">View Humble Store</a>'
+        )
+        return ("\n".join(lines), image_urls[:1])
+
+    except requests.RequestException as e:
+        logger.exception("Failed to fetch Humble Bundle free games")
+        return (f"❌ Failed to fetch Humble Bundle: {html.escape(str(e))}", [])
+    except Exception as e:
+        logger.exception("Error processing Humble Bundle data")
+        return (f"❌ Error processing Humble Bundle: {html.escape(str(e))}", [])

@@ -371,3 +371,97 @@ class TorrentManager:
         except Exception as exc:
             logger.exception("Error retrieving qBittorrent status: %s", exc)
             return f"Error retrieving status: {html.escape(str(exc))}"
+
+    def get_torrent_list(self) -> list[dict]:
+        """Return list of all torrents with basic info for inline keyboards."""
+        if self.qbt_client is None:
+            if not self.connect():
+                return []
+        try:
+            torrents = self.qbt_client.torrents_info() or []
+            result = []
+            for t in torrents:
+                thash = (
+                    getattr(t, "hash", None)
+                    or getattr(t, "info_hash", None)
+                    or getattr(t, "hashString", None)
+                )
+                result.append(
+                    {
+                        "name": getattr(t, "name", "") or "",
+                        "hash": thash or "",
+                        "state": getattr(t, "state", "unknown"),
+                        "progress": getattr(t, "progress", 0.0) or 0.0,
+                    }
+                )
+            return result
+        except Exception:
+            logger.exception("Error getting torrent list")
+            return []
+
+    def _find_by_hash(self, torrent_hash: str) -> dict | None:
+        """Find a torrent by its hash."""
+        if self.qbt_client is None:
+            if not self.connect():
+                return None
+        try:
+            torrents = self.qbt_client.torrents_info() or []
+            for t in torrents:
+                thash = (
+                    getattr(t, "hash", None)
+                    or getattr(t, "info_hash", None)
+                    or getattr(t, "hashString", None)
+                )
+                if thash and thash.startswith(torrent_hash):
+                    return {
+                        "name": getattr(t, "name", "") or "",
+                        "hash": thash,
+                        "state": getattr(t, "state", "unknown"),
+                        "progress": getattr(t, "progress", 0.0) or 0.0,
+                        "size": getattr(t, "total_size", 0) or getattr(t, "size", 0),
+                        "dlspeed": getattr(t, "dlspeed", 0) or 0,
+                        "upspeed": getattr(t, "upspeed", 0) or 0,
+                    }
+            return None
+        except Exception:
+            logger.exception("Error finding torrent by hash")
+            return None
+
+    def stop_by_hash(self, torrent_hash: str) -> str:
+        """Pause a torrent by its hash."""
+        torrent = self._find_by_hash(torrent_hash)
+        if not torrent:
+            return "Torrent not found."
+        ok = self._call_pause_resume([torrent["hash"]], "pause")
+        if ok:
+            return f"⏸️ Paused: {html.escape(torrent['name'])}"
+        return "Failed to pause torrent."
+
+    def start_by_hash(self, torrent_hash: str) -> str:
+        """Resume a torrent by its hash."""
+        torrent = self._find_by_hash(torrent_hash)
+        if not torrent:
+            return "Torrent not found."
+        ok = self._call_pause_resume([torrent["hash"]], "resume")
+        if ok:
+            return f"▶️ Resumed: {html.escape(torrent['name'])}"
+        return "Failed to resume torrent."
+
+    def info_by_hash(self, torrent_hash: str) -> str:
+        """Get info about a torrent by its hash."""
+        torrent = self._find_by_hash(torrent_hash)
+        if not torrent:
+            return "Torrent not found."
+        name = html.escape(torrent["name"])
+        state = html.escape(torrent["state"])
+        progress = torrent["progress"] * 100
+        size = fmt_bytes_compact_decimal(torrent.get("size", 0) or 0)
+        dlspeed = (torrent.get("dlspeed", 0) or 0) / 1024.0
+        upspeed = (torrent.get("upspeed", 0) or 0) / 1024.0
+        return (
+            f"<b>{name}</b>\n"
+            f"Status: {state}\n"
+            f"Progress: {progress:.1f}%\n"
+            f"Size: {size}\n"
+            f"↓ {dlspeed:.1f} KiB/s | ↑ {upspeed:.1f} KiB/s"
+        )

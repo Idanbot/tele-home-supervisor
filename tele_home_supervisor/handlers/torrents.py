@@ -10,6 +10,7 @@ from .. import services, utils
 from ..background import ensure_started
 from ..state import BotState
 from .common import guard, get_state, reply_usage_with_suggestions
+from .callbacks import build_torrent_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,20 @@ async def cmd_torrent_status(update, context) -> None:
     except Exception as e:
         logger.debug("refresh_torrents failed: %s", e)
     msg = await asyncio.to_thread(services.torrent_status)
-    for part in utils.chunk(msg, size=4000):
-        await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+
+    # Get torrent list for inline keyboard
+    torrents = await asyncio.to_thread(services.get_torrent_list)
+    keyboard = build_torrent_keyboard(torrents) if torrents else None
+
+    parts = list(utils.chunk(msg, size=4000))
+    for i, part in enumerate(parts):
+        # Only add keyboard to the last message
+        if i == len(parts) - 1 and keyboard:
+            await update.message.reply_text(
+                part, parse_mode=ParseMode.HTML, reply_markup=keyboard
+            )
+        else:
+            await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
 async def cmd_torrent_stop(update, context) -> None:
