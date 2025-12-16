@@ -117,7 +117,11 @@ def get_temp() -> str:
         ).strip()
         if out:
             return out
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        FileNotFoundError,
+    ) as e:
         logger.debug("vcgencmd temp read failed: %s", e)
     return "n/a"
 
