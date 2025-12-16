@@ -33,7 +33,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install pylint black pip-audit -r requirements.txt
+          pip install pylint black pip-audit bandit -r requirements.txt
 
       - name: Run Black (check)
         run: |
@@ -53,6 +53,13 @@ jobs:
           set -o pipefail
           pip-audit -r requirements.txt --progress-spinner off \
             2>&1 | tee pip-audit.log
+          exit ${PIPESTATUS[0]:-0}
+
+      - name: Run Bandit
+        run: |
+          set -o pipefail
+          bandit -r tele_home_supervisor \
+            2>&1 | tee bandit.log
           exit ${PIPESTATUS[0]:-0}
 
       - name: Notify Telegram (lint failure)
@@ -88,6 +95,14 @@ jobs:
             {
               echo "\n<b>pip-audit</b> (tail):\n<pre>" ;
               tail -n 40 pip-audit.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' ;
+              echo "</pre>" ;
+            } >> lint_snippet.html
+          fi
+
+          if [ -f bandit.log ]; then
+            {
+              echo "\n<b>Bandit</b> (tail):\n<pre>" ;
+              tail -n 40 bandit.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' ;
               echo "</pre>" ;
             } >> lint_snippet.html
           fi

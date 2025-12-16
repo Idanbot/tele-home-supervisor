@@ -1,5 +1,7 @@
 # tele-home-supervisor
 
+[![Build & Publish Docker Image](https://github.com/idanbot/tele-home-supervisor/actions/workflows/build-and-push.yml/badge.svg?branch=main)](https://github.com/idanbot/tele-home-supervisor/actions/workflows/build-and-push.yml)
+
 Telegram bot for monitoring a Raspberry Pi (or any Linux host) and managing Docker + qBittorrent from chat.
 
 - Runs as a Docker container (multi-arch: `linux/amd64` and `linux/arm64`).
