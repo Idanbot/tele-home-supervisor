@@ -12,14 +12,16 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-def _is_active_free_offer(game: dict[str, Any], now: datetime) -> bool:
-    """Return True if the game has a currently active free promotional offer."""
+def _is_active_free_offer(
+    game: dict[str, Any], now: datetime
+) -> tuple[bool, datetime | None, datetime | None]:
+    """Return (is_active, start, end) for a current free promotional offer."""
 
     promotions = game.get("promotions") or {}
     current_offers = promotions.get("promotionalOffers") or []
 
     if not current_offers:
-        return False
+        return (False, None, None)
 
     offers = current_offers[0].get("promotionalOffers") or []
     for offer in offers:
@@ -40,9 +42,9 @@ def _is_active_free_offer(game: dict[str, Any], now: datetime) -> bool:
         if end_dt and end_dt < now:
             continue
         if discount == 0:
-            return True
+            return (True, start_dt, end_dt)
 
-    return False
+    return (False, None, None)
 
 
 def _find_upcoming_free_offer(
@@ -109,7 +111,8 @@ def fetch_epic_free_games() -> tuple[str, list[str]]:
         upcoming_games: list[dict[str, Any]] = []
         now = datetime.now(timezone.utc)
         for game in games:
-            if not _is_active_free_offer(game, now):
+            is_active, active_start, active_end = _is_active_free_offer(game, now)
+            if not is_active:
                 start_dt, end_dt = _find_upcoming_free_offer(game, now)
                 if start_dt:
                     upcoming_games.append(
@@ -150,6 +153,8 @@ def fetch_epic_free_games() -> tuple[str, list[str]]:
                     "title": title,
                     "description": description,
                     "image_url": image_url,
+                    "start": active_start,
+                    "end": active_end,
                 }
             )
 
@@ -177,7 +182,9 @@ def fetch_epic_free_games() -> tuple[str, list[str]]:
                 if game["description"]
                 else "<i>No description</i>"
             )
-            lines.append(f"🎁 <b>{title}</b>\n{desc}\n")
+            start_fmt = _fmt_dt(game.get("start"))
+            end_fmt = _fmt_dt(game.get("end"))
+            lines.append(f"🎁 <b>{title}</b>\n{desc}\n🗓️ {start_fmt} → {end_fmt}\n")
 
             if game["image_url"]:
                 image_urls.append(game["image_url"])

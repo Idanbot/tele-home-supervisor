@@ -13,10 +13,10 @@ async def cmd_ip(update, context) -> None:
     if not await guard(update, context):
         return
     lan = html.escape(utils.get_primary_ip())
+    wan_raw = utils.get_wan_ip()
+    wan = html.escape(wan_raw) if wan_raw else "unknown"
     msg_lines = [f"<b>LAN IP:</b> <code>{lan}</code>"]
-    if core.SHOW_WAN:
-        wan = html.escape(utils.get_wan_ip())
-        msg_lines.append(f"<b>WAN IP:</b> <code>{wan}</code>")
+    msg_lines.append(f"<b>WAN IP:</b> <code>{wan}</code>")
     await update.message.reply_text("\n".join(msg_lines), parse_mode=ParseMode.HTML)
 
 

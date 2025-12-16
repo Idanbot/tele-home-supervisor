@@ -84,7 +84,7 @@ def get_wan_ip() -> str:
             [
                 "bash",
                 "-lc",
-                "curl -fsS https://ipinfo.io/ip || curl -fsS https://ifconfig.me",
+                "curl -fsS https://checkip.amazonaws.com || curl -fsS https://ipinfo.io/ip || curl -fsS https://ifconfig.me",
             ],
             timeout=4,
         )
