@@ -297,7 +297,7 @@ def container_stats_rich() -> str:
             )
     return "\n\n".join(lines)
 
-def oget_container_logs(container_name: str, lines: int = 50) -> str:
+def get_container_logs(container_name: str, lines: int = 50) -> str:
     """Get recent logs from a container."""
     try:
         docker_cmd = get_docker_cmd()
