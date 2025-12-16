@@ -416,13 +416,35 @@ def fetch_humble_free_games() -> tuple[str, list[str]]:
             "filter": "all",
             "search": "",
             "request": 1,
+            "page_size": 100,
+            "page": 0,
         }
+        # Use browser-like headers; Humble often blocks generic clients
         headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; TeleHomeSupervisor/1.0)",
-            "Accept": "application/json",
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "Chrome/120.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Referer": "https://www.humblebundle.com/store",
+            "Origin": "https://www.humblebundle.com",
+            "X-Requested-With": "XMLHttpRequest",
         }
 
-        response = requests.get(url, params=params, headers=headers, timeout=15)
+        session = requests.Session()
+        session.headers.update(headers)
+        response = session.get(url, params=params, timeout=15)
+        if response.status_code == 403:
+            # Retry once with alternate UA (some edges are picky)
+            session.headers.update(
+                {
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 Chrome/122.0 Safari/537.36"
+                    )
+                }
+            )
+            response = session.get(url, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()
 
@@ -464,10 +486,9 @@ def fetch_humble_free_games() -> tuple[str, list[str]]:
             giveaway_url = "https://www.humblebundle.com/store/api/lookup"
             giveaway_params = {"products[]": "mosaic"}
             try:
-                gw_resp = requests.get(
+                gw_resp = session.get(
                     giveaway_url,
                     params=giveaway_params,
-                    headers=headers,
                     timeout=10,
                 )
                 if gw_resp.status_code == 200:
