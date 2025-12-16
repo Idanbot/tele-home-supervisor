@@ -297,13 +297,16 @@ def container_stats_rich() -> str:
             )
     return "\n\n".join(lines)
 
-def get_container_logs(container_name: str, lines: int = 50) -> str:
+def oget_container_logs(container_name: str, lines: int = 50) -> str:
     """Get recent logs from a container."""
     try:
         docker_cmd = get_docker_cmd()
         if not docker_cmd:
             return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
-        rc, out, err = run_cmd([docker_cmd, "logs", "--tail", str(lines), container_name], timeout=10)
+        if lines < 0:
+            rc, out, err = run_cmd([docker_cmd, "logs", container_name, "2>&1 | head -n", str(-lines)], timeout=10)
+        else:
+            rc, out, err = run_cmd([docker_cmd, "logs", "--tail", str(lines), container_name], timeout=10)
         out = out.strip()
         if not out:
             return f"<i>Container {html.escape(container_name)} has no logs</i>"
