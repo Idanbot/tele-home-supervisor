@@ -29,14 +29,23 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: requirements.txt
 
       - name: Install Dependencies
         run: |
-          pip install pylint -r requirements.txt
+          pip install pylint black pip-audit -r requirements.txt
+
+      - name: Run Black (check)
+        run: |
+          black --check .
 
       - name: Run Pylint
         run: |
           pylint --disable=all --enable=F,E tele_home_supervisor/ bot.py
+
+      - name: Run pip-audit
+        run: |
+          pip-audit -r requirements.txt --progress-spinner off
 
   build-and-push:
     needs: [lint]
@@ -112,12 +121,22 @@ jobs:
           # Scan with Trivy
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/workspace" \
             aquasec/trivy:latest image \
             --platform linux/arm64 \
             --severity HIGH,CRITICAL \
             --exit-code 0 \
             --format table \
+            --output /workspace/trivy-arm64.txt \
             ${{ env.IMAGE_NAME }}:latest
+
+      - name: Upload Trivy Scan (ARM64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-arm64
+          path: trivy-arm64.txt
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Notify Telegram
         if: always()
@@ -142,14 +161,22 @@ jobs:
             VERSION=$(echo "$SHA" | cut -c1-7)
           fi
 
-          # Send notification
-          curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -H "Content-Type: application/json" \
-            -d @- <<EOF
-          {
-            "chat_id": "${{ secrets.TELEGRAM_CHAT_ID }}",
-            "parse_mode": "HTML",
-            "disable_web_page_preview": true,
-            "text": "<b>$ICON $TEXT</b>\n━━━━━━━━━━━━━━━━━━━━\n📦 <b>Repo:</b> <code>${{ github.repository }}</code>\n🌿 <b>Branch:</b> <code>$REF_NAME</code>\n🔗 <b>Commit:</b> <code>$VERSION</code>\n🏗️ <b>Build:</b> <code>$BUILD_VERSION</code>\n👤 <b>Author:</b> ${{ github.actor }}\n━━━━━━━━━━━━━━━━━━━━\n<a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
-          }
-          EOF
+          MSG="<b>$ICON $TEXT</b>
+          ━━━━━━━━━━━━━━━━━━━━
+          📦 <b>Repo:</b> <code>${{ github.repository }}</code>
+          🌿 <b>Branch:</b> <code>$REF_NAME</code>
+          🔗 <b>Commit:</b> <code>$VERSION</code>
+          🏗️ <b>Build:</b> <code>$BUILD_VERSION</code>
+          👤 <b>Author:</b> ${{ github.actor }}
+          ━━━━━━━━━━━━━━━━━━━━
+          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
+
+          # Send notification via jq to ensure valid JSON and avoid long lines
+          jq -n \
+            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --arg parse_mode "HTML" \
+            --arg text "$MSG" \
+            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
+            | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d @-

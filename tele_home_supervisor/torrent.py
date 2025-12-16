@@ -143,24 +143,25 @@ class TorrentManager:
         if self.qbt_client is None:
             if not self.connect():
                 return False
-        # prepare a comma-separated string for older API variants
-        hashes_csv = ",".join(hashes)
+        # qBittorrent Web API expects a '|' separated string for multiple hashes
+        hashes_joined = "|".join(hashes)
         try:
             if action == "pause":
-                # try a few call signatures
+                # Prefer the canonical parameter name 'hashes'
                 try:
-                    self.qbt_client.torrents_pause(torrent_hashes=hashes_csv)  # type: ignore
+                    self.qbt_client.torrents_pause(hashes=hashes_joined)  # type: ignore
                 except Exception:
+                    # Fallbacks for older client signatures
                     try:
-                        self.qbt_client.torrents_pause(hashes=hashes_csv)  # type: ignore
+                        self.qbt_client.torrents_pause(torrent_hashes=hashes_joined)  # type: ignore
                     except Exception:
                         self.qbt_client.torrents_pause(hashes)  # type: ignore
             else:
                 try:
-                    self.qbt_client.torrents_resume(torrent_hashes=hashes_csv)  # type: ignore
+                    self.qbt_client.torrents_resume(hashes=hashes_joined)  # type: ignore
                 except Exception:
                     try:
-                        self.qbt_client.torrents_resume(hashes=hashes_csv)  # type: ignore
+                        self.qbt_client.torrents_resume(torrent_hashes=hashes_joined)  # type: ignore
                     except Exception:
                         self.qbt_client.torrents_resume(hashes)  # type: ignore
             return True
@@ -175,19 +176,40 @@ class TorrentManager:
         if self.qbt_client is None:
             if not self.connect():
                 return False
-        hashes_csv = ",".join(hashes)
+        # qBittorrent Web API expects a '|' separated string for multiple hashes
+        hashes_joined = "|".join(hashes)
         try:
+            deleted = False
+            # Primary: correct param names
             try:
-                self.qbt_client.torrents_delete(torrent_hashes=hashes_csv, delete_files=delete_files)  # type: ignore
+                self.qbt_client.torrents_delete(hashes=hashes_joined, delete_files=delete_files)  # type: ignore
+                deleted = True
             except Exception:
+                # Fallbacks for older/signature-variant clients
                 try:
-                    self.qbt_client.torrents_delete(hashes=hashes_csv, delete_files=delete_files)  # type: ignore
+                    self.qbt_client.torrents_delete(torrent_hashes=hashes_joined, delete_files=delete_files)  # type: ignore
+                    deleted = True
                 except Exception:
                     try:
-                        self.qbt_client.torrents_delete(hashes=hashes_csv, deleteFiles=delete_files)  # type: ignore
+                        self.qbt_client.torrents_delete(hashes=hashes_joined, deleteFiles=delete_files)  # type: ignore
+                        deleted = True
                     except Exception:
                         self.qbt_client.torrents_delete(hashes=hashes, delete_files=delete_files)  # type: ignore
-            return True
+                        deleted = True
+
+            # Verify deletion actually happened: query current torrents
+            try:
+                remaining = self.qbt_client.torrents_info() or []  # type: ignore
+                remaining_hashes = {getattr(t, "hash", None) or getattr(t, "info_hash", None) or getattr(t, "hashString", None) for t in remaining}
+                # If any of the requested hashes are still present, consider as not deleted
+                if any(h in remaining_hashes for h in hashes):
+                    logger.warning("Some torrents not deleted as expected: %s", [h for h in hashes if h in remaining_hashes])
+                    return False
+            except Exception:
+                # If verification fails, fall back to reported success
+                pass
+
+            return deleted
         except Exception:
             logger.exception("Error deleting torrents")
             return False
