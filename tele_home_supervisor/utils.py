@@ -313,9 +313,11 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
         return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
     
     try:
+        err = ""  # Initialize for error handling
+        
         if lines < 0:
-            # Get first N lines: fetch all logs and pipe to head
-            # Docker doesn't have a --head flag, so we fetch all and process
+            # Get first N lines: fetch all logs and process in Python
+            # Note: Docker writes logs to both stdout and stderr, we need to combine them
             rc, out, err = run_cmd(
                 [docker_cmd, "logs", container_name],
                 timeout=15
@@ -323,13 +325,20 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
             if rc != 0:
                 raise subprocess.CalledProcessError(rc, "docker logs", output=err)
             
+            # Combine stdout and stderr (docker logs can write to both)
+            combined = (out + err).strip()
+            
             # Take first N lines
-            log_lines = out.splitlines()
+            log_lines = combined.splitlines()
             requested_lines = abs(lines)
+            total_lines = len(log_lines)
             out = "\n".join(log_lines[:requested_lines])
             
-            if len(log_lines) > requested_lines:
-                out = out + f"\n...\n<i>(showing first {requested_lines} of {len(log_lines)} lines)</i>"
+            # Show info about total available lines
+            if total_lines > requested_lines:
+                out = out + f"\n...\n<i>(showing first {requested_lines} of {total_lines} total lines)</i>"
+            else:
+                out = out + f"\n<i>(total: {total_lines} lines available)</i>"
         else:
             # Get last N lines using --tail
             rc, out, err = run_cmd(
@@ -338,6 +347,17 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
             )
             if rc != 0:
                 raise subprocess.CalledProcessError(rc, "docker logs", output=err)
+            
+            # Combine stdout and stderr
+            out = (out + err).strip()
+            
+            # Get total line count for context
+            rc_count, out_count, err_count = run_cmd(
+                [docker_cmd, "logs", container_name],
+                timeout=15
+            )
+            combined_count = (out_count + err_count).strip()
+            total_lines = len(combined_count.splitlines()) if rc_count == 0 else 0
         
         out = out.strip()
         if not out:
@@ -357,8 +377,14 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
         direction = "first" if lines < 0 else "last"
         count = abs(lines)
         
+        # Add total available context for tail mode
+        if lines > 0 and total_lines > 0:
+            count_info = f"{count} requested, {total_lines} available"
+        else:
+            count_info = str(count)
+        
         return (
-            f"<b>Logs for {safe_name}</b> <i>({direction} {count} lines)</i>\n"
+            f"<b>Logs for {safe_name}</b> <i>({direction} {count_info} lines)</i>\n"
             f"<pre>{html.escape(out)}</pre>"
         )
     
