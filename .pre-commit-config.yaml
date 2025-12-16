@@ -1,0 +1,22 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+        language_version: python3
+        exclude: '^(\.venv|venv|env)/'
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.9
+    hooks:
+      - id: bandit
+        name: bandit (high severity)
+        args:
+          - "-r"
+          - "tele_home_supervisor"
+          - "--severity-level"
+          - "high"
+          - "--confidence-level"
+          - "high"
+        pass_filenames: false
+        exclude: '^(\.venv|venv|env)/'

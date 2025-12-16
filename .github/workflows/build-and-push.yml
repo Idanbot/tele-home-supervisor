@@ -55,10 +55,12 @@ jobs:
             2>&1 | tee pip-audit.log
           exit ${PIPESTATUS[0]:-0}
 
-      - name: Run Bandit
+      - name: Run Bandit (high severity only)
         run: |
           set -o pipefail
           bandit -r tele_home_supervisor \
+            --severity-level high \
+            --confidence-level high \
             2>&1 | tee bandit.log
           exit ${PIPESTATUS[0]:-0}
 

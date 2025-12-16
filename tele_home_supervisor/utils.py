@@ -8,7 +8,7 @@ from __future__ import annotations
 import html
 import os
 import socket
-import subprocess
+import subprocess  # nosec B404 - controlled subprocess use for system data
 import time
 import platform
 from datetime import datetime
@@ -109,20 +109,22 @@ def get_temp() -> str:
                 return f"{int(t) / 1000:.1f}°C"
         except (OSError, ValueError) as e:
             logger.debug("Error reading temp from %s: %s", path, e)
-    try:
-        out = subprocess.check_output(
-            ["bash", "-lc", "vcgencmd measure_temp 2>/dev/null | cut -d= -f2"],
-            text=True,
-            timeout=2,
-        ).strip()
-        if out:
-            return out
-    except (
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-        FileNotFoundError,
-    ) as e:
-        logger.debug("vcgencmd temp read failed: %s", e)
+    vcgencmd = shutil.which("vcgencmd")
+    if vcgencmd:
+        try:
+            out = subprocess.check_output(  # nosec B603 - fixed binary, no shell
+                [vcgencmd, "measure_temp"],
+                text=True,
+                timeout=2,
+            ).strip()
+            if out:
+                return out
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            FileNotFoundError,
+        ) as e:
+            logger.debug("vcgencmd temp read failed: %s", e)
     return "n/a"
 
 
@@ -281,11 +283,9 @@ def list_container_names() -> set[str]:
         return set()
     names: set[str] = set()
     for c in cs:
-        try:
-            if c.name:
-                names.add(str(c.name))
-        except Exception:
-            continue
+        name = getattr(c, "name", None)
+        if name:
+            names.add(str(name))
     return names
 
 

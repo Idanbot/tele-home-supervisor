@@ -226,9 +226,10 @@ class TorrentManager:
                         [h for h in hashes if h in remaining_hashes],
                     )
                     return False
-            except Exception:
-                # If verification fails, fall back to reported success
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Delete verification failed; assuming delete succeeded: %s", e
+                )
 
             return deleted
         except Exception:
@@ -339,11 +340,16 @@ class TorrentManager:
                     raw = getattr(t, attr, None)
                     if raw is None:
                         continue
+                    val = None
                     try:
-                        downloaded = int(raw)
+                        val = int(raw)
+                    except (TypeError, ValueError) as e:
+                        logger.debug(
+                            "Cannot parse %s for torrent %s: %s", attr, name, e
+                        )
+                    if val is not None:
+                        downloaded = val
                         break
-                    except Exception:
-                        continue
                 if downloaded is None and total_size > 0:
                     downloaded = int(progress_frac * total_size)
                 if downloaded is None:

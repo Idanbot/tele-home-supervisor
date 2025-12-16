@@ -7,14 +7,16 @@ how we detect the docker binary. This makes testing and changes easier.
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used for controlled CLI calls
 from typing import Optional, Tuple
 
 
 def run_cmd(cmd: list[str], timeout: int = 10) -> Tuple[int, str, str]:
     """Run a command and return (returncode, stdout, stderr)."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(  # nosec B603 - arguments are caller-provided but shell is not used
+            cmd, capture_output=True, text=True, timeout=timeout
+        )
         return proc.returncode, proc.stdout or "", proc.stderr or ""
     except subprocess.TimeoutExpired:
         return 124, "", "timeout"
