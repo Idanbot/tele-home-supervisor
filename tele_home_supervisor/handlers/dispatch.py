@@ -1,4 +1,5 @@
 """Dispatch layer: applies rate limiting then calls the real handlers."""
+
 from __future__ import annotations
 
 from .common import run_rate_limited

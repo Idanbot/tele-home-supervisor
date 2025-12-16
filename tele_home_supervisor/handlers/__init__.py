@@ -1,2 +1,1 @@
 """Telegram command handlers."""
-

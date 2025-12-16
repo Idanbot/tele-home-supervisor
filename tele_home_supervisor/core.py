@@ -1,4 +1,5 @@
 """Core configuration constants used by the bot."""
+
 from __future__ import annotations
 
 import logging
@@ -32,7 +33,9 @@ def _validate_config() -> None:
     if TOKEN is None:
         logger.error("BOT_TOKEN environment variable is not set (from config.settings)")
     if not ALLOWED:
-        logger.warning("ALLOWED_CHAT_IDS is empty; all guarded commands will be unauthorized")
+        logger.warning(
+            "ALLOWED_CHAT_IDS is empty; all guarded commands will be unauthorized"
+        )
     if not WATCH_PATHS:
         logger.warning("WATCH_PATHS is empty; disk usage monitoring disabled")
 

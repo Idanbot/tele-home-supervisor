@@ -19,7 +19,9 @@ async def cmd_torrent_add(update, context) -> None:
     if not await guard(update, context):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /tadd &lt;torrent&gt; [save_path]", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            "Usage: /tadd &lt;torrent&gt; [save_path]", parse_mode=ParseMode.HTML
+        )
         return
     torrent = context.args[0]
     save_path = context.args[1] if len(context.args) > 1 else "/downloads"
@@ -45,7 +47,9 @@ async def cmd_torrent_stop(update, context) -> None:
     state: BotState = get_state(context.application)
     state.maybe_refresh("torrents")
     if not context.args:
-        await reply_usage_with_suggestions(update, "/tstop &lt;torrent&gt;", state.suggest("torrents", limit=5))
+        await reply_usage_with_suggestions(
+            update, "/tstop &lt;torrent&gt;", state.suggest("torrents", limit=5)
+        )
         return
     name = " ".join(context.args)
     res = await asyncio.to_thread(services.torrent_stop, name)
@@ -58,7 +62,9 @@ async def cmd_torrent_start(update, context) -> None:
     state: BotState = get_state(context.application)
     state.maybe_refresh("torrents")
     if not context.args:
-        await reply_usage_with_suggestions(update, "/tstart &lt;torrent&gt;", state.suggest("torrents", limit=5))
+        await reply_usage_with_suggestions(
+            update, "/tstart &lt;torrent&gt;", state.suggest("torrents", limit=5)
+        )
         return
     name = " ".join(context.args)
     res = await asyncio.to_thread(services.torrent_start, name)
@@ -71,14 +77,18 @@ async def cmd_torrent_delete(update, context) -> None:
     state: BotState = get_state(context.application)
     state.maybe_refresh("torrents")
     if not context.args:
-        await reply_usage_with_suggestions(update, "/tdelete &lt;torrent&gt; yes", state.suggest("torrents", limit=5))
+        await reply_usage_with_suggestions(
+            update, "/tdelete &lt;torrent&gt; yes", state.suggest("torrents", limit=5)
+        )
         return
 
     confirm_tokens = {"yes", "--yes", "confirm", "--confirm"}
     confirm = bool(context.args and context.args[-1].strip().lower() in confirm_tokens)
     name = " ".join(context.args[:-1] if confirm else context.args).strip()
     if not name:
-        await reply_usage_with_suggestions(update, "/tdelete &lt;torrent&gt; yes", state.suggest("torrents", limit=5))
+        await reply_usage_with_suggestions(
+            update, "/tdelete &lt;torrent&gt; yes", state.suggest("torrents", limit=5)
+        )
         return
 
     if not confirm:
@@ -86,7 +96,9 @@ async def cmd_torrent_delete(update, context) -> None:
         hint_names = state.suggest("torrents", query=name, limit=5)
         hint = ""
         if hint_names:
-            hint = "\n\n<i>Suggestions:</i>\n" + "\n".join(f"• <code>{html.escape(n)}</code>" for n in hint_names)
+            hint = "\n\n<i>Suggestions:</i>\n" + "\n".join(
+                f"• <code>{html.escape(n)}</code>" for n in hint_names
+            )
         msg = (
             f"{matches_msg}\n\n"
             f"⚠️ This will <b>delete files</b>. Re-run to confirm:\n"
@@ -134,7 +146,9 @@ async def cmd_subscribe(update, context) -> None:
     elif action in {"off", "no", "false", "0"}:
         enable = False
     else:
-        await update.message.reply_text("Usage: /subscribe [on|off|status]", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            "Usage: /subscribe [on|off|status]", parse_mode=ParseMode.HTML
+        )
         return
 
     is_on = state.set_torrent_completion_subscription(chat_id, enable)
@@ -142,4 +156,3 @@ async def cmd_subscribe(update, context) -> None:
         f"Torrent completion notifications: <b>{'ON' if is_on else 'OFF'}</b>",
         parse_mode=ParseMode.HTML,
     )
-

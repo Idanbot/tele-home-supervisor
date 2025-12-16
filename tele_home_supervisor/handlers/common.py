@@ -1,4 +1,5 @@
 """Shared handler helpers: auth guard, rate limit, suggestions."""
+
 from __future__ import annotations
 
 import asyncio
@@ -69,7 +70,9 @@ async def run_rate_limited(
 def _format_suggestions(names: list[str]) -> str:
     if not names:
         return ""
-    return "\n<i>Suggestions:</i>\n" + "\n".join(f"• <code>{html.escape(n)}</code>" for n in names)
+    return "\n<i>Suggestions:</i>\n" + "\n".join(
+        f"• <code>{html.escape(n)}</code>" for n in names
+    )
 
 
 async def reply_usage_with_suggestions(
@@ -78,7 +81,9 @@ async def reply_usage_with_suggestions(
     names: list[str] | None = None,
 ) -> None:
     hint = _format_suggestions(names or [])
-    await update.message.reply_text(f"<i>Usage:</i> {usage_html}{hint}", parse_mode=ParseMode.HTML)
+    await update.message.reply_text(
+        f"<i>Usage:</i> {usage_html}{hint}", parse_mode=ParseMode.HTML
+    )
 
 
 async def maybe_refresh_containers(context: "ContextTypes.DEFAULT_TYPE") -> None:
@@ -87,4 +92,3 @@ async def maybe_refresh_containers(context: "ContextTypes.DEFAULT_TYPE") -> None
 
 async def maybe_refresh_torrents(context: "ContextTypes.DEFAULT_TYPE") -> None:
     await asyncio.to_thread(get_state(context.application).maybe_refresh, "torrents")
-

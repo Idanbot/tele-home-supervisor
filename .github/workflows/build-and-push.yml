@@ -37,15 +37,81 @@ jobs:
 
       - name: Run Black (check)
         run: |
-          black --check .
+          set -o pipefail
+          black --check . 2>&1 | tee black.log
+          exit ${PIPESTATUS[0]:-0}
 
       - name: Run Pylint
         run: |
-          pylint --disable=all --enable=F,E tele_home_supervisor/ bot.py
+          set -o pipefail
+          pylint --disable=all --enable=F,E tele_home_supervisor/ bot.py \
+            2>&1 | tee pylint.log
+          exit ${PIPESTATUS[0]:-0}
 
       - name: Run pip-audit
         run: |
-          pip-audit -r requirements.txt --progress-spinner off
+          set -o pipefail
+          pip-audit -r requirements.txt --progress-spinner off \
+            2>&1 | tee pip-audit.log
+          exit ${PIPESTATUS[0]:-0}
+
+      - name: Notify Telegram (lint failure)
+        if: failure()
+        env:
+          STATUS: ${{ job.status }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          ICON="❌"; TEXT="Lint Failed"
+          if [ "$REF_TYPE" = "tag" ]; then
+            VERSION="$REF_NAME"
+          else
+            VERSION=$(echo "$SHA" | cut -c1-7)
+          fi
+
+          # Build a brief failure summary from available logs (tail 40 lines)
+          SUMMARY=""
+          if [ -f black.log ]; then
+            SUMMARY+=$'\n<b>Black</b> (tail):\n<pre>'
+            tail -n 40 black.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'
+            SUMMARY+=$'</pre>'
+          fi > lint_snippet.html
+          if [ -f pylint.log ]; then
+            {
+              echo "\n<b>Pylint</b> (tail):\n<pre>" ;
+              tail -n 40 pylint.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' ;
+              echo "</pre>" ;
+            } >> lint_snippet.html
+          fi
+          if [ -f pip-audit.log ]; then
+            {
+              echo "\n<b>pip-audit</b> (tail):\n<pre>" ;
+              tail -n 40 pip-audit.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' ;
+              echo "</pre>" ;
+            } >> lint_snippet.html
+          fi
+
+          SNIPPET=$(cat lint_snippet.html)
+
+          MSG="<b>$ICON $TEXT</b>
+          ━━━━━━━━━━━━━━━━━━━━
+          📦 <b>Repo:</b> <code>${{ github.repository }}</code>
+          🌿 <b>Branch:</b> <code>$REF_NAME</code>
+          🔗 <b>Commit:</b> <code>$VERSION</code>
+          ━━━━━━━━━━━━━━━━━━━━
+          $SNIPPET
+          ━━━━━━━━━━━━━━━━━━━━
+          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
+
+          jq -n \
+            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --arg parse_mode "HTML" \
+            --arg text "$MSG" \
+            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
+            | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d @-
 
   build-and-push:
     needs: [lint]

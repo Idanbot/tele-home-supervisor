@@ -3,6 +3,7 @@
 Provides a small `run_cmd` wrapper and `get_docker_cmd` which centralizes
 how we detect the docker binary. This makes testing and changes easier.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -25,9 +26,9 @@ def get_docker_cmd() -> Optional[str]:
     """Return a path to the docker binary or None if not found."""
     candidates = ["/usr/local/bin/docker", "/usr/bin/docker"]
     for c in candidates:
-        if shutil.which(c) or (shutil.which(c.split('/')[-1]) and c):
+        if shutil.which(c) or (shutil.which(c.split("/")[-1]) and c):
             # prefer the explicit path if available in filesystem
-            return c if shutil.which(c) else shutil.which(c.split('/')[-1])
+            return c if shutil.which(c) else shutil.which(c.split("/")[-1])
     # fallback to PATH
     which = shutil.which("docker")
     return which

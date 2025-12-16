@@ -1,5 +1,5 @@
-"""Logging helpers for tele_home_supervisor
-"""
+"""Logging helpers for tele_home_supervisor"""
+
 import logging
 import os
 
@@ -18,7 +18,7 @@ def setup_logging() -> None:
         handler.setFormatter(formatter)
         root.addHandler(handler)
     root.setLevel(level)
-    
+
     # Suppress verbose HTTP request logs from telegram/httpx
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)

@@ -3,6 +3,7 @@
 Simple, dependency-free settings loader. Exposes a `settings` object
 with typed attributes and basic validation.
 """
+
 from __future__ import annotations
 
 import os
@@ -43,7 +44,7 @@ def _read_settings() -> Settings:
         rate_limit = float(os.environ.get("RATE_LIMIT_S", "1.0") or "1.0")
     except Exception:
         rate_limit = 1.0
-    show_wan = (os.environ.get("SHOW_WAN", "false").lower() in {"1", "true", "yes"})
+    show_wan = os.environ.get("SHOW_WAN", "false").lower() in {"1", "true", "yes"}
     watch_paths = _split_paths(os.environ.get("WATCH_PATHS", "/,/srv/media"))
 
     # qBittorrent

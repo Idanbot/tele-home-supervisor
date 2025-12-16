@@ -53,4 +53,3 @@ async def cmd_version(update, context) -> None:
         return
     msg = await asyncio.to_thread(utils.get_version_info)
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-

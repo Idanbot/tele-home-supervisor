@@ -12,7 +12,9 @@ async def cmd_dns(update, context) -> None:
     if not await guard(update, context):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /dns &lt;name&gt;", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            "Usage: /dns &lt;name&gt;", parse_mode=ParseMode.HTML
+        )
         return
     name = context.args[0]
     msg = await asyncio.to_thread(utils.dns_lookup, name)
@@ -23,7 +25,9 @@ async def cmd_traceroute(update, context) -> None:
     if not await guard(update, context):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /traceroute &lt;host&gt; [max_hops]", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            "Usage: /traceroute &lt;host&gt; [max_hops]", parse_mode=ParseMode.HTML
+        )
         return
     host = context.args[0]
     max_hops = 20
@@ -42,4 +46,3 @@ async def cmd_speedtest(update, context) -> None:
         mb = max(1, min(int(context.args[0]), 200))
     msg = await asyncio.to_thread(utils.speedtest_download, mb)
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-

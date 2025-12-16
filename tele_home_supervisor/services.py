@@ -4,6 +4,7 @@ These are thin wrappers around `utils` and `torrent` that return strings
 suitable for sending to telegram. They are intentionally synchronous so
 handlers can call them via `asyncio.to_thread`.
 """
+
 from __future__ import annotations
 
 from . import utils
@@ -41,6 +42,7 @@ def get_uptime_info() -> str:
 def get_version_info() -> str:
     return utils.get_version_info()
 
+
 def container_names() -> set[str]:
     return utils.list_container_names()
 
@@ -61,13 +63,18 @@ def torrent_stop(name_substr: str) -> str:
 def torrent_start(name_substr: str) -> str:
     return _call_with_mgr("start_by_name", name_substr)
 
+
 def torrent_names() -> set[str]:
     mgr = torrent_mod.TorrentManager()
     if not mgr.connect() or mgr.qbt_client is None:
         return set()
     try:
         torrents = mgr.qbt_client.torrents_info() or []
-        return {str(getattr(t, "name", "") or "") for t in torrents if getattr(t, "name", None)}
+        return {
+            str(getattr(t, "name", "") or "")
+            for t in torrents
+            if getattr(t, "name", None)
+        }
     except Exception:
         return set()
 

@@ -14,6 +14,7 @@ The class performs lazy connection (the `connect` method builds the
 as plain text or HTML (this module uses `html.escape` before returning
 content).
 """
+
 from __future__ import annotations
 
 import html
@@ -75,7 +76,9 @@ class TorrentManager:
             return False
 
         try:
-            self.qbt_client = qbittorrentapi.Client(host=self._base_url, username=self.username, password=self.password)
+            self.qbt_client = qbittorrentapi.Client(
+                host=self._base_url, username=self.username, password=self.password
+            )
             self.qbt_client.auth_log_in()
             # Accessing app.version can raise in some client states; guard it
             try:
@@ -124,8 +127,18 @@ class TorrentManager:
             for t in torrents:
                 tname = getattr(t, "name", "") or ""
                 if target in tname.lower():
-                    thash = getattr(t, "hash", None) or getattr(t, "info_hash", None) or getattr(t, "hashString", None)
-                    matches.append({"name": tname, "hash": thash, "state": getattr(t, "state", "unknown")})
+                    thash = (
+                        getattr(t, "hash", None)
+                        or getattr(t, "info_hash", None)
+                        or getattr(t, "hashString", None)
+                    )
+                    matches.append(
+                        {
+                            "name": tname,
+                            "hash": thash,
+                            "state": getattr(t, "state", "unknown"),
+                        }
+                    )
             return matches
         except Exception:
             logger.exception("Error finding torrents by name")
@@ -200,10 +213,18 @@ class TorrentManager:
             # Verify deletion actually happened: query current torrents
             try:
                 remaining = self.qbt_client.torrents_info() or []  # type: ignore
-                remaining_hashes = {getattr(t, "hash", None) or getattr(t, "info_hash", None) or getattr(t, "hashString", None) for t in remaining}
+                remaining_hashes = {
+                    getattr(t, "hash", None)
+                    or getattr(t, "info_hash", None)
+                    or getattr(t, "hashString", None)
+                    for t in remaining
+                }
                 # If any of the requested hashes are still present, consider as not deleted
                 if any(h in remaining_hashes for h in hashes):
-                    logger.warning("Some torrents not deleted as expected: %s", [h for h in hashes if h in remaining_hashes])
+                    logger.warning(
+                        "Some torrents not deleted as expected: %s",
+                        [h for h in hashes if h in remaining_hashes],
+                    )
                     return False
             except Exception:
                 # If verification fails, fall back to reported success
@@ -276,7 +297,9 @@ class TorrentManager:
         ok = self._call_delete(hashes, delete_files=delete_files)
         if ok:
             names = ", ".join(m["name"] for m in matches)
-            action = "Deleted (files removed)" if delete_files else "Deleted (kept files)"
+            action = (
+                "Deleted (files removed)" if delete_files else "Deleted (kept files)"
+            )
             return f"{action}: {html.escape(names)}"
         return "Failed to delete torrents."
 

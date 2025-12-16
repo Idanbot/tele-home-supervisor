@@ -2,6 +2,7 @@
 
 This module contains repeatable code and calculations used by the handlers.
 """
+
 from __future__ import annotations
 
 import html
@@ -59,7 +60,9 @@ def fmt_bytes(n: int) -> str:
 
 def get_primary_ip() -> str:
     try:
-        rc, out, err = run_cmd(["bash", "-lc", "ip route get 1.1.1.1 | awk '{print $7; exit}'"], timeout=2)
+        rc, out, err = run_cmd(
+            ["bash", "-lc", "ip route get 1.1.1.1 | awk '{print $7; exit}'"], timeout=2
+        )
         out = out.strip()
         if rc == 0 and out:
             return out
@@ -77,7 +80,14 @@ def get_primary_ip() -> str:
 
 def get_wan_ip() -> str:
     try:
-        rc, out, err = run_cmd(["bash", "-lc", "curl -fsS https://ipinfo.io/ip || curl -fsS https://ifconfig.me"], timeout=4)
+        rc, out, err = run_cmd(
+            [
+                "bash",
+                "-lc",
+                "curl -fsS https://ipinfo.io/ip || curl -fsS https://ifconfig.me",
+            ],
+            timeout=4,
+        )
         out = out.strip()
         if rc == 0 and out:
             return out
@@ -88,7 +98,10 @@ def get_wan_ip() -> str:
 
 
 def get_temp() -> str:
-    for path in ["/sys/class/thermal/thermal_zone0/temp", "/sys/class/thermal/thermal_zone1/temp"]:
+    for path in [
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/thermal/thermal_zone1/temp",
+    ]:
         try:
             with open(path) as f:
                 t = f.read().strip()
@@ -115,7 +128,11 @@ def get_cpu_temp() -> str:
     The value is expected in millidegrees (e.g. 42000), so we divide by 1000.
     """
     # Try mounted host thermal path first
-    paths = ["/host_thermal/temp", "/sys/class/thermal/thermal_zone0/temp", "/sys/class/thermal/thermal_zone1/temp"]
+    paths = [
+        "/host_thermal/temp",
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/thermal/thermal_zone1/temp",
+    ]
     for p in paths:
         try:
             if not os.path.exists(p):
@@ -170,7 +187,9 @@ def host_health(show_wan: bool = False, watch_paths: list[str] | None = None) ->
     for path in watch_paths:
         try:
             du = psutil.disk_usage(path)
-            disks.append(f"{path}: {fmt_bytes(du.used)}/{fmt_bytes(du.total)} ({du.percent:.0f}%)")
+            disks.append(
+                f"{path}: {fmt_bytes(du.used)}/{fmt_bytes(du.total)} ({du.percent:.0f}%)"
+            )
         except Exception:
             disks.append(f"{path}: n/a")
     temp = get_temp()
@@ -233,11 +252,19 @@ def list_containers_basic() -> str:
             name = html.escape(c.name)
             image = html.escape(c.image.tags[0] if c.image.tags else c.image.short_id)
             status = html.escape(c.status)
-            ports = html.escape(format_ports(c.attrs.get("NetworkSettings", {}).get("Ports")))
-            lines.append(f"<code>{name}</code> • {status} • <code>{image}</code> • {ports}")
+            ports = html.escape(
+                format_ports(c.attrs.get("NetworkSettings", {}).get("Ports"))
+            )
+            lines.append(
+                f"<code>{name}</code> • {status} • <code>{image}</code> • {ports}"
+            )
         except Exception:
-            logger.exception("Error while formatting container %s", getattr(c, 'name', '<unknown>'))
-            lines.append(f"<code>{html.escape(getattr(c, 'name', 'unknown'))}</code> • error")
+            logger.exception(
+                "Error while formatting container %s", getattr(c, "name", "<unknown>")
+            )
+            lines.append(
+                f"<code>{html.escape(getattr(c, 'name', 'unknown'))}</code> • error"
+            )
     return "\n".join(lines)
 
 
@@ -267,7 +294,6 @@ def container_stats_summary() -> str:
     return container_stats_rich()
 
 
-
 def container_stats_rich() -> str:
     """Return extended container stats using `docker stats --no-stream`.
 
@@ -278,7 +304,9 @@ def container_stats_rich() -> str:
         return "<i>Docker CLI not available in container</i>"
 
     fmt = "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}"
-    rc, out, err = run_cmd([docker_cmd, "stats", "--no-stream", "--format", fmt], timeout=5)
+    rc, out, err = run_cmd(
+        [docker_cmd, "stats", "--no-stream", "--format", fmt], timeout=5
+    )
     if rc != 0:
         logger.debug("docker stats returned non-zero: %s %s", rc, err)
         return "<i>Docker stats error</i>"
@@ -297,72 +325,71 @@ def container_stats_rich() -> str:
             )
     return "\n\n".join(lines)
 
+
 def get_container_logs(container_name: str, lines: int = 50) -> str:
     """Get logs from a container.
-    
+
     Args:
         container_name: Name or ID of the container
         lines: Number of lines to fetch. Positive = tail (last N lines),
                Negative = head (first N lines). Default: 50 (last 50 lines)
-    
+
     Returns:
         Formatted HTML string with logs or error message
     """
     docker_cmd = get_docker_cmd()
     if not docker_cmd:
         return "<i>Docker command not found. Ensure docker is installed and accessible.</i>"
-    
+
     try:
         err = ""  # Initialize for error handling
-        
+
         if lines < 0:
             # Get first N lines: fetch all logs and process in Python
             # Note: Docker writes logs to both stdout and stderr, we need to combine them
-            rc, out, err = run_cmd(
-                [docker_cmd, "logs", container_name],
-                timeout=15
-            )
+            rc, out, err = run_cmd([docker_cmd, "logs", container_name], timeout=15)
             if rc != 0:
                 raise subprocess.CalledProcessError(rc, "docker logs", output=err)
-            
+
             # Combine stdout and stderr (docker logs can write to both)
             combined = (out + err).strip()
-            
+
             # Take first N lines
             log_lines = combined.splitlines()
             requested_lines = abs(lines)
             total_lines = len(log_lines)
             out = "\n".join(log_lines[:requested_lines])
-            
+
             # Show info about total available lines
             if total_lines > requested_lines:
-                out = out + f"\n...\n<i>(showing first {requested_lines} of {total_lines} total lines)</i>"
+                out = (
+                    out
+                    + f"\n...\n<i>(showing first {requested_lines} of {total_lines} total lines)</i>"
+                )
             else:
                 out = out + f"\n<i>(total: {total_lines} lines available)</i>"
         else:
             # Get last N lines using --tail
             rc, out, err = run_cmd(
-                [docker_cmd, "logs", "--tail", str(lines), container_name],
-                timeout=15
+                [docker_cmd, "logs", "--tail", str(lines), container_name], timeout=15
             )
             if rc != 0:
                 raise subprocess.CalledProcessError(rc, "docker logs", output=err)
-            
+
             # Combine stdout and stderr
             out = (out + err).strip()
-            
+
             # Get total line count for context
             rc_count, out_count, err_count = run_cmd(
-                [docker_cmd, "logs", container_name],
-                timeout=15
+                [docker_cmd, "logs", container_name], timeout=15
             )
             combined_count = (out_count + err_count).strip()
             total_lines = len(combined_count.splitlines()) if rc_count == 0 else 0
-        
+
         out = out.strip()
         if not out:
             return f"<i>Container {html.escape(container_name)} has no logs</i>"
-        
+
         # Limit output to avoid Telegram message size issues
         max_chars = 3500
         if len(out) > max_chars:
@@ -372,22 +399,22 @@ def get_container_logs(container_name: str, lines: int = 50) -> str:
             else:
                 # For tail, truncate from beginning
                 out = "...\n" + out[-max_chars:]
-        
+
         safe_name = html.escape(container_name)
         direction = "first" if lines < 0 else "last"
         count = abs(lines)
-        
+
         # Add total available context for tail mode
         if lines > 0 and total_lines > 0:
             count_info = f"{count} requested, {total_lines} available"
         else:
             count_info = str(count)
-        
+
         return (
             f"<b>Logs for {safe_name}</b> <i>({direction} {count_info} lines)</i>\n"
             f"<pre>{html.escape(out)}</pre>"
         )
-    
+
     except subprocess.TimeoutExpired:
         return f"<i>Timeout getting logs for {html.escape(container_name)}</i>"
     except subprocess.CalledProcessError as e:
@@ -411,12 +438,17 @@ def healthcheck_container(container_name: str) -> str:
     if not docker_cmd:
         return "<i>Docker CLI not available in container</i>"
     try:
-        rc, out, err = run_cmd([docker_cmd, "inspect", "--format", "{{json .State}}", container_name], timeout=4)
+        rc, out, err = run_cmd(
+            [docker_cmd, "inspect", "--format", "{{json .State}}", container_name],
+            timeout=4,
+        )
         if rc != 0:
             err_text = err or out
             if "No such object" in err_text or "No such container" in err_text:
                 return f"<i>Container {html.escape(container_name)} not found</i>"
-            logger.exception("Error inspecting container %s: %s %s", container_name, rc, err_text)
+            logger.exception(
+                "Error inspecting container %s: %s %s", container_name, rc, err_text
+            )
             return f"<i>Error:</i> <code>{html.escape(str(err_text))}</code>"
         state = json.loads(out)
         health = state.get("Health")
@@ -424,14 +456,16 @@ def healthcheck_container(container_name: str) -> str:
             status = health.get("Status", "unknown")
             return f"<b>Container:</b> <code>{html.escape(container_name)}</code>\n<b>Health:</b> {html.escape(status)}"
         # Fallback to general state fields
-        status = state.get("Status") or ("running" if state.get("Running") else "stopped")
+        status = state.get("Status") or (
+            "running" if state.get("Running") else "stopped"
+        )
         exit_code = state.get("ExitCode")
         s = f"<b>Container:</b> <code>{html.escape(container_name)}</code>\n<b>Status:</b> {html.escape(str(status))}"
         if exit_code is not None:
             s += f"\n<b>ExitCode:</b> {exit_code}"
         return s
     except subprocess.CalledProcessError as e:
-        err = (e.output or str(e))
+        err = e.output or str(e)
         if "No such object" in err or "No such container" in err:
             return f"<i>Container {html.escape(container_name)} not found</i>"
         logger.exception("Error inspecting container %s", container_name)
@@ -447,7 +481,9 @@ def ping_host(host: str, count: int = 3) -> str:
     if not ping_bin or not os.path.exists(ping_bin):
         return "<i>ping command not available in container</i>"
     try:
-        rc, out, err = run_cmd([ping_bin, "-c", str(count), "-W", "2", host], timeout=10)
+        rc, out, err = run_cmd(
+            [ping_bin, "-c", str(count), "-W", "2", host], timeout=10
+        )
         out = out.strip()
         if not out:
             return "<i>No output from ping</i>"
@@ -630,10 +666,13 @@ def get_version_info() -> str:
     build_version = os.environ.get("TELE_HOME_SUPERVISOR_BUILD_VERSION")
     if build_version:
         lines.append(f"<b>Build:</b> <code>{html.escape(build_version)}</code>")
-    
+
     # Try to get latest git commit date (suppress stderr to avoid logs when .git missing)
     try:
-        rc, out, err = run_cmd(["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"], timeout=3)
+        rc, out, err = run_cmd(
+            ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"],
+            timeout=3,
+        )
         out = out.strip()
         if rc == 0 and out:
             lines.append(f"<b>Last Commit:</b> {html.escape(out)}")
@@ -647,14 +686,15 @@ def get_version_info() -> str:
             lines.append(f"<b>Commit:</b> <code>{html.escape(out)}</code>")
     except Exception:
         pass
-    
+
     # Python version
     import sys
+
     lines.append(f"<b>Python:</b> {sys.version.split()[0]}")
-    
+
     # Package info
     lines.append("<b>Package:</b> tele-home-supervisor")
-    
+
     # Startup time
     try:
         from .runtime import STARTUP_TIME
@@ -663,10 +703,10 @@ def get_version_info() -> str:
         lines.append(f"<b>Started:</b> {startup}")
     except Exception:
         pass
-    
+
     if len(lines) == 1:
         return "<i>Version information not available</i>"
-    
+
     return "\n".join(lines)
 
 

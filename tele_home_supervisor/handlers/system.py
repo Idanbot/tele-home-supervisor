@@ -38,7 +38,9 @@ async def cmd_ping(update, context) -> None:
     if not await guard(update, context):
         return
     if not context.args or len(context.args) == 0:
-        await update.message.reply_text("Usage: /ping &lt;ip_or_host&gt; [count]", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            "Usage: /ping &lt;ip_or_host&gt; [count]", parse_mode=ParseMode.HTML
+        )
         return
     host = context.args[0]
     count = 3
@@ -61,4 +63,3 @@ async def cmd_top(update, context) -> None:
         return
     msg = await asyncio.to_thread(utils.get_top_processes)
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-

@@ -1,4 +1,5 @@
 """Bot runtime state (caches, subscriptions, background tasks)."""
+
 from __future__ import annotations
 
 import json
@@ -30,11 +31,11 @@ class BotState:
 
     torrent_completion_subscribers: set[int] = field(default_factory=set)
     tasks: dict[str, object] = field(default_factory=dict)
-    
+
     # Scheduled notifications mute state (chat_id -> muted)
     epic_games_muted: set[int] = field(default_factory=set)
     hackernews_muted: set[int] = field(default_factory=set)
-    
+
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
 
     def refresh_containers(self) -> set[str]:
@@ -74,7 +75,9 @@ class BotState:
             ranked = sorted(items)
         return ranked[: max(0, limit)]
 
-    def set_torrent_completion_subscription(self, chat_id: int, enable: bool | None) -> bool:
+    def set_torrent_completion_subscription(
+        self, chat_id: int, enable: bool | None
+    ) -> bool:
         if enable is None:
             enable = chat_id not in self.torrent_completion_subscribers
         if enable:
@@ -119,7 +122,9 @@ class BotState:
             data = {
                 "epic_games_muted": list(self.epic_games_muted),
                 "hackernews_muted": list(self.hackernews_muted),
-                "torrent_completion_subscribers": list(self.torrent_completion_subscribers),
+                "torrent_completion_subscribers": list(
+                    self.torrent_completion_subscribers
+                ),
             }
             self._state_file.write_text(json.dumps(data, indent=2))
         except Exception:
@@ -133,11 +138,12 @@ class BotState:
             data = json.loads(self._state_file.read_text())
             self.epic_games_muted = set(data.get("epic_games_muted", []))
             self.hackernews_muted = set(data.get("hackernews_muted", []))
-            self.torrent_completion_subscribers = set(data.get("torrent_completion_subscribers", []))
+            self.torrent_completion_subscribers = set(
+                data.get("torrent_completion_subscribers", [])
+            )
             logger.info("Loaded bot state from %s", self._state_file)
         except Exception:
             logger.exception("Failed to load bot state")
 
 
 BOT_STATE_KEY = "state"
-
