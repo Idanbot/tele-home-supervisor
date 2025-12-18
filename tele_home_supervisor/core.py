@@ -27,6 +27,8 @@ if not ALLOWED:
 # Feature flags / config used by handlers
 SHOW_WAN = settings.SHOW_WAN
 WATCH_PATHS = list(settings.WATCH_PATHS)
+OLLAMA_HOST = settings.OLLAMA_HOST
+OLLAMA_MODEL = settings.OLLAMA_MODEL
 
 
 def _validate_config() -> None:
@@ -43,4 +45,12 @@ def _validate_config() -> None:
 _validate_config()
 
 
-__all__ = ["TOKEN", "ALLOWED", "SHOW_WAN", "WATCH_PATHS", "RATE_LIMIT_S"]
+__all__ = [
+    "TOKEN",
+    "ALLOWED",
+    "SHOW_WAN",
+    "WATCH_PATHS",
+    "RATE_LIMIT_S",
+    "OLLAMA_HOST",
+    "OLLAMA_MODEL",
+]

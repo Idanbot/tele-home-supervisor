@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .common import run_rate_limited
-from . import meta, system, docker, network, torrents, notifications
+from . import meta, system, docker, network, torrents, notifications, ai
 
 
 async def cmd_start(update, context) -> None:
@@ -132,3 +132,7 @@ async def cmd_gogfree_now(update, context) -> None:
 
 async def cmd_humblefree_now(update, context) -> None:
     await run_rate_limited(update, context, notifications.cmd_humblefree_now)
+
+
+async def cmd_ask(update, context) -> None:
+    await run_rate_limited(update, context, ai.cmd_ask)

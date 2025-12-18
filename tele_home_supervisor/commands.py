@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-Group = Literal["System", "Docker", "Network", "Torrents", "Notifications", "Info"]
+Group = Literal[
+    "System", "Docker", "Network", "Torrents", "Notifications", "AI", "Info"
+]
 Needs = Literal["none", "container", "torrent"]
 
 
@@ -243,6 +245,15 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "show current Humble Bundle free games",
         handler="cmd_humblefree_now",
     ),
+    # AI
+    CommandSpec(
+        "ask",
+        (),
+        "AI",
+        "/ask <question>",
+        "ask a question to local Ollama model (streaming)",
+        handler="cmd_ask",
+    ),
 )
 
 
@@ -252,5 +263,6 @@ GROUP_ORDER: tuple[Group, ...] = (
     "Network",
     "Torrents",
     "Notifications",
+    "AI",
     "Info",
 )

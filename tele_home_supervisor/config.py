@@ -35,6 +35,8 @@ class Settings:
     QBT_PORT: int
     QBT_USER: str
     QBT_PASS: str
+    OLLAMA_HOST: str
+    OLLAMA_MODEL: str
 
 
 def _read_settings() -> Settings:
@@ -57,6 +59,10 @@ def _read_settings() -> Settings:
     qbt_user = os.environ.get("QBT_USER") or "admin"
     qbt_pass = os.environ.get("QBT_PASS") or "adminadmin"
 
+    # Ollama
+    ollama_host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
+    ollama_model = os.environ.get("OLLAMA_MODEL") or "llama2"
+
     return Settings(
         BOT_TOKEN=token,
         ALLOWED_CHAT_IDS=allowed,
@@ -67,6 +73,8 @@ def _read_settings() -> Settings:
         QBT_PORT=qbt_port,
         QBT_USER=qbt_user,
         QBT_PASS=qbt_pass,
+        OLLAMA_HOST=ollama_host,
+        OLLAMA_MODEL=ollama_model,
     )
 
 
