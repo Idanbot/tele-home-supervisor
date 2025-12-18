@@ -110,9 +110,7 @@ async def cmd_dhealth(update, context) -> None:
 
 
 async def cmd_ports(update, context) -> None:
-
     if not await guard(update, context):
-
         return
 
     msg = await services.get_listening_ports()
@@ -122,5 +120,4 @@ async def cmd_ports(update, context) -> None:
     formatted = f"{view.bold('Listening Ports:')}\n{view.pre(msg)}"
 
     for part in view.chunk(formatted, size=4000):
-
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)

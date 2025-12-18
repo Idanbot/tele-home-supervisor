@@ -4,6 +4,7 @@
 This file keeps compatibility for the existing Dockerfile/usage which runs
 `python /app/bot.py`.
 """
+
 from tele_home_supervisor.main import run
 
 

@@ -81,7 +81,6 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 len(pending_tokens) >= STREAM_MIN_TOKENS
                 or (now - last_update_time) >= STREAM_UPDATE_INTERVAL
             ):
-
                 current_text = _format_html("".join(full_response), done=False)
 
                 try:

@@ -497,7 +497,7 @@ async def speedtest_download(mb: int = 10) -> str:
         mbps = (downloaded * 8.0) / seconds / 1_000_000.0
 
         return (
-            f"Size: {downloaded/1_000_000.0:.1f}MB\n"
+            f"Size: {downloaded / 1_000_000.0:.1f}MB\n"
             f"Time: {seconds:.2f}s\n"
             f"Rate: {_fmt_rate_bps(bps)} ({mbps:.1f} Mbps)"
         )

@@ -195,19 +195,27 @@ class TorrentManager:
             deleted = False
             # Primary: correct param names
             try:
-                self.qbt_client.torrents_delete(hashes=hashes_joined, delete_files=delete_files)  # type: ignore
+                self.qbt_client.torrents_delete(
+                    hashes=hashes_joined, delete_files=delete_files
+                )  # type: ignore
                 deleted = True
             except Exception:
                 # Fallbacks for older/signature-variant clients
                 try:
-                    self.qbt_client.torrents_delete(torrent_hashes=hashes_joined, delete_files=delete_files)  # type: ignore
+                    self.qbt_client.torrents_delete(
+                        torrent_hashes=hashes_joined, delete_files=delete_files
+                    )  # type: ignore
                     deleted = True
                 except Exception:
                     try:
-                        self.qbt_client.torrents_delete(hashes=hashes_joined, deleteFiles=delete_files)  # type: ignore
+                        self.qbt_client.torrents_delete(
+                            hashes=hashes_joined, deleteFiles=delete_files
+                        )  # type: ignore
                         deleted = True
                     except Exception:
-                        self.qbt_client.torrents_delete(hashes=hashes, delete_files=delete_files)  # type: ignore
+                        self.qbt_client.torrents_delete(
+                            hashes=hashes, delete_files=delete_files
+                        )  # type: ignore
                         deleted = True
 
             # Verify deletion actually happened: query current torrents

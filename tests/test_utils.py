@@ -31,7 +31,6 @@ async def test_container_stats_rich_parsing():
         ),
         patch("tele_home_supervisor.cli.run_cmd", new_callable=AsyncMock) as mock_run,
     ):
-
         output = "my-container\t5.0%\t10.0%\t50MiB\t1KB/2KB\t0B/0B\t123"
         mock_run.return_value = (0, output, "")
 
@@ -48,7 +47,6 @@ async def test_speedtest_parser_success():
         patch("shutil.which", return_value="/usr/bin/curl"),
         patch("tele_home_supervisor.cli.run_cmd", new_callable=AsyncMock) as mock_run,
     ):
-
         # curl -w "%{{time_total}} %{{size_download}}" output
         # 2.0 seconds, 10,000,000 bytes (10MB)
         mock_run.return_value = (0, "2.0 10000000", "")
