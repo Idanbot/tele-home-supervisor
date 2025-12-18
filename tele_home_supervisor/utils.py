@@ -131,7 +131,10 @@ async def get_cpu_temp() -> str:
                         return f"CPU Temp: {temp:.1f}°C"
                     except ValueError:
                         continue
-            except Exception:
+            except Exception as sensor_error:
+                logger.debug(
+                    f"Skipping unreadable temperature sensor {p}: {sensor_error}"
+                )
                 continue
         return "Error: Could not read temperature."
 

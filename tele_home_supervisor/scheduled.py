@@ -504,8 +504,8 @@ def fetch_humble_free_games() -> tuple[str, list[str]]:
                                         "image": item.get("icon", ""),
                                     }
                                 )
-            except Exception:
-                pass  # Fallback failed, continue with empty list
+            except Exception as fallback_error:
+                logger.warning(f"Humble Bundle fallback API failed: {fallback_error}")
 
         if not free_games:
             return (

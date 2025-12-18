@@ -117,8 +117,8 @@ async def handle_callback_query(update, context) -> None:
         logger.exception("Callback query error")
         try:
             await query.message.reply_text(f"❌ Error: {html.escape(str(e))}")
-        except Exception:
-            pass
+        except Exception as notify_error:
+            logger.error(f"Failed to send error notification: {notify_error}")
 
 
 async def _handle_dlogs_callback(query, container: str) -> None:
