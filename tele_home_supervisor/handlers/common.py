@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import html
-import threading
+import logging
 import time
 from typing import TYPE_CHECKING, Awaitable, Callable
-import logging
 
 from telegram.constants import ParseMode
 
-from .. import core
+from .. import config
 from ..state import BOT_STATE_KEY, BotState
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 
 # Global rate limit (seconds) for all commands.
 _last_command_ts = 0.0
-_rate_lock = threading.Lock()
+# We use a simple timestamp check. Since we are in asyncio,
+# strictly speaking race conditions are only possible at await points.
+# A simple float comparison is atomic enough for this use case.
 
 
 def get_state(app) -> BotState:
@@ -31,10 +33,10 @@ def get_state(app) -> BotState:
 
 
 def allowed(update: "Update") -> bool:
-    if not core.ALLOWED:
+    if not config.ALLOWED:
         return False
     chat_id = update.effective_chat.id if update.effective_chat else None
-    return chat_id in core.ALLOWED
+    return chat_id in config.ALLOWED
 
 
 async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
@@ -45,29 +47,31 @@ async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
     return False
 
 
-async def run_rate_limited(
-    update: "Update",
-    context: "ContextTypes.DEFAULT_TYPE",
-    func: Callable[["Update", "ContextTypes.DEFAULT_TYPE"], Awaitable[None]],
-) -> None:
-    try:
+def rate_limit(func: Callable) -> Callable:
+    """Decorator to enforce global rate limit."""
+
+    @functools.wraps(func)
+    async def wrapper(
+        update: "Update", context: "ContextTypes.DEFAULT_TYPE", *args, **kwargs
+    ):
+        global _last_command_ts
         now = time.monotonic()
-        with _rate_lock:
-            global _last_command_ts
-            elapsed = now - _last_command_ts
-            if elapsed < core.RATE_LIMIT_S:
-                try:
-                    if update and getattr(update, "effective_message", None):
-                        await update.effective_message.reply_text(
-                            f"⏱ Rate limit: please wait {core.RATE_LIMIT_S - elapsed:.1f}s",
-                        )
-                except Exception as e:
-                    logger.debug("rate-limit notice failed to send: %s", e)
-                return
-            _last_command_ts = now
-    except Exception as e:
-        logger.debug("rate limiter error: %s", e)
-    await func(update, context)
+        elapsed = now - _last_command_ts
+
+        if elapsed < config.RATE_LIMIT_S:
+            try:
+                if update and getattr(update, "effective_message", None):
+                    await update.effective_message.reply_text(
+                        f"⏱ Rate limit: please wait {config.RATE_LIMIT_S - elapsed:.1f}s",
+                    )
+            except Exception as e:
+                logger.debug("rate-limit notice failed to send: %s", e)
+            return
+
+        _last_command_ts = now
+        return await func(update, context, *args, **kwargs)
+
+    return wrapper
 
 
 def _format_suggestions(names: list[str]) -> str:
@@ -87,11 +91,3 @@ async def reply_usage_with_suggestions(
     await update.message.reply_text(
         f"<i>Usage:</i> {usage_html}{hint}", parse_mode=ParseMode.HTML
     )
-
-
-async def maybe_refresh_containers(context: "ContextTypes.DEFAULT_TYPE") -> None:
-    await asyncio.to_thread(get_state(context.application).maybe_refresh, "containers")
-
-
-async def maybe_refresh_torrents(context: "ContextTypes.DEFAULT_TYPE") -> None:
-    await asyncio.to_thread(get_state(context.application).maybe_refresh, "torrents")

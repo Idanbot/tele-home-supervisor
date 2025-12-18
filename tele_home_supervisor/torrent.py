@@ -373,7 +373,7 @@ class TorrentManager:
             return f"Error retrieving status: {html.escape(str(exc))}"
 
     def get_torrent_list(self) -> list[dict]:
-        """Return list of all torrents with basic info for inline keyboards."""
+        """Return list of all torrents with detailed info."""
         if self.qbt_client is None:
             if not self.connect():
                 return []
@@ -386,12 +386,45 @@ class TorrentManager:
                     or getattr(t, "info_hash", None)
                     or getattr(t, "hashString", None)
                 )
+
+                # Calculate size summary
+                total_size_raw = (
+                    getattr(t, "total_size", None) or getattr(t, "size", None) or 0
+                )
+                try:
+                    total_size = int(total_size_raw)
+                except Exception:
+                    total_size = 0
+
+                progress_frac = getattr(t, "progress", 0.0) or 0.0
+                downloaded = None
+                for attr in ("completed", "downloaded", "downloaded_session"):
+                    val = getattr(t, attr, None)
+                    if val is not None:
+                        try:
+                            downloaded = int(val)
+                            break
+                        except ValueError:
+                            pass
+
+                if downloaded is None and total_size > 0:
+                    downloaded = int(progress_frac * total_size)
+                if downloaded is None:
+                    downloaded = 0
+
+                size_summary = ""
+                if total_size > 0:
+                    downloaded = max(0, min(downloaded, total_size))
+                    size_summary = f"{fmt_bytes_compact_decimal(downloaded)}/{fmt_bytes_compact_decimal(total_size)}"
+
                 result.append(
                     {
                         "name": getattr(t, "name", "") or "",
                         "hash": thash or "",
                         "state": getattr(t, "state", "unknown"),
-                        "progress": getattr(t, "progress", 0.0) or 0.0,
+                        "progress": progress_frac * 100.0,
+                        "dlspeed": (getattr(t, "dlspeed", 0) or 0) / 1024.0,
+                        "size_summary": size_summary,
                     }
                 )
             return result

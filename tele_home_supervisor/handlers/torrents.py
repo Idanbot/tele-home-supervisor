@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import html
-
-from telegram.constants import ParseMode
 import logging
 
-from .. import services, utils
+from telegram.constants import ParseMode
+
+from .. import services, view
 from ..background import ensure_started
 from ..state import BotState
 from .common import guard, get_state, reply_usage_with_suggestions
@@ -16,20 +15,17 @@ logger = logging.getLogger(__name__)
 
 
 async def cmd_torrent_add(update, context) -> None:
-    """Add a torrent to qBittorrent (magnet/URL).
-
-    Usage: /tadd <torrent> [save_path]
-    """
+    """Add a torrent to qBittorrent (magnet/URL)."""
     if not await guard(update, context):
         return
     if not context.args:
         await update.message.reply_text(
-            "Usage: /tadd &lt;torrent&gt; [save_path]", parse_mode=ParseMode.HTML
+            "Usage: /tadd <torrent> [save_path]", parse_mode=ParseMode.HTML
         )
         return
     torrent = context.args[0]
     save_path = context.args[1] if len(context.args) > 1 else "/downloads"
-    res = await asyncio.to_thread(services.torrent_add, torrent, save_path)
+    res = await services.torrent_add(torrent, save_path)
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
@@ -40,15 +36,13 @@ async def cmd_torrent_status(update, context) -> None:
         get_state(context.application).refresh_torrents()
     except Exception as e:
         logger.debug("refresh_torrents failed: %s", e)
-    msg = await asyncio.to_thread(services.torrent_status)
 
-    # Get torrent list for inline keyboard
-    torrents = await asyncio.to_thread(services.get_torrent_list)
+    torrents = await services.get_torrent_list()
+    msg = view.render_torrent_list(torrents)
     keyboard = build_torrent_keyboard(torrents) if torrents else None
 
-    parts = list(utils.chunk(msg, size=4000))
+    parts = view.chunk(msg)
     for i, part in enumerate(parts):
-        # Only add keyboard to the last message
         if i == len(parts) - 1 and keyboard:
             await update.message.reply_text(
                 part, parse_mode=ParseMode.HTML, reply_markup=keyboard
@@ -64,11 +58,11 @@ async def cmd_torrent_stop(update, context) -> None:
     state.maybe_refresh("torrents")
     if not context.args:
         await reply_usage_with_suggestions(
-            update, "/tstop &lt;torrent&gt;", state.suggest("torrents", limit=5)
+            update, "/tstop <torrent>", state.suggest("torrents", limit=5)
         )
         return
     name = " ".join(context.args)
-    res = await asyncio.to_thread(services.torrent_stop, name)
+    res = await services.torrent_stop(name)
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
@@ -79,11 +73,11 @@ async def cmd_torrent_start(update, context) -> None:
     state.maybe_refresh("torrents")
     if not context.args:
         await reply_usage_with_suggestions(
-            update, "/tstart &lt;torrent&gt;", state.suggest("torrents", limit=5)
+            update, "/tstart <torrent>", state.suggest("torrents", limit=5)
         )
         return
     name = " ".join(context.args)
-    res = await asyncio.to_thread(services.torrent_start, name)
+    res = await services.torrent_start(name)
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
@@ -94,7 +88,7 @@ async def cmd_torrent_delete(update, context) -> None:
     state.maybe_refresh("torrents")
     if not context.args:
         await reply_usage_with_suggestions(
-            update, "/tdelete &lt;torrent&gt; yes", state.suggest("torrents", limit=5)
+            update, "/tdelete <torrent> yes", state.suggest("torrents", limit=5)
         )
         return
 
@@ -103,12 +97,12 @@ async def cmd_torrent_delete(update, context) -> None:
     name = " ".join(context.args[:-1] if confirm else context.args).strip()
     if not name:
         await reply_usage_with_suggestions(
-            update, "/tdelete &lt;torrent&gt; yes", state.suggest("torrents", limit=5)
+            update, "/tdelete <torrent> yes", state.suggest("torrents", limit=5)
         )
         return
 
     if not confirm:
-        matches_msg = await asyncio.to_thread(services.torrent_preview, name)
+        matches_msg = await services.torrent_preview(name)
         hint_names = state.suggest("torrents", query=name, limit=5)
         hint = ""
         if hint_names:
@@ -124,7 +118,7 @@ async def cmd_torrent_delete(update, context) -> None:
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         return
 
-    res = await asyncio.to_thread(services.torrent_delete, name)
+    res = await services.torrent_delete(name)
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 

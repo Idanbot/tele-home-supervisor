@@ -2,137 +2,53 @@
 
 from __future__ import annotations
 
-from .common import run_rate_limited
+from .common import rate_limit
 from . import meta, system, docker, network, torrents, notifications, ai
 
 
-async def cmd_start(update, context) -> None:
-    await run_rate_limited(update, context, meta.cmd_start)
-
-
-async def cmd_help(update, context) -> None:
-    await run_rate_limited(update, context, meta.cmd_help)
-
-
-async def cmd_whoami(update, context) -> None:
-    await run_rate_limited(update, context, meta.cmd_whoami)
-
-
-async def cmd_version(update, context) -> None:
-    await run_rate_limited(update, context, meta.cmd_version)
-
-
-async def cmd_ip(update, context) -> None:
-    await run_rate_limited(update, context, system.cmd_ip)
-
-
-async def cmd_health(update, context) -> None:
-    await run_rate_limited(update, context, system.cmd_health)
-
-
-async def cmd_uptime(update, context) -> None:
-    await run_rate_limited(update, context, system.cmd_uptime)
-
-
-async def cmd_temp(update, context) -> None:
-    await run_rate_limited(update, context, system.cmd_temp)
-
-
-async def cmd_top(update, context) -> None:
-    await run_rate_limited(update, context, system.cmd_top)
-
-
-async def cmd_ping(update, context) -> None:
-    await run_rate_limited(update, context, system.cmd_ping)
-
-
-async def cmd_docker(update, context) -> None:
-    await run_rate_limited(update, context, docker.cmd_docker)
-
-
-async def cmd_dockerstats(update, context) -> None:
-    await run_rate_limited(update, context, docker.cmd_dockerstats)
-
-
-async def cmd_dstats_rich(update, context) -> None:
-    await run_rate_limited(update, context, docker.cmd_dstats_rich)
-
-
-async def cmd_dlogs(update, context) -> None:
-    await run_rate_limited(update, context, docker.cmd_dlogs)
-
-
-async def cmd_dhealth(update, context) -> None:
-    await run_rate_limited(update, context, docker.cmd_dhealth)
-
-
-async def cmd_ports(update, context) -> None:
-    await run_rate_limited(update, context, docker.cmd_ports)
-
-
-async def cmd_dns(update, context) -> None:
-    await run_rate_limited(update, context, network.cmd_dns)
-
-
-async def cmd_traceroute(update, context) -> None:
-    await run_rate_limited(update, context, network.cmd_traceroute)
-
-
-async def cmd_speedtest(update, context) -> None:
-    await run_rate_limited(update, context, network.cmd_speedtest)
-
-
-async def cmd_torrent_add(update, context) -> None:
-    await run_rate_limited(update, context, torrents.cmd_torrent_add)
-
-
-async def cmd_torrent_status(update, context) -> None:
-    await run_rate_limited(update, context, torrents.cmd_torrent_status)
-
-
-async def cmd_torrent_stop(update, context) -> None:
-    await run_rate_limited(update, context, torrents.cmd_torrent_stop)
-
-
-async def cmd_torrent_start(update, context) -> None:
-    await run_rate_limited(update, context, torrents.cmd_torrent_start)
-
-
-async def cmd_torrent_delete(update, context) -> None:
-    await run_rate_limited(update, context, torrents.cmd_torrent_delete)
-
-
-async def cmd_subscribe(update, context) -> None:
-    await run_rate_limited(update, context, torrents.cmd_subscribe)
-
-
-async def cmd_mute_epicgames(update, context) -> None:
-    await run_rate_limited(update, context, notifications.cmd_mute_epicgames)
-
-
-async def cmd_mute_hackernews(update, context) -> None:
-    await run_rate_limited(update, context, notifications.cmd_mute_hackernews)
-
-
-async def cmd_epicgames_now(update, context) -> None:
-    await run_rate_limited(update, context, notifications.cmd_epicgames_now)
-
-
-async def cmd_hackernews_now(update, context) -> None:
-    await run_rate_limited(update, context, notifications.cmd_hackernews_now)
-
-
-async def cmd_steamfree_now(update, context) -> None:
-    await run_rate_limited(update, context, notifications.cmd_steamfree_now)
-
-
-async def cmd_gogfree_now(update, context) -> None:
-    await run_rate_limited(update, context, notifications.cmd_gogfree_now)
-
-
-async def cmd_humblefree_now(update, context) -> None:
-    await run_rate_limited(update, context, notifications.cmd_humblefree_now)
-
-
-async def cmd_ask(update, context) -> None:
-    await run_rate_limited(update, context, ai.cmd_ask)
+# Meta
+cmd_start = rate_limit(meta.cmd_start)
+cmd_help = rate_limit(meta.cmd_help)
+cmd_whoami = rate_limit(meta.cmd_whoami)
+cmd_version = rate_limit(meta.cmd_version)
+
+# System
+cmd_ip = rate_limit(system.cmd_ip)
+cmd_health = rate_limit(system.cmd_health)
+cmd_uptime = rate_limit(system.cmd_uptime)
+cmd_temp = rate_limit(system.cmd_temp)
+cmd_top = rate_limit(system.cmd_top)
+cmd_ping = rate_limit(system.cmd_ping)
+
+# Docker
+cmd_docker = rate_limit(docker.cmd_docker)
+cmd_dockerstats = rate_limit(docker.cmd_dockerstats)
+cmd_dstats_rich = rate_limit(docker.cmd_dstats_rich)
+cmd_dlogs = rate_limit(docker.cmd_dlogs)
+cmd_dhealth = rate_limit(docker.cmd_dhealth)
+cmd_ports = rate_limit(docker.cmd_ports)
+
+# Network
+cmd_dns = rate_limit(network.cmd_dns)
+cmd_traceroute = rate_limit(network.cmd_traceroute)
+cmd_speedtest = rate_limit(network.cmd_speedtest)
+
+# Torrents
+cmd_torrent_add = rate_limit(torrents.cmd_torrent_add)
+cmd_torrent_status = rate_limit(torrents.cmd_torrent_status)
+cmd_torrent_stop = rate_limit(torrents.cmd_torrent_stop)
+cmd_torrent_start = rate_limit(torrents.cmd_torrent_start)
+cmd_torrent_delete = rate_limit(torrents.cmd_torrent_delete)
+cmd_subscribe = rate_limit(torrents.cmd_subscribe)
+
+# Notifications
+cmd_mute_epicgames = rate_limit(notifications.cmd_mute_epicgames)
+cmd_mute_hackernews = rate_limit(notifications.cmd_mute_hackernews)
+cmd_epicgames_now = rate_limit(notifications.cmd_epicgames_now)
+cmd_hackernews_now = rate_limit(notifications.cmd_hackernews_now)
+cmd_steamfree_now = rate_limit(notifications.cmd_steamfree_now)
+cmd_gogfree_now = rate_limit(notifications.cmd_gogfree_now)
+cmd_humblefree_now = rate_limit(notifications.cmd_humblefree_now)
+
+# AI
+cmd_ask = rate_limit(ai.cmd_ask)

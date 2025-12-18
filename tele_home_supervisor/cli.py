@@ -1,27 +1,46 @@
 """Helper utilities for running subprocess/CLI commands.
 
-Provides a small `run_cmd` wrapper and `get_docker_cmd` which centralizes
-how we detect the docker binary. This makes testing and changes easier.
+Provides an async `run_cmd` wrapper and `get_docker_cmd`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import shutil
-import subprocess  # nosec B404 - subprocess is used for controlled CLI calls
+import logging
 from typing import Optional, Tuple
 
+logger = logging.getLogger(__name__)
 
-def run_cmd(cmd: list[str], timeout: int = 10) -> Tuple[int, str, str]:
-    """Run a command and return (returncode, stdout, stderr)."""
+
+async def run_cmd(cmd: list[str], timeout: int = 10) -> Tuple[int, str, str]:
+    """Run a command asynchronously and return (returncode, stdout, stderr)."""
     try:
-        proc = subprocess.run(  # nosec B603 - arguments are caller-provided but shell is not used
-            cmd, capture_output=True, text=True, timeout=timeout
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        return proc.returncode, proc.stdout or "", proc.stderr or ""
-    except subprocess.TimeoutExpired:
-        return 124, "", "timeout"
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout
+            )
+            return (
+                process.returncode or 0,
+                stdout.decode().strip(),
+                stderr.decode().strip(),
+            )
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            return 124, "", "timeout"
     except FileNotFoundError:
         return 127, "", "not found"
+    except Exception as e:
+        logger.debug(f"run_cmd failed: {e}")
+        return 1, "", str(e)
 
 
 def get_docker_cmd() -> Optional[str]:

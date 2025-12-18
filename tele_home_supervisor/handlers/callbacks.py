@@ -9,7 +9,7 @@ import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-from .. import services, utils
+from .. import services, view, config
 from ..state import BotState
 from .common import get_state
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 def build_docker_keyboard(containers: list[str]) -> InlineKeyboardMarkup:
     """Build inline keyboard with container action buttons."""
     buttons = []
-    for name in containers[:8]:  # Limit to 8 containers for UI clarity
+    for name in containers[:8]:
         buttons.append(
             [
                 InlineKeyboardButton(
@@ -29,7 +29,6 @@ def build_docker_keyboard(containers: list[str]) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("📊", callback_data=f"dstats:{name[:30]}"),
             ]
         )
-    # Add refresh button
     buttons.append([InlineKeyboardButton("🔄 Refresh", callback_data="docker:refresh")])
     return InlineKeyboardMarkup(buttons)
 
@@ -37,7 +36,7 @@ def build_docker_keyboard(containers: list[str]) -> InlineKeyboardMarkup:
 def build_torrent_keyboard(torrents: list[dict]) -> InlineKeyboardMarkup:
     """Build inline keyboard with torrent action buttons."""
     buttons = []
-    for t in torrents[:6]:  # Limit to 6 torrents for UI clarity
+    for t in torrents[:6]:
         name = t.get("name", "Unknown")[:20]
         torrent_hash = t.get("hash", "")[:16]
         state = t.get("state", "")
@@ -46,7 +45,6 @@ def build_torrent_keyboard(torrents: list[dict]) -> InlineKeyboardMarkup:
             InlineKeyboardButton(f"📁 {name}", callback_data=f"tinfo:{torrent_hash}")
         ]
 
-        # Show pause or resume based on state
         if state in ("downloading", "uploading", "stalledDL", "stalledUP", "queuedDL"):
             row.append(InlineKeyboardButton("⏸️", callback_data=f"tstop:{torrent_hash}"))
         else:
@@ -56,7 +54,6 @@ def build_torrent_keyboard(torrents: list[dict]) -> InlineKeyboardMarkup:
 
         buttons.append(row)
 
-    # Add refresh button
     buttons.append(
         [InlineKeyboardButton("🔄 Refresh", callback_data="torrent:refresh")]
     )
@@ -64,7 +61,6 @@ def build_torrent_keyboard(torrents: list[dict]) -> InlineKeyboardMarkup:
 
 
 def build_free_games_keyboard() -> InlineKeyboardMarkup:
-    """Build inline keyboard for free games commands."""
     buttons = [
         [
             InlineKeyboardButton("🎮 Epic", callback_data="games:epic"),
@@ -79,17 +75,13 @@ def build_free_games_keyboard() -> InlineKeyboardMarkup:
 
 
 async def handle_callback_query(update, context) -> None:
-    """Handle inline keyboard button presses."""
     query = update.callback_query
     await query.answer()
 
     data = query.data
     chat_id = update.effective_chat.id if update.effective_chat else None
 
-    # Check authorization
-    from .. import core
-
-    if chat_id not in core.ALLOWED:
+    if chat_id not in config.ALLOWED:
         await query.edit_message_text("⛔ Not authorized")
         return
 
@@ -130,78 +122,86 @@ async def handle_callback_query(update, context) -> None:
 
 
 async def _handle_dlogs_callback(query, container: str) -> None:
-    """Show last 20 lines of container logs."""
     await query.message.reply_text(f"🔄 Fetching logs for {container}...")
-    msg = await asyncio.to_thread(utils.get_container_logs, container, 20)
-    for part in utils.chunk(msg, size=4000):
+    # Default 20 lines tail
+    raw = await services.get_container_logs(container, 20)
+    msg = view.render_logs(container, raw, "tail", "20")
+    for part in view.chunk(msg):
         await query.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
 async def _handle_dhealth_callback(query, container: str) -> None:
-    """Show container health status."""
-    msg = await asyncio.to_thread(utils.healthcheck_container, container)
-    await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    msg = await services.healthcheck_container(container)
+    await query.message.reply_text(f"<pre>{msg}</pre>", parse_mode=ParseMode.HTML)
 
 
 async def _handle_dstats_callback(query, container: str) -> None:
-    """Show container stats."""
-    msg = await asyncio.to_thread(utils.container_stats_summary)
-    # Filter to show only the requested container if possible
+    # We fetch all stats and filter? Or just show all?
+    # Original logic showed all for dstats command but filtered for button?
+    # Original: "Filter to show only the requested container if possible" -> comment only
+    # Actually utils.container_stats_summary returns string for ALL containers.
+    # To filter we would need the rich dict.
+
+    stats = await services.container_stats_rich()
+    # Filter for container
+    target_stats = [s for s in stats if s["name"] == container]
+    if not target_stats:
+        msg = f"Stats for {container} not found."
+    else:
+        msg = view.render_container_stats(target_stats)
+
     await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
 async def _handle_docker_refresh(query, context) -> None:
-    """Refresh docker container list with keyboard."""
     state: BotState = get_state(context.application)
     state.refresh_containers()
 
-    msg = await asyncio.to_thread(utils.list_containers_basic)
-    containers = list(state.get_cached("containers"))
+    containers = await services.list_containers()
+    msg = view.render_container_list(containers)
 
-    keyboard = build_docker_keyboard(containers)
+    container_names = list(state.get_cached("containers"))
+    keyboard = build_docker_keyboard(container_names)
+
     await query.edit_message_text(
         msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
     )
 
 
 async def _handle_torrent_stop(query, torrent_hash: str) -> None:
-    """Pause a torrent by hash."""
-    result = await asyncio.to_thread(services.torrent_stop_by_hash, torrent_hash)
+    result = await services.torrent_stop_by_hash(torrent_hash)
     await query.message.reply_text(result, parse_mode=ParseMode.HTML)
 
 
 async def _handle_torrent_start(query, torrent_hash: str) -> None:
-    """Resume a torrent by hash."""
-    result = await asyncio.to_thread(services.torrent_start_by_hash, torrent_hash)
+    result = await services.torrent_start_by_hash(torrent_hash)
     await query.message.reply_text(result, parse_mode=ParseMode.HTML)
 
 
 async def _handle_torrent_info(query, torrent_hash: str) -> None:
-    """Show torrent info."""
-    result = await asyncio.to_thread(services.torrent_info_by_hash, torrent_hash)
+    result = await services.torrent_info_by_hash(torrent_hash)
     await query.message.reply_text(result, parse_mode=ParseMode.HTML)
 
 
 async def _handle_torrent_refresh(query, context) -> None:
-    """Refresh torrent list with keyboard."""
     state: BotState = get_state(context.application)
     state.refresh_torrents()
 
-    msg = await asyncio.to_thread(services.torrent_status)
-    torrents = await asyncio.to_thread(services.get_torrent_list)
-
+    torrents = await services.get_torrent_list()
+    msg = view.render_torrent_list(torrents)
     keyboard = build_torrent_keyboard(torrents)
+
     await query.edit_message_text(
         msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
     )
 
 
 async def _handle_games_callback(query, game_type: str) -> None:
-    """Handle free games button press."""
     from .. import scheduled as scheduled_fetchers
 
     await query.message.reply_text(f"🔄 Fetching {game_type} free games...")
 
+    # scheduled fetchers are likely sync, so we wrap them
     if game_type == "epic":
         message, image_urls = await asyncio.to_thread(
             scheduled_fetchers.fetch_epic_free_games

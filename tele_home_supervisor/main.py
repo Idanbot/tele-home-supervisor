@@ -11,7 +11,7 @@ from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 from .logger import setup_logging
-from . import core
+from . import config
 from .commands import COMMANDS, GROUP_ORDER
 from .handlers import dispatch
 from .handlers.callbacks import handle_callback_query
@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 def build_application() -> Application:
-    if core.TOKEN is None:
+    if config.TOKEN is None:
         raise RuntimeError("BOT_TOKEN environment variable is not set")
 
-    app = Application.builder().token(core.TOKEN).build()
+    app = Application.builder().token(config.TOKEN).build()
 
     app.bot_data.setdefault(BOT_STATE_KEY, BotState())
 
@@ -66,13 +66,13 @@ async def send_startup_notification(app: Application) -> None:
     # Register commands for autocomplete
     await register_bot_commands(app)
 
-    logger.info(f"Sending startup notification to {len(core.ALLOWED)} chat(s)")
-    if not core.ALLOWED:
+    logger.info(f"Sending startup notification to {len(config.ALLOWED)} chat(s)")
+    if not config.ALLOWED:
         logger.warning("No ALLOWED_CHAT_IDS configured, skipping startup notification")
         return
 
     startup_msg = f"🤖 Bot is deployed at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S')}"
-    for chat_id in core.ALLOWED:
+    for chat_id in config.ALLOWED:
         try:
             await app.bot.send_message(chat_id=chat_id, text=startup_msg)
             logger.info(f"Sent startup notification to chat_id {chat_id}")

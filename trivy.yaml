@@ -1,0 +1,6 @@
+# Trivy configuration
+timeout: 10m
+format: table
+severity:
+  - HIGH
+  - CRITICAL

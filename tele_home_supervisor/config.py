@@ -1,14 +1,13 @@
-"""Central configuration for tele_home_supervisor.
-
-Simple, dependency-free settings loader. Exposes a `settings` object
-with typed attributes and basic validation.
-"""
+"""Central configuration for tele_home_supervisor."""
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Set, List
+
+logger = logging.getLogger(__name__)
 
 
 def _split_ints(s: str) -> Set[int]:
@@ -83,7 +82,20 @@ settings = _read_settings()
 
 def validate_settings() -> None:
     if settings.BOT_TOKEN is None:
-        # caller will decide whether this is fatal; we still expose the value
-        return
-    # Additional validations can be added here
-    return
+        logger.error("BOT_TOKEN environment variable is not set")
+    if not settings.ALLOWED_CHAT_IDS:
+        logger.warning(
+            "ALLOWED_CHAT_IDS is empty; guarded commands will be unauthorized."
+        )
+
+
+# Exported constants
+TOKEN: str | None = settings.BOT_TOKEN
+ALLOWED: set[int] = settings.ALLOWED_CHAT_IDS
+RATE_LIMIT_S: float = settings.RATE_LIMIT_S
+SHOW_WAN: bool = settings.SHOW_WAN
+WATCH_PATHS: list[str] = settings.WATCH_PATHS
+OLLAMA_HOST: str = settings.OLLAMA_HOST
+OLLAMA_MODEL: str = settings.OLLAMA_MODEL
+
+validate_settings()

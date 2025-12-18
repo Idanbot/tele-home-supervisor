@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-
-from telegram.constants import ParseMode
 import logging
 
-from .. import utils
+from telegram.constants import ParseMode
+
+from .. import services, view
 from ..state import BotState
 from .common import guard, get_state, reply_usage_with_suggestions
 from .callbacks import build_docker_keyboard
@@ -21,17 +20,18 @@ async def cmd_docker(update, context) -> None:
         state.refresh_containers()
     except Exception as e:
         logger.debug("refresh_containers failed: %s", e)
-    msg = await asyncio.to_thread(utils.list_containers_basic)
+
+    containers = await services.list_containers()
+    msg = view.render_container_list(containers)
 
     # Get container names for inline keyboard
-    containers = list(state.get_cached("containers"))
+    container_names = list(state.get_cached("containers"))
 
     # Build inline keyboard if we have containers
-    keyboard = build_docker_keyboard(containers) if containers else None
+    keyboard = build_docker_keyboard(container_names) if container_names else None
 
-    parts = list(utils.chunk(msg))
+    parts = view.chunk(msg)
     for i, part in enumerate(parts):
-        # Only add keyboard to the last message
         if i == len(parts) - 1 and keyboard:
             await update.message.reply_text(
                 part, parse_mode=ParseMode.HTML, reply_markup=keyboard
@@ -41,29 +41,22 @@ async def cmd_docker(update, context) -> None:
 
 
 async def cmd_dockerstats(update, context) -> None:
-    if not await guard(update, context):
-        return
-    msg = await asyncio.to_thread(utils.container_stats_summary)
-    for part in utils.chunk(msg):
-        await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+    # Legacy command, mapped to rich stats for now or we can implement summary?
+    # services.container_stats_rich returns list of dicts.
+    await cmd_dstats_rich(update, context)
 
 
 async def cmd_dstats_rich(update, context) -> None:
     if not await guard(update, context):
         return
-    msg = await asyncio.to_thread(utils.container_stats_rich)
-    for part in utils.chunk(msg):
+    stats = await services.container_stats_rich()
+    msg = view.render_container_stats(stats)
+    for part in view.chunk(msg):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
 async def cmd_dlogs(update, context) -> None:
-    """Fetch container logs. Supports positive (tail) and negative (head) line counts.
-
-    Examples:
-        /dlogs mycontainer        - Last 50 lines (default)
-        /dlogs mycontainer 100    - Last 100 lines
-        /dlogs mycontainer -50    - First 50 lines
-    """
+    """Fetch container logs."""
     if not await guard(update, context):
         return
 
@@ -79,26 +72,24 @@ async def cmd_dlogs(update, context) -> None:
         return
 
     container_name = context.args[0]
-    lines = 50  # Default: last 50 lines
+    lines = 50
 
     if len(context.args) > 1:
         try:
-            # Parse line count (supports negative numbers for head)
             lines = int(context.args[1])
-            # Clamp to reasonable bounds
             if lines > 0:
-                lines = min(lines, 500)  # Max 500 lines from tail
+                lines = min(lines, 500)
             else:
-                lines = max(lines, -500)  # Max 500 lines from head
+                lines = max(lines, -500)
         except ValueError:
-            await update.message.reply_text(
-                "❌ Invalid line count. Use a positive number (tail) or negative (head).\n"
-                "Example: /dlogs mycontainer -100"
-            )
+            await update.message.reply_text("❌ Invalid line count.")
             return
 
-    msg = await asyncio.to_thread(utils.get_container_logs, container_name, lines)
-    for part in utils.chunk(msg, size=4000):
+    raw_logs = await services.get_container_logs(container_name, lines)
+    direction = "head" if lines < 0 else "tail"
+    msg = view.render_logs(container_name, raw_logs, direction, str(abs(lines)))
+
+    for part in view.chunk(msg, size=4000):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
@@ -113,13 +104,23 @@ async def cmd_dhealth(update, context) -> None:
         )
         return
     name = context.args[0]
-    msg = await asyncio.to_thread(utils.healthcheck_container, name)
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    msg = await services.healthcheck_container(name)
+    # Simple formatting
+    await update.message.reply_text(f"<pre>{msg}</pre>", parse_mode=ParseMode.HTML)
 
 
 async def cmd_ports(update, context) -> None:
+
     if not await guard(update, context):
+
         return
-    msg = await asyncio.to_thread(utils.get_listening_ports)
-    for part in utils.chunk(msg, size=4000):
+
+    msg = await services.get_listening_ports()
+
+    # Formatting
+
+    formatted = f"{view.bold('Listening Ports:')}\n{view.pre(msg)}"
+
+    for part in view.chunk(formatted, size=4000):
+
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
