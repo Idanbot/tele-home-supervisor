@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
-
-from telegram.constants import ParseMode
 import logging
 
-from .. import utils
-from ..commands import COMMANDS, GROUP_ORDER
+from telegram.constants import ParseMode
+
+from .. import services
 from ..background import ensure_started
+from ..commands import COMMANDS, GROUP_ORDER
 from .common import guard
 
 logger = logging.getLogger(__name__)
@@ -54,5 +53,9 @@ async def cmd_whoami(update, context) -> None:
 async def cmd_version(update, context) -> None:
     if not await guard(update, context):
         return
-    msg = await asyncio.to_thread(utils.get_version_info)
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    try:
+        msg = await services.get_version_info()
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.exception("Version command failed")
+        await update.message.reply_text(f"❌ Error getting version info: {e}")

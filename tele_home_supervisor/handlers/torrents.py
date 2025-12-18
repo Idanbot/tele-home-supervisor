@@ -33,7 +33,7 @@ async def cmd_torrent_status(update, context) -> None:
     if not await guard(update, context):
         return
     try:
-        get_state(context.application).refresh_torrents()
+        await get_state(context.application).refresh_torrents()
     except Exception as e:
         logger.debug("refresh_torrents failed: %s", e)
 
@@ -55,7 +55,7 @@ async def cmd_torrent_stop(update, context) -> None:
     if not await guard(update, context):
         return
     state: BotState = get_state(context.application)
-    state.maybe_refresh("torrents")
+    await state.maybe_refresh("torrents")
     if not context.args:
         await reply_usage_with_suggestions(
             update, "/tstop <torrent>", state.suggest("torrents", limit=5)
@@ -70,7 +70,7 @@ async def cmd_torrent_start(update, context) -> None:
     if not await guard(update, context):
         return
     state: BotState = get_state(context.application)
-    state.maybe_refresh("torrents")
+    await state.maybe_refresh("torrents")
     if not context.args:
         await reply_usage_with_suggestions(
             update, "/tstart <torrent>", state.suggest("torrents", limit=5)
@@ -85,7 +85,7 @@ async def cmd_torrent_delete(update, context) -> None:
     if not await guard(update, context):
         return
     state: BotState = get_state(context.application)
-    state.maybe_refresh("torrents")
+    await state.maybe_refresh("torrents")
     if not context.args:
         await reply_usage_with_suggestions(
             update, "/tdelete <torrent> yes", state.suggest("torrents", limit=5)

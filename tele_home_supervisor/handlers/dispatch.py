@@ -52,3 +52,4 @@ cmd_humblefree_now = rate_limit(notifications.cmd_humblefree_now)
 
 # AI
 cmd_ask = rate_limit(ai.cmd_ask)
+cmd_askreset = rate_limit(ai.cmd_askreset)

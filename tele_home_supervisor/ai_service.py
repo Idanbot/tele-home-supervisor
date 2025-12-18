@@ -19,11 +19,11 @@ class OllamaClient:
         base_url: str,
         model: str,
         system_prompt: str,
-        timeout: float = 60.0,
-        temp: float = 0.5,
-        top_k: int = 80,
-        top_p: float = 0.92,
-        num_predict: int = 512,
+        timeout: float = 90.0,
+        temp: float = 0.4,
+        top_k: int = 40,
+        top_p: float = 0.9,
+        num_predict: int = 640,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model

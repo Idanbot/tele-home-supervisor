@@ -490,7 +490,18 @@ async def speedtest_download(mb: int = 10) -> str:
         return f"Speedtest failed: {err or out}"
 
     try:
-        parts = out.strip().split()
+        # Remove any non-numeric content (e.g., JSON from cloudflare)
+        out_clean = out.strip()
+        # If output contains JSON markers, it's likely an error response
+        if "{" in out_clean or "}" in out_clean:
+            logger.warning(f"Speedtest returned unexpected format: {out_clean[:100]}")
+            return "Speedtest failed: unexpected response format"
+
+        parts = out_clean.split()
+        if len(parts) < 2:
+            logger.warning(f"Speedtest output has insufficient parts: {out_clean}")
+            return "Speedtest failed: invalid output format"
+
         seconds = float(parts[0])
         downloaded = float(parts[1])
         if seconds <= 0:
@@ -504,5 +515,6 @@ async def speedtest_download(mb: int = 10) -> str:
             f"Time: {seconds:.2f}s\n"
             f"Rate: {_fmt_rate_bps(bps)} ({mbps:.1f} Mbps)"
         )
-    except Exception as e:
+    except (ValueError, IndexError) as e:
+        logger.error(f"Speedtest parse error. Output: '{out[:200]}', Error: {e}")
         return f"Parse error: {e}"

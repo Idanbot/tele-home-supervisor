@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import html
+import logging
 
 from telegram.constants import ParseMode
 
 from .. import scheduled as scheduled_fetchers
 from ..state import BOT_STATE_KEY, BotState
 from .common import guard
+
+logger = logging.getLogger(__name__)
 
 
 async def cmd_mute_epicgames(update, context) -> None:
@@ -59,24 +63,41 @@ async def cmd_epicgames_now(update, context) -> None:
             scheduled_fetchers.fetch_epic_free_games
         )
 
-        # Delete the "fetching" message
-        await msg.delete()
-
-        # Send as photo with caption if image available, otherwise text
+        # Try to send with image first, fallback to text-only if image fails
         if image_urls:
-            await update.message.reply_photo(
-                photo=image_urls[0],
-                caption=message,
-                parse_mode=ParseMode.HTML,
-            )
-        else:
-            await update.message.reply_text(
-                message,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
+            try:
+                await msg.delete()
+                await update.message.reply_photo(
+                    photo=image_urls[0],
+                    caption=message,
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            except Exception as img_err:
+                logger.warning(
+                    f"Failed to send Epic image, falling back to text: {img_err}"
+                )
+                # Message was deleted, need to send a new one
+                await update.message.reply_text(
+                    message,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                return
+
+        # No images available, edit existing message
+        await msg.edit_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
     except Exception as e:
-        await msg.edit_text(f"❌ Error: {e}")
+        logger.exception("Epic Games fetch failed")
+        try:
+            await msg.edit_text(f"❌ Error: {html.escape(str(e))}")
+        except Exception:
+            # If edit fails (message deleted), send new message
+            await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
 
 
 async def cmd_hackernews_now(update, context) -> None:

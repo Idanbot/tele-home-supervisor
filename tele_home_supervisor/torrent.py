@@ -83,9 +83,9 @@ class TorrentManager:
             # Accessing app.version can raise in some client states; guard it
             try:
                 ver = getattr(self.qbt_client.app, "version", None)
-                logger.info("Connected to qBittorrent: %s", ver)
+                logger.debug("Connected to qBittorrent: %s", ver)
             except Exception:
-                logger.info("Connected to qBittorrent (version unknown)")
+                logger.debug("Connected to qBittorrent (version unknown)")
             return True
         except qbittorrentapi.LoginFailed:  # type: ignore
             logger.warning("Invalid qBittorrent login credentials")

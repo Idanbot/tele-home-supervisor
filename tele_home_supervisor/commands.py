@@ -254,6 +254,14 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "ask a question to local Ollama model (streaming)",
         handler="cmd_ask",
     ),
+    CommandSpec(
+        "askreset",
+        (),
+        "AI",
+        "/askreset",
+        "reset custom AI generation parameters",
+        handler="cmd_askreset",
+    ),
 )
 
 

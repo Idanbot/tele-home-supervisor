@@ -17,7 +17,7 @@ async def cmd_docker(update, context) -> None:
         return
     state = get_state(context.application)
     try:
-        state.refresh_containers()
+        await state.refresh_containers()
     except Exception as e:
         logger.debug("refresh_containers failed: %s", e)
 
@@ -61,7 +61,7 @@ async def cmd_dlogs(update, context) -> None:
         return
 
     state: BotState = get_state(context.application)
-    state.maybe_refresh("containers")
+    await state.maybe_refresh("containers")
 
     if not context.args:
         await reply_usage_with_suggestions(
@@ -97,7 +97,7 @@ async def cmd_dhealth(update, context) -> None:
     if not await guard(update, context):
         return
     state: BotState = get_state(context.application)
-    state.maybe_refresh("containers")
+    await state.maybe_refresh("containers")
     if not context.args:
         await reply_usage_with_suggestions(
             update, "/dhealth &lt;container&gt;", state.suggest("containers", limit=5)

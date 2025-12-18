@@ -37,24 +37,24 @@ class BotState:
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
 
-    def refresh_containers(self) -> set[str]:
-        names = _normalize(services.container_names())
+    async def refresh_containers(self) -> set[str]:
+        names = _normalize(await services.container_names())
         self.caches["containers"] = CacheEntry(updated_at=time.monotonic(), items=names)
         return set(names)
 
-    def refresh_torrents(self) -> set[str]:
-        names = _normalize(services.torrent_names())
+    async def refresh_torrents(self) -> set[str]:
+        names = _normalize(await services.torrent_names())
         self.caches["torrents"] = CacheEntry(updated_at=time.monotonic(), items=names)
         return set(names)
 
-    def maybe_refresh(self, key: str) -> set[str]:
+    async def maybe_refresh(self, key: str) -> set[str]:
         entry = self.caches.get(key)
         if entry and (time.monotonic() - entry.updated_at) < self.cache_ttl_s:
             return set(entry.items)
         if key == "containers":
-            return self.refresh_containers()
+            return await self.refresh_containers()
         if key == "torrents":
-            return self.refresh_torrents()
+            return await self.refresh_torrents()
         return set()
 
     def get_cached(self, key: str) -> set[str]:

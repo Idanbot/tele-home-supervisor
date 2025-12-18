@@ -155,7 +155,7 @@ async def _handle_dstats_callback(query, container: str) -> None:
 
 async def _handle_docker_refresh(query, context) -> None:
     state: BotState = get_state(context.application)
-    state.refresh_containers()
+    await state.refresh_containers()
 
     containers = await services.list_containers()
     msg = view.render_container_list(containers)
