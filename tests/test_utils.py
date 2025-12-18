@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, patch
-from tele_home_supervisor import utils, cli
+from tele_home_supervisor import utils
 
 
 @pytest.mark.asyncio

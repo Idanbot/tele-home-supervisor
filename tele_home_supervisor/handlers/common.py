@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import functools
 import html
 import logging
 import time
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import TYPE_CHECKING, Callable
 
 from telegram.constants import ParseMode
 

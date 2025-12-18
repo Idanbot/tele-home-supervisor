@@ -12,7 +12,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
 from .logger import setup_logging
 from . import config
-from .commands import COMMANDS, GROUP_ORDER
+from .commands import COMMANDS
 from .handlers import dispatch
 from .handlers.callbacks import handle_callback_query
 from .state import BOT_STATE_KEY, BotState
