@@ -253,6 +253,9 @@ jobs:
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
         continue-on-error: true
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify Telegram (Build Status)
         if: always()
