@@ -2,7 +2,9 @@ FROM python:3.14.2-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=Asia/Jerusalem
+    TZ=Asia/Jerusalem \
+    # TELL UV TO USE SYSTEM PYTHON (Fixes the mismatch)
+    UV_PROJECT_ENVIRONMENT=/usr/local
 
 # Install build deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,7 +19,10 @@ WORKDIR /app
 # Install dependencies
 COPY pyproject.toml uv.lock README.md ./
 # Compile bytecode for faster startup
-RUN uv sync --frozen --no-dev --compile-bytecode
+# We use --no-install-project because we don't need to pip-install the bot itself, just its deps
+RUN uv sync --frozen --no-dev --compile-bytecode --no-install-project
+
+# --------------------------------------------------------
 
 FROM python:3.14.2-slim
 
@@ -46,10 +51,11 @@ WORKDIR /app
 # Create data directory
 RUN mkdir -p /app/data && chmod 777 /app/data
 
-# Copy installed packages from builder
+# Copy installed packages from builder (Now this actually contains your deps!)
 COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# Copy source code
 COPY . .
 
 CMD ["python", "/app/bot.py"]
