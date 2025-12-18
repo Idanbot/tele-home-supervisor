@@ -1,6 +1,6 @@
 # tele-home-supervisor
 
-[![Build & Publish](https://github.com/idanbot/tele-home-supervisor/actions/workflows/build-and-push.yml/badge.svg?branch=main)](https://github.com/idanbot/tele-home-supervisor/actions/workflows/build-and-push.yml)
+[![CI-CD](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml)
 
 A Telegram bot for monitoring a Raspberry Pi (or any Linux host) and managing Docker containers and qBittorrent remotely.
 
