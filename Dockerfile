@@ -15,9 +15,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 WORKDIR /app
 
 # Install dependencies
-COPY pyproject.toml .
+COPY pyproject.toml uv.lock ./
 # Compile bytecode for faster startup
-RUN uv pip install --system --compile-bytecode .
+RUN uv sync --frozen --no-dev --compile-bytecode
 
 FROM python:3.14.2-slim
 
