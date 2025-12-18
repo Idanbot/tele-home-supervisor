@@ -46,10 +46,16 @@ async def cmd_ask(update, context) -> None:
     )
 
     try:
+        # Get the event loop to schedule coroutines from the thread
+        loop = asyncio.get_running_loop()
+
         result = await asyncio.to_thread(
             _stream_ollama_generate,
             prompt=prompt,
-            callback=lambda text: asyncio.create_task(_update_message(msg, text)),
+            loop=loop,
+            callback=lambda text: asyncio.run_coroutine_threadsafe(
+                _update_message(msg, text), loop
+            ),
         )
 
         # Final update with complete response
@@ -74,12 +80,13 @@ async def _update_message(msg, text: str) -> None:
         logger.debug("Message edit failed: %s", e)
 
 
-def _stream_ollama_generate(prompt: str, callback=None) -> str:
+def _stream_ollama_generate(prompt: str, loop=None, callback=None) -> str:
     """Stream generate from Ollama and accumulate response.
 
     Args:
         prompt: The prompt to send
-        callback: Optional async callback for incremental updates
+        loop: Event loop for scheduling async callbacks from thread
+        callback: Optional callback for incremental updates
 
     Returns:
         Complete response text
