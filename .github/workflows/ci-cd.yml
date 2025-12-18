@@ -221,7 +221,7 @@ jobs:
         id: buildver
         run: |
           TS="$(date -u +'%Y.%m.%d-%H:%M:%S')"
-          echo "version=${TS}-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "version=${TS}-rc${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
         id: build-and-push
