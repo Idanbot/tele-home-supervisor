@@ -16,8 +16,29 @@ from .common import guard
 
 logger = logging.getLogger(__name__)
 
-# Update interval for streaming (seconds) to avoid Telegram rate limits
-STREAM_UPDATE_INTERVAL = 1.0
+# Streaming controls
+# How often we edit the Telegram message (seconds)
+STREAM_UPDATE_INTERVAL = 0.4
+# Minimum tokens to batch before pushing an update
+STREAM_MIN_TOKENS = 3
+
+# Ollama decode defaults tuned for small CPU models
+OLLAMA_TEMP = 0.35
+OLLAMA_TOP_K = 40
+OLLAMA_TOP_P = 0.9
+OLLAMA_NUM_PREDICT = 512  # allow richer responses while staying under Telegram limits
+
+# Default formatting guidance for Ollama responses (safe for HTML parse_mode with escaping)
+STYLE_SYSTEM_PROMPT = (
+    "You are a professional, structured assistant. Reply as plain text (no raw HTML). "
+    "Format: a concise title line, a short summary sentence, then well-spaced bullets (3-10) starting with '- '. "
+    "Use tasteful sectioning with blank lines between sections. "
+    "Include code snippets only when helpful; wrap them in backticks or triple backticks. "
+    "Aim for clarity and style; you may use up to ~3500 characters. Avoid apologies and meta commentary."
+)
+
+# Shared HTTP session to keep the TCP connection warm
+_SESSION: requests.Session | None = None
 
 
 async def cmd_ask(update, context) -> None:
@@ -80,6 +101,13 @@ async def _update_message(msg, text: str) -> None:
         logger.debug("Message edit failed: %s", e)
 
 
+def _get_session() -> requests.Session:
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = requests.Session()
+    return _SESSION
+
+
 def _stream_ollama_generate(prompt: str, loop=None, callback=None) -> str:
     """Stream generate from Ollama and accumulate response.
 
@@ -96,14 +124,21 @@ def _stream_ollama_generate(prompt: str, loop=None, callback=None) -> str:
         "model": core.OLLAMA_MODEL,
         "prompt": prompt,
         "stream": True,
+        "system": STYLE_SYSTEM_PROMPT,
+        "temperature": OLLAMA_TEMP,
+        "top_k": OLLAMA_TOP_K,
+        "top_p": OLLAMA_TOP_P,
+        "num_predict": OLLAMA_NUM_PREDICT,
     }
 
-    accumulated = []
+    accumulated: list[str] = []  # committed tokens
+    pending: list[str] = []  # batch to flush on interval/size
     last_update = 0.0
     think_mode = False
 
     try:
-        with requests.post(url, json=payload, stream=True, timeout=60) as resp:
+        session = _get_session()
+        with session.post(url, json=payload, stream=True, timeout=60) as resp:
             resp.raise_for_status()
 
             for line in resp.iter_lines():
@@ -129,11 +164,20 @@ def _stream_ollama_generate(prompt: str, loop=None, callback=None) -> str:
 
                     # Only accumulate non-thinking tokens
                     if not think_mode and token.strip():
-                        accumulated.append(token)
+                        pending.append(token)
 
-                    # Periodically update the message
+                    # Periodically update the message (batch by time or token count)
                     now = time.time()
-                    if callback and (now - last_update) >= STREAM_UPDATE_INTERVAL:
+                    if (
+                        callback
+                        and pending
+                        and (
+                            len(pending) >= STREAM_MIN_TOKENS
+                            or (now - last_update) >= STREAM_UPDATE_INTERVAL
+                        )
+                    ):
+                        accumulated.extend(pending)
+                        pending.clear()
                         current_text = _format_response(accumulated, done=False)
                         if current_text:
                             callback(current_text)
@@ -141,6 +185,11 @@ def _stream_ollama_generate(prompt: str, loop=None, callback=None) -> str:
 
                 if done:
                     break
+
+        # Flush any remaining pending tokens
+        if pending:
+            accumulated.extend(pending)
+            pending.clear()
 
         # Return final formatted response
         return _format_response(accumulated, done=True)
@@ -156,7 +205,7 @@ def _format_response(tokens: list[str], done: bool) -> str:
     if not text:
         return "🤔 <i>Thinking...</i>"
 
-    # Escape HTML
+    # Escape HTML (preserve line breaks)
     text = html.escape(text)
 
     # Add typing indicator if not done
