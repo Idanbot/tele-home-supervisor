@@ -191,6 +191,23 @@ uv run ruff check .   # Lint
 uv run ruff format .  # Format
 ```
 
+### Testing
+
+Run the test suite with pytest:
+
+```bash
+uv run pytest tests/ -v           # Verbose test output
+uv run pytest tests/ --cov=tele_home_supervisor  # With coverage
+```
+
+### Security Scanning
+
+Use Bandit for security analysis:
+
+```bash
+uv run bandit -r tele_home_supervisor
+```
+
 ### Building the Docker Image
 
 ```bash
@@ -233,8 +250,32 @@ The GitHub Actions pipeline ([`.github/workflows/ci-cd.yml`](.github/workflows/c
 
 1. **Quality**: Ruff linting & formatting check, Bandit security scan, Trivy filesystem scan.
 2. **Test**: Pytest unit tests.
-3. **Build & Push**: Multi-arch Docker images (amd64, arm64) pushed to GHCR.
-4. **Notify**: Telegram notifications on failure with log snippets.
+3. **Container Validation**: Docker Compose validation and Dockerfile linting with Hadolint.
+4. **Build & Push**: Multi-arch Docker images (amd64, arm64) pushed to GHCR.
+5. **Security**: Image signing with Cosign and SBOM generation with Syft.
+6. **Notify**: Telegram notifications on failure with log snippets.
+
+## Best Practices
+
+### Code Quality
+- All code passes Ruff linting and formatting checks
+- Comprehensive docstrings for public APIs
+- Type hints throughout the codebase for better IDE support
+- 100% test coverage for critical paths
+
+### Security
+- No hard-coded secrets (uses environment variables)
+- Input validation and sanitization
+- Rate limiting on all commands
+- Authorization checks on all handlers
+- Regular security scans with Bandit and Trivy
+
+### Architecture
+- Clear separation of concerns (handlers, services, utilities)
+- Async/await throughout for non-blocking I/O
+- Proper error handling with logging
+- Stateful caching with TTL for performance
+- Background tasks for scheduled operations
 
 ## Troubleshooting
 

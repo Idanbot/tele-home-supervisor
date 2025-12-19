@@ -28,10 +28,29 @@ _last_command_ts = 0.0
 
 
 def get_state(app) -> BotState:
+    """Retrieve or initialize the bot state from application data.
+
+    Args:
+        app: The Telegram Application instance
+
+    Returns:
+        BotState object containing runtime state, caches, and subscriptions.
+    """
     return app.bot_data.setdefault(BOT_STATE_KEY, BotState())
 
 
 def allowed(update: "Update") -> bool:
+    """Check if the update sender is authorized to use the bot.
+
+    Args:
+        update: Telegram Update object containing chat information
+
+    Returns:
+        True if the chat ID is in the ALLOWED list, False otherwise.
+
+    Note:
+        Returns False if ALLOWED_CHAT_IDS is empty or update has no chat.
+    """
     if not config.ALLOWED:
         return False
     chat_id = update.effective_chat.id if update.effective_chat else None
@@ -39,6 +58,18 @@ def allowed(update: "Update") -> bool:
 
 
 async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
+    """Guard function to check authorization before executing commands.
+
+    Args:
+        update: Telegram Update object
+        context: Telegram context object
+
+    Returns:
+        True if authorized, False otherwise. Sends unauthorized message on failure.
+
+    Note:
+        This is the primary authorization mechanism for all guarded commands.
+    """
     if allowed(update):
         return True
     if update and update.effective_chat:
@@ -47,7 +78,18 @@ async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
 
 
 def rate_limit(func: Callable) -> Callable:
-    """Decorator to enforce global rate limit."""
+    """Decorator to enforce global rate limiting on command handlers.
+
+    Args:
+        func: The async command handler function to wrap
+
+    Returns:
+        Wrapped function that enforces rate limiting based on config.RATE_LIMIT_S
+
+    Note:
+        Uses a global timestamp check. Rate limit applies across all commands.
+        If rate limit is exceeded, sends a message to the user with wait time.
+    """
 
     @functools.wraps(func)
     async def wrapper(

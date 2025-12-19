@@ -11,6 +11,18 @@ logger = logging.getLogger(__name__)
 
 
 def _split_ints(s: str) -> Set[int]:
+    """Parse comma-separated string into a set of integers.
+
+    Args:
+        s: Comma-separated string of integers (e.g., "123,456,789")
+
+    Returns:
+        Set of parsed integers. Invalid entries are silently skipped.
+
+    Example:
+        >>> _split_ints("123,456,invalid,789")
+        {123, 456, 789}
+    """
     out = set()
     for part in (s or "").split(","):
         p = part.strip()
@@ -20,11 +32,28 @@ def _split_ints(s: str) -> Set[int]:
 
 
 def _split_paths(s: str) -> List[str]:
+    """Parse comma-separated string into a list of filesystem paths.
+
+    Args:
+        s: Comma-separated string of paths. Defaults to "/,/srv/media" if empty.
+
+    Returns:
+        List of non-empty path strings.
+
+    Example:
+        >>> _split_paths("/home,/var/log")
+        ['/home', '/var/log']
+    """
     return [p.strip() for p in (s or "/,/srv/media").split(",") if p.strip()]
 
 
 @dataclass
 class Settings:
+    """Configuration settings for tele_home_supervisor.
+
+    All settings are loaded from environment variables with sensible defaults.
+    """
+
     BOT_TOKEN: str | None
     ALLOWED_CHAT_IDS: Set[int]
     RATE_LIMIT_S: float
@@ -40,6 +69,15 @@ class Settings:
 
 
 def _read_settings() -> Settings:
+    """Read all configuration from environment variables.
+
+    Returns:
+        Settings object with all configuration values.
+
+    Note:
+        Invalid numeric values fall back to sensible defaults.
+        Boolean values accept: 1/true/yes (case-insensitive) as True.
+    """
     token = os.environ.get("BOT_TOKEN") or None
     allowed = _split_ints(os.environ.get("ALLOWED_CHAT_IDS", ""))
     try:
@@ -87,6 +125,11 @@ settings = _read_settings()
 
 
 def validate_settings() -> None:
+    """Validate critical configuration and log warnings for issues.
+
+    This function checks BOT_TOKEN and ALLOWED_CHAT_IDS, logging appropriate
+    error/warning messages if they are not configured correctly.
+    """
     if settings.BOT_TOKEN is None:
         logger.error("BOT_TOKEN environment variable is not set")
     if not settings.ALLOWED_CHAT_IDS:

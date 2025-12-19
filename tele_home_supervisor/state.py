@@ -15,16 +15,43 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CacheEntry:
+    """Cache entry with timestamp and cached items.
+
+    Attributes:
+        updated_at: Unix timestamp (monotonic) when cache was last updated
+        items: Set of cached string values
+    """
+
     updated_at: float
     items: set[str]
 
 
 def _normalize(items: set[str]) -> set[str]:
+    """Normalize a set of strings by trimming whitespace and removing empty values.
+
+    Args:
+        items: Set of strings to normalize
+
+    Returns:
+        Set of non-empty trimmed strings
+    """
     return {i.strip() for i in items if i and i.strip()}
 
 
 @dataclass
 class BotState:
+    """Runtime state for the bot including caches, subscriptions, and background tasks.
+
+    Attributes:
+        cache_ttl_s: Time-to-live for cached data in seconds
+        caches: Dictionary of cache entries keyed by cache type
+        torrent_completion_subscribers: Set of chat IDs subscribed to torrent notifications
+        tasks: Dictionary of background asyncio tasks
+        gameoffers_muted: Set of chat IDs with game offers notifications muted
+        hackernews_muted: Set of chat IDs with hacker news notifications muted
+        _state_file: Path to persistent state file on disk
+    """
+
     cache_ttl_s: float = 60.0
     caches: dict[str, CacheEntry] = field(default_factory=dict)
 
@@ -38,11 +65,21 @@ class BotState:
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
 
     async def refresh_containers(self) -> set[str]:
+        """Refresh the cache of Docker container names.
+
+        Returns:
+            Set of current container names
+        """
         names = _normalize(await services.container_names())
         self.caches["containers"] = CacheEntry(updated_at=time.monotonic(), items=names)
         return set(names)
 
     async def refresh_torrents(self) -> set[str]:
+        """Refresh the cache of torrent names.
+
+        Returns:
+            Set of current torrent names
+        """
         names = _normalize(await services.torrent_names())
         self.caches["torrents"] = CacheEntry(updated_at=time.monotonic(), items=names)
         return set(names)
@@ -62,6 +99,19 @@ class BotState:
         return set(entry.items) if entry else set()
 
     def suggest(self, key: str, query: str | None = None, limit: int = 5) -> list[str]:
+        """Get suggestions from cached items based on a query string.
+
+        Args:
+            key: Cache key ("containers" or "torrents")
+            query: Optional search query. If provided, filters by prefix/contains.
+            limit: Maximum number of suggestions to return
+
+        Returns:
+            List of suggested items, ranked by relevance (prefix matches first).
+
+        Note:
+            When no query is provided, returns sorted list of all items.
+        """
         items = list(self.get_cached(key))
         if not items:
             return []
