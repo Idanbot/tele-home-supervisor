@@ -97,8 +97,10 @@ class TorrentManager:
                 if hasattr(self.qbt_client, attr):
                     try:
                         setattr(self.qbt_client, attr, self.timeout_s)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug(
+                            "Failed to set qBittorrent client %s: %s", attr, exc
+                        )
             self.qbt_client.auth_log_in()
             # Accessing app.version can raise in some client states; guard it
             try:
