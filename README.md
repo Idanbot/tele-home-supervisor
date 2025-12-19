@@ -276,9 +276,6 @@ The GitHub Actions pipeline ([`.github/workflows/ci-cd.yml`](.github/workflows/c
 - Proper error handling with logging
 - Stateful caching with TTL for performance
 - Background tasks for scheduled operations
-2. **Test**: Pytest unit tests.
-3. **Build & Push**: Multi-arch Docker images (amd64, arm64) pushed to GHCR.
-4. **Notify**: Telegram notifications on failure with log snippets.
 
 ## Troubleshooting
 
