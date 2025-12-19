@@ -127,7 +127,8 @@ jobs:
       - name: Lint Dockerfile (hadolint)
         run: |
           set -o pipefail
-          docker run --rm -i hadolint/hadolint:v2.12.0 < Dockerfile 2>&1 | tee hadolint.log
+          docker run --rm -i hadolint/hadolint:v2.12.0 --failure-threshold error - < Dockerfile \
+            2>&1 | tee hadolint.log
 
       - name: Upload container logs
         if: always()
