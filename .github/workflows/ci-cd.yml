@@ -66,58 +66,17 @@ jobs:
           output: 'trivy-fs.txt'
         continue-on-error: true
 
-      - name: Notify Telegram (Failure)
-        if: failure() && github.actor != 'dependabot[bot]'
-        env:
-          STATUS: ${{ job.status }}
-          REF_NAME: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
-        run: |
-          VERSION=$(echo "$SHA" | cut -c1-7)
-          SUMMARY=""
-          
-          if [ -s ruff.log ]; then
-            SUMMARY+=$'\n<b>Ruff Lint</b> (tail):\n<pre>'
-            tail -n 20 ruff.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'
-            SUMMARY+=$'</pre>'
-          fi
-          
-          if [ -s ruff-format.log ]; then
-            SUMMARY+=$'\n<b>Ruff Format</b> (tail):\n<pre>'
-            tail -n 20 ruff-format.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'
-            SUMMARY+=$'</pre>'
-          fi
-          
-          if [ -s bandit.log ]; then
-            SUMMARY+=$'\n<b>Bandit</b> (tail):\n<pre>'
-            tail -n 20 bandit.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'
-            SUMMARY+=$'</pre>'
-          fi
-
-          if [ -s trivy-fs.txt ]; then
-            SUMMARY+=$'\n<b>Trivy</b> (tail):\n<pre>'
-            tail -n 20 trivy-fs.txt | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'
-            SUMMARY+=$'</pre>'
-          fi
-
-          MSG="<b>❌ Quality Check Failed</b>
-          ━━━━━━━━━━━━━━━━━━━━
-          📦 <b>Repo:</b> <code>${{ github.repository }}</code>
-          🌿 <b>Branch:</b> <code>$REF_NAME</code>
-          🔗 <b>Commit:</b> <code>$VERSION</code>
-          ━━━━━━━━━━━━━━━━━━━━
-          $SUMMARY
-          ━━━━━━━━━━━━━━━━━━━━
-          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
-
-          jq -n \
-            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --arg parse_mode "HTML" \
-            --arg text "$MSG" \
-            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
-            | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-                -H "Content-Type: application/json" \
-                -d @-
+      - name: Upload quality logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: quality-logs
+          path: |
+            ruff.log
+            ruff-format.log
+            bandit.log
+            trivy-fs.txt
+          if-no-files-found: ignore
 
   test:
     name: Unit Tests
@@ -145,39 +104,13 @@ jobs:
           set -o pipefail
           uv run pytest 2>&1 | tee pytest.log
 
-      - name: Notify Telegram (Failure)
-        if: failure() && github.actor != 'dependabot[bot]'
-        env:
-          REF_NAME: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
-        run: |
-          VERSION=$(echo "$SHA" | cut -c1-7)
-          SUMMARY=""
-          
-          if [ -s pytest.log ]; then
-            SUMMARY+=$'\n<b>Pytest</b> (tail):\n<pre>'
-            tail -n 30 pytest.log | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'
-            SUMMARY+=$'</pre>'
-          fi
-
-          MSG="<b>❌ Tests Failed</b>
-          ━━━━━━━━━━━━━━━━━━━━
-          📦 <b>Repo:</b> <code>${{ github.repository }}</code>
-          🌿 <b>Branch:</b> <code>$REF_NAME</code>
-          🔗 <b>Commit:</b> <code>$VERSION</code>
-          ━━━━━━━━━━━━━━━━━━━━
-          $SUMMARY
-          ━━━━━━━━━━━━━━━━━━━━
-          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
-
-          jq -n \
-            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --arg parse_mode "HTML" \
-            --arg text "$MSG" \
-            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
-            | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-                -H "Content-Type: application/json" \
-                -d @-
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-logs
+          path: pytest.log
+          if-no-files-found: ignore
 
   build-and-push:
     name: Build & Push Docker Image
@@ -300,43 +233,6 @@ jobs:
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
           TRIVY_PLATFORM: linux/arm64
 
-      - name: Notify Telegram (Build Status)
-        if: always() && github.actor != 'dependabot[bot]'
-        env:
-          STATUS: ${{ job.status }}
-          REF_NAME: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
-          BUILD_VERSION: ${{ steps.buildver.outputs.version }}
-        run: |
-          # Icon and Text based on status
-          if [ "$STATUS" == "success" ]; then
-            ICON="✅"
-            TEXT="Build Success"
-          else
-            ICON="❌"
-            TEXT="Build Failed"
-          fi
-
-          VERSION=$(echo "$SHA" | cut -c1-7)
-
-          MSG="<b>$ICON $TEXT</b>
-          ━━━━━━━━━━━━━━━━━━━━
-          📦 <b>Repo:</b> <code>${{ github.repository }}</code>
-          🌿 <b>Branch:</b> <code>$REF_NAME</code>
-          🔗 <b>Commit:</b> <code>$VERSION</code>
-          🏗️ <b>Build:</b> <code>$BUILD_VERSION</code>
-          👤 <b>Author:</b> ${{ github.actor }}
-          ━━━━━━━━━━━━━━━━━━━━
-          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
-
-          jq -n \
-            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --arg parse_mode "HTML" \
-            --arg text "$MSG" \
-            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
-          | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-                -H "Content-Type: application/json" \
-                -d @-
 
   smoke-test:
     name: Smoke Test
@@ -364,36 +260,20 @@ jobs:
           BOT_TOKEN: "test-token"
           ALLOWED_CHAT_IDS: "123"
         run: |
-          uv run python - <<'PY'
+          uv run python - <<'PY' 2>&1 | tee smoke.log
           from tele_home_supervisor.main import build_application
           app = build_application()
           assert app is not None
           print("Smoke OK")
           PY
 
-      - name: Notify Telegram (Failure)
-        if: failure() && github.actor != 'dependabot[bot]'
-        env:
-          REF_NAME: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
-        run: |
-          VERSION=$(echo "$SHA" | cut -c1-7)
-          MSG="<b>❌ Smoke Test Failed</b>
-          ━━━━━━━━━━━━━━━━━━━━
-          📦 <b>Repo:</b> <code>${{ github.repository }}</code>
-          🌿 <b>Branch:</b> <code>$REF_NAME</code>
-          🔗 <b>Commit:</b> <code>$VERSION</code>
-          ━━━━━━━━━━━━━━━━━━━━
-          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
-
-          jq -n \
-            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --arg parse_mode "HTML" \
-            --arg text "$MSG" \
-            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
-            | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-                -H "Content-Type: application/json" \
-                -d @-
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: smoke-logs
+          path: smoke.log
+          if-no-files-found: ignore
 
   notify:
     name: Notify Telegram (Summary)
@@ -401,6 +281,27 @@ jobs:
     needs: [quality, test, smoke-test, build-and-push]
     runs-on: ubuntu-latest
     steps:
+      - name: Download quality logs
+        uses: actions/download-artifact@v6
+        with:
+          name: quality-logs
+          path: artifacts/quality
+        continue-on-error: true
+
+      - name: Download test logs
+        uses: actions/download-artifact@v6
+        with:
+          name: test-logs
+          path: artifacts/test
+        continue-on-error: true
+
+      - name: Download smoke logs
+        uses: actions/download-artifact@v6
+        with:
+          name: smoke-logs
+          path: artifacts/smoke
+        continue-on-error: true
+
       - name: Notify Telegram (Summary)
         env:
           STATUS_QUALITY: ${{ needs.quality.result }}
@@ -410,17 +311,66 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
         run: |
+          status_emoji() {
+            case "$1" in
+              success) echo "✅" ;;
+              failure) echo "❌" ;;
+              cancelled) echo "⚠️" ;;
+              skipped) echo "➖" ;;
+              *) echo "❔" ;;
+            esac
+          }
+
+          html_escape() {
+            sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'
+          }
+
+          append_tail() {
+            local label="$1"
+            local file="$2"
+            local lines="$3"
+            if [ -s "$file" ]; then
+              DETAILS+=$'\n<b>'"$label"$'</b> (tail):\n<pre>'
+              tail -n "$lines" "$file" | html_escape
+              DETAILS+=$'</pre>'
+            fi
+          }
+
           VERSION=$(echo "$SHA" | cut -c1-7)
+          Q_EMOJI=$(status_emoji "$STATUS_QUALITY")
+          T_EMOJI=$(status_emoji "$STATUS_TEST")
+          S_EMOJI=$(status_emoji "$STATUS_SMOKE")
+          B_EMOJI=$(status_emoji "$STATUS_BUILD")
+
+          SUMMARY="$Q_EMOJI <b>Quality:</b> $STATUS_QUALITY
+          $T_EMOJI <b>Tests:</b> $STATUS_TEST
+          $S_EMOJI <b>Smoke:</b> $STATUS_SMOKE
+          $B_EMOJI <b>Build:</b> $STATUS_BUILD"
+
+          DETAILS=""
+          if [ "$STATUS_QUALITY" != "success" ]; then
+            append_tail "Ruff Lint" "artifacts/quality/ruff.log" 20
+            append_tail "Ruff Format" "artifacts/quality/ruff-format.log" 20
+            append_tail "Bandit" "artifacts/quality/bandit.log" 20
+            append_tail "Trivy" "artifacts/quality/trivy-fs.txt" 20
+          fi
+
+          if [ "$STATUS_TEST" != "success" ]; then
+            append_tail "Pytest" "artifacts/test/pytest.log" 30
+          fi
+
+          if [ "$STATUS_SMOKE" != "success" ]; then
+            append_tail "Smoke" "artifacts/smoke/smoke.log" 30
+          fi
+
           MSG="<b>🧭 Workflow Summary</b>
           ━━━━━━━━━━━━━━━━━━━━
           📦 <b>Repo:</b> <code>${{ github.repository }}</code>
           🌿 <b>Branch:</b> <code>$REF_NAME</code>
           🔗 <b>Commit:</b> <code>$VERSION</code>
           ━━━━━━━━━━━━━━━━━━━━
-          ✅ <b>Quality:</b> $STATUS_QUALITY
-          ✅ <b>Tests:</b> $STATUS_TEST
-          ✅ <b>Smoke:</b> $STATUS_SMOKE
-          ✅ <b>Build:</b> $STATUS_BUILD
+          $SUMMARY
+          $DETAILS
           ━━━━━━━━━━━━━━━━━━━━
           <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
 
