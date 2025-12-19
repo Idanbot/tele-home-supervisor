@@ -30,6 +30,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TZ=Asia/Jerusalem
 
+ARG APP_UID=10001
+ARG APP_GID=10001
+ARG DOCKER_GID=0
+
 ARG BUILD_VERSION=dev
 ENV TELE_HOME_SUPERVISOR_BUILD_VERSION=$BUILD_VERSION
 
@@ -46,16 +50,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chmod +x /usr/local/bin/docker \
     && docker --version
 
+RUN groupadd -g ${APP_GID} app \
+    && useradd -u ${APP_UID} -g ${APP_GID} -M -s /usr/sbin/nologin app \
+    && if [ "${DOCKER_GID}" != "0" ]; then groupadd -g "${DOCKER_GID}" docker; fi \
+    && if [ "${DOCKER_GID}" != "0" ]; then usermod -aG "${DOCKER_GID}" app; fi
+
 WORKDIR /app
 
 # Create data directory
-RUN mkdir -p /app/data && chmod 777 /app/data
+RUN mkdir -p /app/data && chown -R app:app /app
 
 # Copy installed packages from builder (Now this actually contains your deps!)
 COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy source code
-COPY . .
+COPY --chown=app:app . .
+
+USER app
 
 CMD ["python", "/app/bot.py"]

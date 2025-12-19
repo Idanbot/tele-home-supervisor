@@ -88,24 +88,24 @@ async def handle_callback_query(update, context) -> None:
     try:
         if data.startswith("dlogs:"):
             container = data[6:]
-            await _handle_dlogs_callback(query, container)
+            await _handle_dlogs_callback(query, context, container)
         elif data.startswith("dhealth:"):
             container = data[8:]
-            await _handle_dhealth_callback(query, container)
+            await _handle_dhealth_callback(query, context, container)
         elif data.startswith("dstats:"):
             container = data[7:]
-            await _handle_dstats_callback(query, container)
+            await _handle_dstats_callback(query, context, container)
         elif data == "docker:refresh":
             await _handle_docker_refresh(query, context)
         elif data.startswith("tstop:"):
             torrent_hash = data[6:]
-            await _handle_torrent_stop(query, torrent_hash)
+            await _handle_torrent_stop(query, context, torrent_hash)
         elif data.startswith("tstart:"):
             torrent_hash = data[7:]
-            await _handle_torrent_start(query, torrent_hash)
+            await _handle_torrent_start(query, context, torrent_hash)
         elif data.startswith("tinfo:"):
             torrent_hash = data[6:]
-            await _handle_torrent_info(query, torrent_hash)
+            await _handle_torrent_info(query, context, torrent_hash)
         elif data == "torrent:refresh":
             await _handle_torrent_refresh(query, context)
         elif data.startswith("games:"):
@@ -121,7 +121,14 @@ async def handle_callback_query(update, context) -> None:
             logger.error(f"Failed to send error notification: {notify_error}")
 
 
-async def _handle_dlogs_callback(query, container: str) -> None:
+async def _handle_dlogs_callback(query, context, container: str) -> None:
+    state: BotState = get_state(context.application)
+    await state.maybe_refresh("containers")
+    if state.get_cached("containers") and container not in state.get_cached(
+        "containers"
+    ):
+        await query.message.reply_text(f"❌ Unknown container: {container}")
+        return
     await query.message.reply_text(f"🔄 Fetching logs for {container}...")
     # Default 20 lines tail
     raw = await services.get_container_logs(container, 20)
@@ -130,12 +137,26 @@ async def _handle_dlogs_callback(query, container: str) -> None:
         await query.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
-async def _handle_dhealth_callback(query, container: str) -> None:
+async def _handle_dhealth_callback(query, context, container: str) -> None:
+    state: BotState = get_state(context.application)
+    await state.maybe_refresh("containers")
+    if state.get_cached("containers") and container not in state.get_cached(
+        "containers"
+    ):
+        await query.message.reply_text(f"❌ Unknown container: {container}")
+        return
     msg = await services.healthcheck_container(container)
     await query.message.reply_text(f"<pre>{msg}</pre>", parse_mode=ParseMode.HTML)
 
 
-async def _handle_dstats_callback(query, container: str) -> None:
+async def _handle_dstats_callback(query, context, container: str) -> None:
+    state: BotState = get_state(context.application)
+    await state.maybe_refresh("containers")
+    if state.get_cached("containers") and container not in state.get_cached(
+        "containers"
+    ):
+        await query.message.reply_text(f"❌ Unknown container: {container}")
+        return
     # We fetch all stats and filter? Or just show all?
     # Original logic showed all for dstats command but filtered for button?
     # Original: "Filter to show only the requested container if possible" -> comment only
@@ -168,17 +189,26 @@ async def _handle_docker_refresh(query, context) -> None:
     )
 
 
-async def _handle_torrent_stop(query, torrent_hash: str) -> None:
+async def _handle_torrent_stop(query, context, torrent_hash: str) -> None:
+    if not await _validate_torrent_hash(context, torrent_hash):
+        await query.message.reply_text("❌ Unknown torrent.")
+        return
     result = await services.torrent_stop_by_hash(torrent_hash)
     await query.message.reply_text(result, parse_mode=ParseMode.HTML)
 
 
-async def _handle_torrent_start(query, torrent_hash: str) -> None:
+async def _handle_torrent_start(query, context, torrent_hash: str) -> None:
+    if not await _validate_torrent_hash(context, torrent_hash):
+        await query.message.reply_text("❌ Unknown torrent.")
+        return
     result = await services.torrent_start_by_hash(torrent_hash)
     await query.message.reply_text(result, parse_mode=ParseMode.HTML)
 
 
-async def _handle_torrent_info(query, torrent_hash: str) -> None:
+async def _handle_torrent_info(query, context, torrent_hash: str) -> None:
+    if not await _validate_torrent_hash(context, torrent_hash):
+        await query.message.reply_text("❌ Unknown torrent.")
+        return
     result = await services.torrent_info_by_hash(torrent_hash)
     await query.message.reply_text(result, parse_mode=ParseMode.HTML)
 
@@ -193,6 +223,17 @@ async def _handle_torrent_refresh(query, context) -> None:
 
     await query.edit_message_text(
         msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def _validate_torrent_hash(context, torrent_hash: str) -> bool:
+    state: BotState = get_state(context.application)
+    await state.maybe_refresh("torrents")
+    torrents = await services.get_torrent_list()
+    return any(
+        (t.get("hash") or "").startswith(torrent_hash)
+        for t in torrents
+        if t.get("hash")
     )
 
 

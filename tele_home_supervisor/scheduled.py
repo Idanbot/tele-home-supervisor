@@ -7,13 +7,91 @@ from __future__ import annotations
 
 import html
 import logging
-from typing import Any
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from threading import Lock
+from typing import Any, Callable
 from urllib.parse import quote_plus
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+_GAME_OFFERS_TTL_S = 24 * 60 * 60
+_CACHE_BASE_BACKOFF_S = 15 * 60
+_CACHE_MAX_BACKOFF_S = 6 * 60 * 60
+
+
+@dataclass
+class _CacheEntry:
+    value: object | None
+    fetched_at: float
+    error_count: int = 0
+    next_retry_at: float = 0.0
+    last_error: object | None = None
+
+
+_cache_lock = Lock()
+_cache: dict[str, _CacheEntry] = {}
+
+
+def _is_error_value(value: object | None) -> bool:
+    if isinstance(value, tuple) and value:
+        msg = value[0]
+    else:
+        msg = value
+    return isinstance(msg, str) and msg.strip().startswith("❌")
+
+
+def _cached_fetch(
+    key: str,
+    ttl_s: float,
+    fetcher: Callable[[], object],
+) -> object:
+    now = time.monotonic()
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and entry.value is not None and (now - entry.fetched_at) < ttl_s:
+            return entry.value
+        if entry and now < entry.next_retry_at:
+            return entry.value if entry.value is not None else entry.last_error
+
+    value: object | None = None
+    try:
+        value = fetcher()
+        if _is_error_value(value):
+            raise RuntimeError("fetch returned error value")
+    except Exception as exc:
+        with _cache_lock:
+            entry = _cache.get(key)
+            error_count = (entry.error_count if entry else 0) + 1
+            backoff = min(
+                _CACHE_MAX_BACKOFF_S, _CACHE_BASE_BACKOFF_S * (2 ** (error_count - 1))
+            )
+            next_retry_at = now + backoff
+            if entry:
+                entry.error_count = error_count
+                entry.next_retry_at = next_retry_at
+                entry.last_error = value
+                _cache[key] = entry
+                if entry.value is not None:
+                    logger.warning("Using cached %s after fetch error: %s", key, exc)
+                    return entry.value
+            _cache[key] = _CacheEntry(
+                value=None,
+                fetched_at=0.0,
+                error_count=error_count,
+                next_retry_at=next_retry_at,
+                last_error=value,
+            )
+        if value is not None:
+            return value
+        raise
+
+    with _cache_lock:
+        _cache[key] = _CacheEntry(value=value, fetched_at=now)
+    return value
 
 
 def _is_active_free_offer(
@@ -91,6 +169,14 @@ def _fmt_dt(dt: datetime | None) -> str:
 
 
 def fetch_epic_free_games() -> tuple[str, list[str]]:
+    return _cached_fetch(
+        "epic",
+        _GAME_OFFERS_TTL_S,
+        _fetch_epic_free_games_uncached,
+    )
+
+
+def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
     """Fetch current free games from Epic Games Store.
 
     Returns tuple of (formatted HTML message, list of image URLs).
@@ -286,6 +372,14 @@ def fetch_hackernews_top(limit: int = 3) -> str:
 
 
 def fetch_steam_free_games(limit: int = 5) -> tuple[str, list[str]]:
+    return _cached_fetch(
+        f"steam:{limit}",
+        _GAME_OFFERS_TTL_S,
+        lambda: _fetch_steam_free_games_uncached(limit),
+    )
+
+
+def _fetch_steam_free_games_uncached(limit: int) -> tuple[str, list[str]]:
     """Fetch currently free-to-keep Steam games (filtering for 100% discount).
 
     Returns tuple of (formatted HTML message, list of image URLs). Dates are not
@@ -363,13 +457,21 @@ def fetch_steam_free_games(limit: int = 5) -> tuple[str, list[str]]:
 
     except requests.RequestException as e:
         logger.exception("Failed to fetch Steam free games")
-        return f"❌ Failed to fetch Steam freebies: {html.escape(str(e))}"
+        return (f"❌ Failed to fetch Steam freebies: {html.escape(str(e))}", [])
     except Exception as e:
         logger.exception("Error processing Steam free games data")
-        return f"❌ Error processing Steam freebies: {html.escape(str(e))}"
+        return (f"❌ Error processing Steam freebies: {html.escape(str(e))}", [])
 
 
 def fetch_gog_free_games() -> tuple[str, list[str]]:
+    return _cached_fetch(
+        "gog",
+        _GAME_OFFERS_TTL_S,
+        _fetch_gog_free_games_uncached,
+    )
+
+
+def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
     """Fetch current GOG giveaway games.
 
     Returns tuple of (formatted HTML message, list of image URLs).
@@ -450,6 +552,14 @@ def fetch_gog_free_games() -> tuple[str, list[str]]:
 
 
 def fetch_humble_free_games() -> tuple[str, list[str]]:
+    return _cached_fetch(
+        "humble",
+        _GAME_OFFERS_TTL_S,
+        _fetch_humble_free_games_uncached,
+    )
+
+
+def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
     """Fetch current Humble Bundle free games/giveaways.
 
     Returns tuple of (formatted HTML message, list of image URLs).
@@ -599,7 +709,7 @@ def build_combined_game_offers(limit_steam: int = 5) -> str:
         logger.exception("Failed to include Epic section")
 
     try:
-        steam_msg = fetch_steam_free_games(limit_steam)
+        steam_msg, _ = fetch_steam_free_games(limit_steam)
         if steam_msg:
             sections.append(steam_msg)
     except Exception:

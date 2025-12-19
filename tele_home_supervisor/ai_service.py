@@ -20,21 +20,23 @@ class OllamaClient:
         model: str,
         system_prompt: str,
         timeout: float = 90.0,
-        temp: float = 0.4,
-        top_k: int = 40,
-        top_p: float = 0.9,
-        num_predict: int = 640,
+        temp: float = 0.25,
+        top_k: int = 30,
+        top_p: float = 0.85,
+        num_predict: int = 320,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.system_prompt = system_prompt
         self.timeout = timeout
-        self.params = {
+        self.options = {
             "temperature": temp,
             "top_k": top_k,
             "top_p": top_p,
             "num_predict": num_predict,
-            "repeat_penalty": 1.2,
+            "repeat_penalty": 1.1,
+            "num_thread": 4,
+            "num_ctx": 4000,
         }
 
     async def generate_stream(self, prompt: str) -> AsyncGenerator[str, None]:
@@ -49,7 +51,7 @@ class OllamaClient:
             "prompt": prompt,
             "stream": True,
             "system": self.system_prompt,
-            **self.params,
+            "options": dict(self.options),
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:

@@ -14,6 +14,15 @@ from .callbacks import build_torrent_keyboard
 logger = logging.getLogger(__name__)
 
 
+def _has_torrent_match(names: set[str], query: str) -> bool:
+    if not names:
+        return True
+    target = query.strip().lower()
+    if not target:
+        return False
+    return any(target in n.lower() for n in names)
+
+
 async def cmd_torrent_add(update, context) -> None:
     """Add a torrent to qBittorrent (magnet/URL)."""
     if not await guard(update, context):
@@ -62,6 +71,11 @@ async def cmd_torrent_stop(update, context) -> None:
         )
         return
     name = " ".join(context.args)
+    if not _has_torrent_match(state.get_cached("torrents"), name):
+        await reply_usage_with_suggestions(
+            update, "/tstop <torrent>", state.suggest("torrents", query=name, limit=5)
+        )
+        return
     res = await services.torrent_stop(name)
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
@@ -77,6 +91,11 @@ async def cmd_torrent_start(update, context) -> None:
         )
         return
     name = " ".join(context.args)
+    if not _has_torrent_match(state.get_cached("torrents"), name):
+        await reply_usage_with_suggestions(
+            update, "/tstart <torrent>", state.suggest("torrents", query=name, limit=5)
+        )
+        return
     res = await services.torrent_start(name)
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
@@ -118,6 +137,13 @@ async def cmd_torrent_delete(update, context) -> None:
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         return
 
+    if not _has_torrent_match(state.get_cached("torrents"), name):
+        await reply_usage_with_suggestions(
+            update,
+            "/tdelete <torrent> yes",
+            state.suggest("torrents", query=name, limit=5),
+        )
+        return
     res = await services.torrent_delete(name)
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 

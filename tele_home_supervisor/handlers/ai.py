@@ -19,10 +19,13 @@ from .common import guard
 
 logger = logging.getLogger(__name__)
 
-STREAM_UPDATE_INTERVAL = 1.0
-STREAM_MIN_TOKENS = 5
+STREAM_UPDATE_INTERVAL = 1.8
+STREAM_MIN_TOKENS = 12
 
-STYLE_SYSTEM_PROMPT = "Answer in Telegram MarkdownV2 format. For code or quotes use code blocks (```\ncode\n```). "
+STYLE_SYSTEM_PROMPT = (
+    "Respond in Telegram MarkdownV2. Avoid HTML. "
+    "Use fenced code blocks for code or quotes. Keep responses concise."
+)
 
 
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -137,11 +140,13 @@ def _escape_md_v2_segment(text: str) -> str:
     Preserves valid formatting: **bold**, __bold__, *italic*, _italic_, ~~strikethrough~~.
     """
     # Temporarily mark formatting patterns so we don't escape them
+    # Use markers that don't contain escapable characters
     placeholders = {}
     counter = [0]
 
     def mark_pattern(m):
-        placeholder = f"__KEEP_{counter[0]}__"
+        # Use a marker that won't be escaped (only alphanumeric and specific safe chars)
+        placeholder = f"KEEP{counter[0]}MARKER"
         placeholders[placeholder] = m.group(0)
         counter[0] += 1
         return placeholder

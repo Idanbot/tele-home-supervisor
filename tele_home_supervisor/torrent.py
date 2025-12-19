@@ -57,11 +57,15 @@ class TorrentManager:
         port: Optional[int] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
+        timeout_s: Optional[float] = None,
     ) -> None:
         self.host = host or settings.QBT_HOST
         self.port = port or settings.QBT_PORT
         self.username = username or settings.QBT_USER
         self.password = password or settings.QBT_PASS
+        self.timeout_s = (
+            float(timeout_s) if timeout_s is not None else settings.QBT_TIMEOUT_S
+        )
 
         self._base_url = f"http://{self.host}:{self.port}"
         self.qbt_client: Optional["qbittorrentapi.Client"] = None
@@ -76,9 +80,25 @@ class TorrentManager:
             return False
 
         try:
-            self.qbt_client = qbittorrentapi.Client(
-                host=self._base_url, username=self.username, password=self.password
-            )
+            try:
+                self.qbt_client = qbittorrentapi.Client(
+                    host=self._base_url,
+                    username=self.username,
+                    password=self.password,
+                    timeout=self.timeout_s,
+                )
+            except TypeError:
+                self.qbt_client = qbittorrentapi.Client(
+                    host=self._base_url,
+                    username=self.username,
+                    password=self.password,
+                )
+            for attr in ("timeout", "request_timeout"):
+                if hasattr(self.qbt_client, attr):
+                    try:
+                        setattr(self.qbt_client, attr, self.timeout_s)
+                    except Exception:
+                        pass
             self.qbt_client.auth_log_in()
             # Accessing app.version can raise in some client states; guard it
             try:

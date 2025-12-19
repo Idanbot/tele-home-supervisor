@@ -34,6 +34,7 @@ class Settings:
     QBT_PORT: int
     QBT_USER: str
     QBT_PASS: str
+    QBT_TIMEOUT_S: float
     OLLAMA_HOST: str
     OLLAMA_MODEL: str
 
@@ -57,6 +58,10 @@ def _read_settings() -> Settings:
         qbt_port = 8080
     qbt_user = os.environ.get("QBT_USER") or "admin"
     qbt_pass = os.environ.get("QBT_PASS") or "adminadmin"
+    try:
+        qbt_timeout = float(os.environ.get("QBT_TIMEOUT_S", "8") or "8")
+    except Exception:
+        qbt_timeout = 8.0
 
     # Ollama
     ollama_host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
@@ -72,6 +77,7 @@ def _read_settings() -> Settings:
         QBT_PORT=qbt_port,
         QBT_USER=qbt_user,
         QBT_PASS=qbt_pass,
+        QBT_TIMEOUT_S=qbt_timeout,
         OLLAMA_HOST=ollama_host,
         OLLAMA_MODEL=ollama_model,
     )
@@ -97,5 +103,6 @@ SHOW_WAN: bool = settings.SHOW_WAN
 WATCH_PATHS: list[str] = settings.WATCH_PATHS
 OLLAMA_HOST: str = settings.OLLAMA_HOST
 OLLAMA_MODEL: str = settings.OLLAMA_MODEL
+QBT_TIMEOUT_S: float = settings.QBT_TIMEOUT_S
 
 validate_settings()

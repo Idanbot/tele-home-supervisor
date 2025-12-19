@@ -72,6 +72,14 @@ async def cmd_dlogs(update, context) -> None:
         return
 
     container_name = context.args[0]
+    container_names = state.get_cached("containers")
+    if container_names and container_name not in container_names:
+        await reply_usage_with_suggestions(
+            update,
+            "/dlogs &lt;container&gt; [lines]",
+            state.suggest("containers", query=container_name, limit=5),
+        )
+        return
     lines = 50
 
     if len(context.args) > 1:
@@ -104,6 +112,14 @@ async def cmd_dhealth(update, context) -> None:
         )
         return
     name = context.args[0]
+    container_names = state.get_cached("containers")
+    if container_names and name not in container_names:
+        await reply_usage_with_suggestions(
+            update,
+            "/dhealth &lt;container&gt;",
+            state.suggest("containers", query=name, limit=5),
+        )
+        return
     msg = await services.healthcheck_container(name)
     # Simple formatting
     await update.message.reply_text(f"<pre>{msg}</pre>", parse_mode=ParseMode.HTML)

@@ -11,6 +11,7 @@ def test_settings_defaults():
         assert settings.RATE_LIMIT_S == 1.0
         assert settings.QBT_HOST == "qbittorrent"
         assert settings.QBT_PORT == 8080
+        assert settings.QBT_TIMEOUT_S == 8.0
 
 
 def test_settings_custom():
@@ -20,6 +21,7 @@ def test_settings_custom():
         "RATE_LIMIT_S": "2.5",
         "SHOW_WAN": "true",
         "QBT_PORT": "9090",
+        "QBT_TIMEOUT_S": "12.5",
     }
     with mock.patch.dict(os.environ, env, clear=True):
         settings = config._read_settings()
@@ -28,3 +30,4 @@ def test_settings_custom():
         assert settings.RATE_LIMIT_S == 2.5
         assert settings.SHOW_WAN is True
         assert settings.QBT_PORT == 9090
+        assert settings.QBT_TIMEOUT_S == 12.5

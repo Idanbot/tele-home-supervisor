@@ -2,6 +2,9 @@ services:
   rpi_telebot:
     image: ghcr.io/idanbot/tele-home-supervisor:latest
     container_name: rpi-telebot
+    user: "10001:10001"
+    group_add:
+      - "${DOCKER_GID}"
 
     networks:
       - bit-net
