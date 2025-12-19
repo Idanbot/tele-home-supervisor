@@ -56,7 +56,7 @@ jobs:
       # Trivy Scan (Filesystem)
       # Using specific version tag for stability
       - name: Trivy FS Scan
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -277,7 +277,7 @@ jobs:
       # Scan the built image (ARM64)
       - name: Trivy Image Scan
         if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}:latest
           format: 'table'
