@@ -127,8 +127,8 @@ jobs:
       - name: Lint Dockerfile (hadolint)
         run: |
           set -o pipefail
-          docker run --rm -i hadolint/hadolint:v2.12.0 --failure-threshold error - < Dockerfile \
-            2>&1 | tee hadolint.log
+          docker run --rm -i hadolint/hadolint:v2.12.0 \
+            hadolint --failure-threshold error - < Dockerfile 2>&1 | tee hadolint.log
 
       - name: Upload container logs
         if: always()
@@ -367,12 +367,14 @@ jobs:
             local lines="$3"
             if [ -s "$file" ]; then
               DETAILS+=$'\n<b>'"$label"$'</b> (tail):\n<pre>'
-              tail -n "$lines" "$file" | html_escape
+              DETAILS+=$(tail -n "$lines" "$file" | html_escape)
               DETAILS+=$'</pre>'
             fi
           }
 
+          RUN_DATE_UTC=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
           VERSION=$(echo "$SHA" | cut -c1-7)
+          PIPELINE_VERSION="${{ github.ref_name }}"
           Q_EMOJI=$(status_emoji "$STATUS_QUALITY")
           T_EMOJI=$(status_emoji "$STATUS_TEST")
           S_EMOJI=$(status_emoji "$STATUS_SMOKE")
@@ -408,8 +410,12 @@ jobs:
 
           MSG="<b>🧭 Workflow Summary</b>
           ━━━━━━━━━━━━━━━━━━━━
+          🧾 <b>Workflow:</b> <code>${{ github.workflow }}</code>
+          🏷️ <b>Version:</b> <code>$PIPELINE_VERSION</code>
+          🧮 <b>Run:</b> <code>${{ github.run_number }}</code>
+          🕒 <b>Time:</b> <code>$RUN_DATE_UTC</code>
           📦 <b>Repo:</b> <code>${{ github.repository }}</code>
-          🌿 <b>Branch:</b> <code>$REF_NAME</code>
+          🌿 <b>Ref:</b> <code>$REF_NAME</code>
           🔗 <b>Commit:</b> <code>$VERSION</code>
           ━━━━━━━━━━━━━━━━━━━━
           $SUMMARY
