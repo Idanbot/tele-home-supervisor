@@ -32,7 +32,20 @@ client: "DockerClient" = docker.from_env()
 
 
 def fmt_bytes(n: int) -> str:
-    """Format bytes to human readable string (e.g. 1.2 GiB)."""
+    """Format bytes to human readable string using binary units (e.g. 1.2 GiB).
+
+    Args:
+        n: Number of bytes to format
+
+    Returns:
+        Human-readable string with appropriate unit (B, KiB, MiB, GiB, TiB)
+
+    Example:
+        >>> fmt_bytes(1536)
+        '1.5 KiB'
+        >>> fmt_bytes(1073741824)
+        '1.0 GiB'
+    """
     units = ["B", "KiB", "MiB", "GiB", "TiB"]
     i = 0
     f = float(n)
@@ -43,6 +56,18 @@ def fmt_bytes(n: int) -> str:
 
 
 async def get_primary_ip() -> str:
+    """Get the primary LAN IP address of this host.
+
+    First attempts to use `ip route` command, then falls back to psutil
+    to find the first non-loopback IPv4 address.
+
+    Returns:
+        IP address string, or "unknown" if not found
+
+    Note:
+        Prefers the IP used for routing to 1.1.1.1 to ensure we get
+        the primary outbound interface.
+    """
     rc, out, err = await cli.run_cmd(
         ["bash", "-lc", "ip route get 1.1.1.1 | awk '{print $7; exit}'"], timeout=2
     )
@@ -66,6 +91,19 @@ async def get_primary_ip() -> str:
 
 
 async def get_wan_ip() -> str:
+    """Get the public WAN IP address using external services.
+
+    Tries multiple services in sequence:
+    1. AWS checkip
+    2. ipinfo.io
+    3. ifconfig.me
+
+    Returns:
+        Public IP address string, or "n/a" if all services fail
+
+    Note:
+        Has a 5-second timeout to avoid blocking on network issues.
+    """
     rc, out, err = await cli.run_cmd(
         [
             "bash",
@@ -152,6 +190,31 @@ def human_uptime() -> str:
 
 
 async def host_health(watch_paths: list[str] | None = None) -> dict[str, Any]:
+    """Collect comprehensive system health information.
+
+    Args:
+        watch_paths: List of filesystem paths to monitor for disk usage.
+                    Defaults to ["/", "/srv/media"] if not specified.
+
+    Returns:
+        Dictionary containing:
+        - host: hostname
+        - system: OS name
+        - release: OS release
+        - time: current time with timezone
+        - lan_ip: local IP address
+        - wan_ip: public IP address
+        - uptime: system uptime in human-readable format
+        - load: system load averages (1m, 5m, 15m)
+        - cpu_pct: CPU usage percentage
+        - mem_used/mem_total/mem_pct: memory statistics
+        - temp: CPU temperature
+        - disks: list of disk usage strings
+
+    Note:
+        This function performs I/O operations and network requests,
+        so it may take a few seconds to complete.
+    """
     if watch_paths is None:
         watch_paths = ["/", "/srv/media"]
 
@@ -287,7 +350,19 @@ async def container_stats_rich() -> list[dict[str, str]]:
 
 
 async def get_container_logs(container_name: str, lines: int = 50) -> str:
-    """Return raw log string."""
+    """Return raw log string from a Docker container.
+
+    Args:
+        container_name: Name or ID of the container
+        lines: Number of lines to retrieve. Positive for tail, negative for head.
+
+    Returns:
+        Container log output as a string, or error message if failed.
+
+    Note:
+        Negative line numbers retrieve from the start of the log (head),
+        positive numbers retrieve from the end (tail).
+    """
     docker_cmd = cli.get_docker_cmd()
     if not docker_cmd:
         return "Docker command not found."
@@ -312,6 +387,7 @@ async def get_container_logs(container_name: str, lines: int = 50) -> str:
             return (out + err).strip()
 
     except Exception as e:
+        logger.exception("Unexpected error getting container logs")
         return f"Unexpected error: {e}"
 
 
@@ -405,7 +481,22 @@ async def get_listening_ports() -> str:
 
 
 async def dns_lookup(name: str) -> str:
-    """Resolve a hostname."""
+    """Resolve a hostname to IP addresses.
+
+    Args:
+        name: Hostname or domain to resolve
+
+    Returns:
+        Formatted string with lookup time and resolved IPs (IPv4 and IPv6),
+        or error message if resolution fails.
+
+    Example output:
+        Lookup time: 45ms
+        A:
+          1.2.3.4
+        AAAA:
+          2001:db8::1
+    """
 
     def _resolve():
         try:
@@ -462,7 +553,19 @@ def _fmt_rate_kbits(bits_per_s: float) -> str:
 
 
 async def speedtest_download(mb: int = 100) -> str:
-    """Download speed test using curl."""
+    """Download speed test using curl and Cloudflare's speed test endpoint.
+
+    Args:
+        mb: Size in megabytes to download (minimum 1, default 100)
+
+    Returns:
+        Formatted string with download size, time, and speed in Mb/s or Kb/s,
+        or error message if test fails.
+
+    Note:
+        Uses a 30-second timeout and downloads from speed.cloudflare.com.
+        Bandwidth is calculated in bits per second for accurate network measurements.
+    """
     curl_bin = shutil.which("curl")
     if not curl_bin:
         return "curl not available"
