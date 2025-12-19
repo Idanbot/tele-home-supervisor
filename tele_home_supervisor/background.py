@@ -21,7 +21,7 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 _TASK_TORRENT_COMPLETION = "torrent_completion"
-_TASK_EPIC_GAMES = "epic_games_scheduler"
+_TASK_GAMEOFFERS = "gameoffers_scheduler"
 _TASK_HACKERNEWS = "hackernews_scheduler"
 _POLL_INTERVAL_S = 30.0
 _ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
@@ -49,10 +49,10 @@ def ensure_started(app: Application) -> None:
             _torrent_completion_loop(app)
         )
 
-    # Start Epic Games scheduler
-    task = state.tasks.get(_TASK_EPIC_GAMES)
+    # Start Game Offers scheduler (replaces Epic Games)
+    task = state.tasks.get(_TASK_GAMEOFFERS)
     if not isinstance(task, asyncio.Task) or task.done():
-        state.tasks[_TASK_EPIC_GAMES] = asyncio.create_task(_epic_games_scheduler(app))
+        state.tasks[_TASK_GAMEOFFERS] = asyncio.create_task(_game_offers_scheduler(app))
 
     # Start Hacker News scheduler
     task = state.tasks.get(_TASK_HACKERNEWS)
@@ -212,15 +212,17 @@ def _seconds_until_time(target_hour: int, target_minute: int = 0) -> float:
     return max(0.0, delta)
 
 
-async def _epic_games_scheduler(app: Application) -> None:
-    """Schedule Epic Games free games notification at 8 PM Israel time daily."""
-    logger.info("Starting Epic Games scheduler (8 PM Israel time)")
+async def _game_offers_scheduler(app: Application) -> None:
+    """Schedule combined Game Offers notification at 8 PM Israel time daily."""
+    logger.info("Starting Game Offers scheduler (8 PM Israel time)")
 
     while True:
         try:
             # Wait until 8 PM Israel time
             wait_seconds = _seconds_until_time(20, 0)  # 8 PM = 20:00
-            logger.info("Epic Games: waiting %.1f seconds until next run", wait_seconds)
+            logger.info(
+                "Game Offers: waiting %.1f seconds until next run", wait_seconds
+            )
             await asyncio.sleep(wait_seconds)
 
             # Fetch and send
@@ -230,43 +232,29 @@ async def _epic_games_scheduler(app: Application) -> None:
                 await asyncio.sleep(3600)  # Wait 1 hour before retry
                 continue
 
-            message, image_urls = await asyncio.to_thread(
-                scheduled_fetchers.fetch_epic_free_games
+            combined_msg = await asyncio.to_thread(
+                scheduled_fetchers.build_combined_game_offers, 5
             )
 
             for chat_id in settings.ALLOWED_CHAT_IDS:
-                if state.is_epic_games_muted(chat_id):
-                    logger.debug("Epic Games muted for chat_id=%s", chat_id)
+                if state.is_gameoffers_muted(chat_id):
+                    logger.debug("Game Offers muted for chat_id=%s", chat_id)
                     continue
 
                 try:
-                    # Send as photo with caption if image available, otherwise text
-                    if image_urls:
-                        # Send first game with image, rest as text if multiple games
-                        await app.bot.send_photo(
-                            chat_id=chat_id,
-                            photo=image_urls[0],
-                            caption=message,
-                            parse_mode=ParseMode.HTML,
-                        )
-                        logger.info(
-                            "Sent Epic Games notification (with image) to chat_id=%s",
-                            chat_id,
-                        )
-                    else:
-                        await app.bot.send_message(
-                            chat_id=chat_id,
-                            text=message,
-                            parse_mode=ParseMode.HTML,
-                            disable_web_page_preview=True,
-                        )
-                        logger.info(
-                            "Sent Epic Games notification (text only) to chat_id=%s",
-                            chat_id,
-                        )
+                    await app.bot.send_message(
+                        chat_id=chat_id,
+                        text=combined_msg,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                    logger.info(
+                        "Sent Game Offers notification to chat_id=%s",
+                        chat_id,
+                    )
                 except Exception:
                     logger.exception(
-                        "Failed to send Epic Games notification to chat_id=%s", chat_id
+                        "Failed to send Game Offers notification to chat_id=%s", chat_id
                     )
 
             # Wait a bit to avoid rescheduling immediately
@@ -275,7 +263,7 @@ async def _epic_games_scheduler(app: Application) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Epic Games scheduler error")
+            logger.exception("Game Offers scheduler error")
             await asyncio.sleep(3600)  # Wait 1 hour on error
 
 

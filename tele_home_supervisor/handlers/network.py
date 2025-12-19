@@ -43,14 +43,14 @@ async def cmd_traceroute(update, context) -> None:
 async def cmd_speedtest(update, context) -> None:
     if not await guard(update, context):
         return
-    mb = 10
+    mb = 100
     if context.args and context.args[0].isdigit():
         mb = max(1, min(int(context.args[0]), 200))
 
-    await update.message.reply_text(
+    msg = await update.message.reply_text(
         "🏃 Running speedtest...", parse_mode=ParseMode.HTML
     )
 
     result = await services.speedtest_download(mb)
-    msg = f"{view.bold('Speedtest (download):')}\n{result}"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    text = f"{view.bold('Speedtest (download):')}\n{result}"
+    await msg.edit_text(text, parse_mode=ParseMode.HTML)

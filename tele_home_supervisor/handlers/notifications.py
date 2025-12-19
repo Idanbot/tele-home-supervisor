@@ -15,20 +15,20 @@ from .common import guard
 logger = logging.getLogger(__name__)
 
 
-async def cmd_mute_epicgames(update, context) -> None:
-    """Toggle Epic Games daily notifications."""
+async def cmd_mute_gameoffers(update, context) -> None:
+    """Toggle combined Game Offers daily notifications (Epic/Steam/GOG/Humble)."""
     if not await guard(update, context):
         return
 
     state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
     chat_id = update.effective_chat.id
 
-    is_muted = state.toggle_epic_games_mute(chat_id)
+    is_muted = state.toggle_gameoffers_mute(chat_id)
 
     if is_muted:
-        msg = "🔕 Epic Games daily notifications are now <b>muted</b>.\nYou will no longer receive the 8 PM update."
+        msg = "🔕 Game Offers daily notifications are now <b>muted</b>.\nYou will no longer receive the 8 PM update."
     else:
-        msg = "🔔 Epic Games daily notifications are now <b>enabled</b>.\nYou will receive updates at 8 PM Israel time."
+        msg = "🔔 Game Offers daily notifications are now <b>enabled</b>.\nYou will receive updates at 8 PM Israel time."
 
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
@@ -51,48 +51,24 @@ async def cmd_mute_hackernews(update, context) -> None:
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_epicgames_now(update, context) -> None:
-    """Fetch and display current Epic Games free games on demand."""
+async def cmd_gameoffers_now(update, context) -> None:
+    """Fetch and display combined game offers on demand (Epic/Steam/GOG/Humble)."""
     if not await guard(update, context):
         return
 
-    msg = await update.message.reply_text("🔄 Fetching Epic Games free games...")
+    msg = await update.message.reply_text("🔄 Fetching game offers...")
 
     try:
-        message, image_urls = await asyncio.to_thread(
-            scheduled_fetchers.fetch_epic_free_games
+        combined = await asyncio.to_thread(
+            scheduled_fetchers.build_combined_game_offers, 5
         )
-
-        # Try to send with image first, fallback to text-only if image fails
-        if image_urls:
-            try:
-                await msg.delete()
-                await update.message.reply_photo(
-                    photo=image_urls[0],
-                    caption=message,
-                    parse_mode=ParseMode.HTML,
-                )
-                return
-            except Exception as img_err:
-                logger.warning(
-                    f"Failed to send Epic image, falling back to text: {img_err}"
-                )
-                # Message was deleted, need to send a new one
-                await update.message.reply_text(
-                    message,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
-                return
-
-        # No images available, edit existing message
         await msg.edit_text(
-            message,
+            combined,
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
     except Exception as e:
-        logger.exception("Epic Games fetch failed")
+        logger.exception("Game Offers fetch failed")
         try:
             await msg.edit_text(f"❌ Error: {html.escape(str(e))}")
         except Exception:
@@ -149,14 +125,71 @@ async def cmd_steamfree_now(update, context) -> None:
     msg = await update.message.reply_text("🔄 Fetching Steam free-to-keep games...")
 
     try:
-        result = await asyncio.to_thread(
+        message, image_urls = await asyncio.to_thread(
             scheduled_fetchers.fetch_steam_free_games, limit
         )
-        await msg.edit_text(
-            result, parse_mode=ParseMode.HTML, disable_web_page_preview=True
-        )
+        if image_urls:
+            await msg.delete()
+            await update.message.reply_photo(
+                photo=image_urls[0],
+                caption=message,
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await msg.edit_text(
+                message, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+            )
     except Exception as e:
         await msg.edit_text(f"❌ Error: {e}")
+
+
+async def cmd_epicgames_now(update, context) -> None:
+    """Fetch and display current Epic Games free games on demand."""
+    if not await guard(update, context):
+        return
+
+    msg = await update.message.reply_text("🔄 Fetching Epic Games free games...")
+
+    try:
+        message, image_urls = await asyncio.to_thread(
+            scheduled_fetchers.fetch_epic_free_games
+        )
+
+        # Try to send with image first, fallback to text-only if image fails
+        if image_urls:
+            try:
+                await msg.delete()
+                await update.message.reply_photo(
+                    photo=image_urls[0],
+                    caption=message,
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            except Exception as img_err:
+                logger.warning(
+                    f"Failed to send Epic image, falling back to text: {img_err}"
+                )
+                # Message was deleted, need to send a new one
+                await update.message.reply_text(
+                    message,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                return
+
+        # No images available, edit existing message
+        await msg.edit_text(
+            message,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    except Exception as e:
+        logger.exception("Epic Games fetch failed")
+        try:
+            await msg.edit_text(f"❌ Error: {html.escape(str(e))}")
+        except Exception:
+            # If edit fails (message deleted), send new message
+            await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
 
 
 async def cmd_gogfree_now(update, context) -> None:

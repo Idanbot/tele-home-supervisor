@@ -190,12 +190,12 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     # Notifications
     CommandSpec(
-        "mute_epicgames",
+        "mute_gameoffers",
         (),
         "Notifications",
-        "/mute_epicgames",
-        "toggle Epic Games daily notifications (8 PM)",
-        handler="cmd_mute_epicgames",
+        "/mute_gameoffers",
+        "toggle Game Offers daily notifications (8 PM)",
+        handler="cmd_mute_gameoffers",
     ),
     CommandSpec(
         "mute_hackernews",
@@ -204,6 +204,14 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "/mute_hackernews",
         "toggle Hacker News daily digest (8 AM)",
         handler="cmd_mute_hackernews",
+    ),
+    CommandSpec(
+        "gameoffers",
+        (),
+        "Notifications",
+        "/gameoffers",
+        "show combined game offers (Epic/Steam/GOG/Humble)",
+        handler="cmd_gameoffers_now",
     ),
     CommandSpec(
         "epicgames",
@@ -251,7 +259,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
         (),
         "AI",
         "/ask <question>",
-        "ask a question to local Ollama model (streaming)",
+        "ask a question, flags: --temp|-t 0.4 --top-k|-k 40 --top-p|-p 0.9 --num-predict|-n 640",
         handler="cmd_ask",
     ),
     CommandSpec(

@@ -1,8 +1,8 @@
 # tele-home-supervisor
 
-[![CI-CD](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml)
+[![CI/CD](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml)
 
-A Telegram bot for monitoring a Raspberry Pi (or any Linux host) and managing Docker containers and qBittorrent remotely.
+A Telegram bot for monitoring a Raspberry Pi (or any Linux host) and managing Docker containers, qBittorrent, and AI queries remotely.
 
 ## Features
 
@@ -14,6 +14,7 @@ A Telegram bot for monitoring a Raspberry Pi (or any Linux host) and managing Do
 | **Torrents** | Add/pause/resume/delete torrents, completion notifications |
 | **Free Games** | Epic Games, Steam, GOG, Humble Bundle giveaway tracking |
 | **News** | Hacker News top stories with daily digest |
+| **AI** | Query local LLMs via Ollama with customizable parameters |
 
 ### Interactive Features
 
@@ -28,6 +29,7 @@ A Telegram bot for monitoring a Raspberry Pi (or any Linux host) and managing Do
 - Docker and Docker Compose
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - Your Telegram chat ID
+- (Optional) [Ollama](https://ollama.com/) for AI features
 
 ### Installation
 
@@ -43,6 +45,8 @@ QBT_HOST=qbittorrent
 QBT_PORT=8080
 QBT_USER=admin
 QBT_PASS=adminadmin
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=llama3
 EOF
 
 # Create the external network
@@ -104,6 +108,12 @@ The included Watchtower service auto-updates the bot when new images are pushed.
 | `/mute_epicgames` | Toggle daily Epic digest (8 PM) |
 | `/mute_hackernews` | Toggle daily HN digest (8 AM) |
 
+### AI
+| Command | Description |
+|---------|-------------|
+| `/ask <question>` | Ask a question via Ollama (supports flags like `--temp`, `--num-predict`) |
+| `/askreset` | Reset custom AI generation parameters |
+
 ### Info
 | Command | Description |
 |---------|-------------|
@@ -131,6 +141,8 @@ The included Watchtower service auto-updates the bot when new images are pushed.
 | `QBT_PORT` | `8080` | qBittorrent WebUI port |
 | `QBT_USER` | `admin` | qBittorrent username |
 | `QBT_PASS` | `adminadmin` | qBittorrent password |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
+| `OLLAMA_MODEL` | `llama2` | Default model for AI queries |
 
 ### Volume Mounts
 
@@ -146,30 +158,31 @@ volumes:
 
 ### Local Setup
 
-```bash
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+This project uses [`uv`](https://github.com/astral-sh/uv) for dependency management.
 
-# Install dependencies
-pip install -r requirements.txt
+```bash
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies and setup environment
+uv sync
 
 # Install pre-commit hooks
-pip install pre-commit
-pre-commit install
+uv run pre-commit install
 
 # Run locally
 export BOT_TOKEN=...
 export ALLOWED_CHAT_IDS=...
-python bot.py
+uv run bot.py
 ```
 
-### Pre-commit Hooks
+### Formatting & Linting
 
-The project uses Black (formatting) and Bandit (security) hooks that mirror CI checks:
+The project uses [`Ruff`](https://github.com/astral-sh/ruff) for fast linting and formatting (replaces Black, Flake8, Isort).
 
 ```bash
-pre-commit run --all-files
+uv run ruff check .   # Lint
+uv run ruff format .  # Format
 ```
 
 ### Building the Docker Image
@@ -184,32 +197,38 @@ docker build -t tele-home-supervisor .
 tele_home_supervisor/
 ├── main.py           # Application entry point, command registration
 ├── commands.py       # Command registry (single source of truth)
+├── config.py         # Settings and environment variables
 ├── state.py          # Runtime state, caches, subscriptions
+├── runtime.py        # Bot runtime initialization
 ├── background.py     # Background tasks (torrent polling, schedulers)
 ├── scheduled.py      # Fetchers for Epic, Steam, GOG, Humble, HN
 ├── services.py       # Business logic layer
-├── utils.py          # System/Docker/network utilities
+├── ai_service.py     # Ollama integration
 ├── torrent.py        # qBittorrent API wrapper
+├── view.py           # Message formatting utilities
+├── logger.py         # Logging configuration
+├── utils.py          # System/Docker/network utilities
 └── handlers/
     ├── dispatch.py      # Rate-limiting dispatcher
     ├── callbacks.py     # Inline keyboard handlers
+    ├── ai.py            # AI command handlers
     ├── meta.py          # /start, /help, /whoami, /version
     ├── system.py        # Host monitoring commands
     ├── docker.py        # Docker commands
     ├── network.py       # Network commands
     ├── torrents.py      # Torrent commands
-    └── notifications.py # Free games and news commands
+    ├── notifications.py # Free games and news commands
+    └── common.py        # Shared handler utilities
 ```
 
 ## CI/CD
 
-The GitHub Actions pipeline (`.github/workflows/build-and-push.yml`):
+The GitHub Actions pipeline ([`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)):
 
-1. **Lint**: Black formatting, Pylint errors, Bandit security scan, pip-audit
-2. **Build**: Multi-arch images (amd64 + arm64)
-3. **Scan**: Trivy vulnerability scanning
-4. **Push**: Images pushed to `ghcr.io/idanbot/tele-home-supervisor`
-5. **Notify**: Telegram notifications on build status
+1. **Quality**: Ruff linting & formatting check, Bandit security scan, Trivy filesystem scan.
+2. **Test**: Pytest unit tests.
+3. **Build & Push**: Multi-arch Docker images (amd64, arm64) pushed to GHCR.
+4. **Notify**: Telegram notifications on failure with log snippets.
 
 ## Troubleshooting
 
@@ -217,7 +236,7 @@ The GitHub Actions pipeline (`.github/workflows/build-and-push.yml`):
 |-------|----------|
 | No Docker data | Verify `/var/run/docker.sock` is mounted |
 | No torrent data | Check `QBT_*` environment variables and network connectivity |
-| No suggestions | Run the base command (e.g., `/docker`) to populate the cache |
+| No AI response | Verify `OLLAMA_HOST` is reachable and model is pulled (`ollama pull llama2`) |
 | Permission denied | Ensure the bot container can access the Docker socket |
 
 ## License

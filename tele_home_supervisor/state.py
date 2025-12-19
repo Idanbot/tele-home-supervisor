@@ -32,7 +32,7 @@ class BotState:
     tasks: dict[str, object] = field(default_factory=dict)
 
     # Scheduled notifications mute state (chat_id -> muted)
-    epic_games_muted: set[int] = field(default_factory=set)
+    gameoffers_muted: set[int] = field(default_factory=set)
     hackernews_muted: set[int] = field(default_factory=set)
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
@@ -88,18 +88,18 @@ class BotState:
     def torrent_completion_enabled(self, chat_id: int) -> bool:
         return chat_id in self.torrent_completion_subscribers
 
-    def toggle_epic_games_mute(self, chat_id: int) -> bool:
-        """Toggle Epic Games notifications. Returns True if now muted."""
-        if chat_id in self.epic_games_muted:
-            self.epic_games_muted.discard(chat_id)
+    def toggle_gameoffers_mute(self, chat_id: int) -> bool:
+        """Toggle combined Game Offers notifications. Returns True if now muted."""
+        if chat_id in self.gameoffers_muted:
+            self.gameoffers_muted.discard(chat_id)
             self._save_state()
             return False
-        self.epic_games_muted.add(chat_id)
+        self.gameoffers_muted.add(chat_id)
         self._save_state()
         return True
 
-    def is_epic_games_muted(self, chat_id: int) -> bool:
-        return chat_id in self.epic_games_muted
+    def is_gameoffers_muted(self, chat_id: int) -> bool:
+        return chat_id in self.gameoffers_muted
 
     def toggle_hackernews_mute(self, chat_id: int) -> bool:
         """Toggle Hacker News notifications. Returns True if now muted."""
@@ -119,7 +119,7 @@ class BotState:
         try:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
             data = {
-                "epic_games_muted": list(self.epic_games_muted),
+                "gameoffers_muted": list(self.gameoffers_muted),
                 "hackernews_muted": list(self.hackernews_muted),
                 "torrent_completion_subscribers": list(
                     self.torrent_completion_subscribers
@@ -135,7 +135,9 @@ class BotState:
             if not self._state_file.exists():
                 return
             data = json.loads(self._state_file.read_text())
-            self.epic_games_muted = set(data.get("epic_games_muted", []))
+            # Migrate legacy epic_games_muted to gameoffers_muted if present
+            legacy_epic = set(data.get("epic_games_muted", []))
+            self.gameoffers_muted = set(data.get("gameoffers_muted", [])) or legacy_epic
             self.hackernews_muted = set(data.get("hackernews_muted", []))
             self.torrent_completion_subscribers = set(
                 data.get("torrent_completion_subscribers", [])

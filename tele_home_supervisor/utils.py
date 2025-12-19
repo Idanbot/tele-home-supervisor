@@ -7,6 +7,7 @@ Presentation logic is handled by the view layer.
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import os
 import platform
@@ -452,17 +453,15 @@ async def traceroute_host(host: str, max_hops: int = 20) -> str:
     return out.strip() or err.strip()
 
 
-def _fmt_rate_bps(bytes_per_s: float) -> str:
-    units = ["B/s", "KB/s", "MB/s", "GB/s"]
-    value = float(max(0.0, bytes_per_s))
-    unit_idx = 0
-    while value >= 1000.0 and unit_idx < len(units) - 1:
-        value /= 1000.0
-        unit_idx += 1
-    return f"{value:.2f} {units[unit_idx]}"
+def _fmt_rate_kbits(bits_per_s: float) -> str:
+    """Format rate in Kb/s or Mb/s (bits), switching at 1000 Kb/s."""
+    kbps = float(max(0.0, bits_per_s)) / 1000.0
+    if kbps < 1000.0:
+        return f"{kbps:.2f} Kb/s"
+    return f"{kbps / 1000.0:.2f} Mb/s"
 
 
-async def speedtest_download(mb: int = 10) -> str:
+async def speedtest_download(mb: int = 100) -> str:
     """Download speed test using curl."""
     curl_bin = shutil.which("curl")
     if not curl_bin:
@@ -490,14 +489,14 @@ async def speedtest_download(mb: int = 10) -> str:
         return f"Speedtest failed: {err or out}"
 
     try:
-        # Remove any non-numeric content (e.g., JSON from cloudflare)
+        # Attempt to extract two numeric fields: time_total and size_download
         out_clean = out.strip()
-        # If output contains JSON markers, it's likely an error response
-        if "{" in out_clean or "}" in out_clean:
-            logger.warning(f"Speedtest returned unexpected format: {out_clean[:100]}")
-            return "Speedtest failed: unexpected response format"
-
-        parts = out_clean.split()
+        # Prefer regex to be robust against extra content
+        m = re.search(r"([0-9]+\.[0-9]+|[0-9]+)\s+([0-9]+\.[0-9]+|[0-9]+)", out_clean)
+        if m:
+            parts = [m.group(1), m.group(2)]
+        else:
+            parts = out_clean.split()
         if len(parts) < 2:
             logger.warning(f"Speedtest output has insufficient parts: {out_clean}")
             return "Speedtest failed: invalid output format"
@@ -507,13 +506,13 @@ async def speedtest_download(mb: int = 10) -> str:
         if seconds <= 0:
             return "Invalid duration"
 
-        bps = downloaded / seconds
-        mbps = (downloaded * 8.0) / seconds / 1_000_000.0
+        # bits per second
+        bits_per_s = (downloaded * 8.0) / seconds
 
         return (
             f"Size: {downloaded / 1_000_000.0:.1f}MB\n"
             f"Time: {seconds:.2f}s\n"
-            f"Rate: {_fmt_rate_bps(bps)} ({mbps:.1f} Mbps)"
+            f"Rate: {_fmt_rate_kbits(bits_per_s)}"
         )
     except (ValueError, IndexError) as e:
         logger.error(f"Speedtest parse error. Output: '{out[:200]}', Error: {e}")

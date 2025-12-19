@@ -59,7 +59,7 @@ async def traceroute_host(host: str, max_hops: int = 20) -> str:
     return await utils.traceroute_host(host, max_hops)
 
 
-async def speedtest_download(mb: int = 10) -> str:
+async def speedtest_download(mb: int = 100) -> str:
     return await utils.speedtest_download(mb)
 
 

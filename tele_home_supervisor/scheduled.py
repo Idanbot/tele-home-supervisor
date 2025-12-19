@@ -1,4 +1,7 @@
-"""Scheduled notification fetchers (Epic Games, Hacker News, etc.)."""
+"""Scheduled notification fetchers (Epic Games, Hacker News, GOG, Steam, Humble).
+
+Also provides a combined game offers builder for daily digests.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +9,7 @@ import html
 import logging
 from typing import Any
 from datetime import datetime, timezone
+from urllib.parse import quote_plus
 
 import requests
 
@@ -184,7 +188,14 @@ def fetch_epic_free_games() -> tuple[str, list[str]]:
             )
             start_fmt = _fmt_dt(game.get("start"))
             end_fmt = _fmt_dt(game.get("end"))
-            lines.append(f"🎁 <b>{title}</b>\n{desc}\n🗓️ {start_fmt} → {end_fmt}\n")
+            store_url = (
+                f"https://store.epicgames.com/en-US/browse?q={quote_plus(game['title'])}"
+                if game.get("title")
+                else "https://store.epicgames.com/free-games"
+            )
+            lines.append(
+                f"🎁 <a href='{store_url}'><b>{title}</b></a>\n{desc}\n🗓️ {start_fmt} → {end_fmt}\n"
+            )
 
             if game["image_url"]:
                 image_urls.append(game["image_url"])
@@ -195,7 +206,14 @@ def fetch_epic_free_games() -> tuple[str, list[str]]:
                 title = html.escape(up["title"])
                 start_fmt = _fmt_dt(up.get("start"))
                 end_fmt = _fmt_dt(up.get("end"))
-                lines.append(f"🗓️ {title}\n   {start_fmt} → {end_fmt}")
+                store_url = (
+                    f"https://store.epicgames.com/en-US/browse?q={quote_plus(up['title'])}"
+                    if up.get("title")
+                    else "https://store.epicgames.com/free-games"
+                )
+                lines.append(
+                    f"🗓️ <a href='{store_url}'>{title}</a>\n   {start_fmt} → {end_fmt}"
+                )
 
         lines.append('<a href="https://store.epicgames.com/free-games">View Store</a>')
         return ("\n".join(lines), image_urls)
@@ -267,8 +285,12 @@ def fetch_hackernews_top(limit: int = 3) -> str:
         return f"❌ Error processing Hacker News data: {html.escape(str(e))}"
 
 
-def fetch_steam_free_games(limit: int = 5) -> str:
-    """Fetch currently free-to-keep Steam games (filtering for 100% discount)."""
+def fetch_steam_free_games(limit: int = 5) -> tuple[str, list[str]]:
+    """Fetch currently free-to-keep Steam games (filtering for 100% discount).
+
+    Returns tuple of (formatted HTML message, list of image URLs). Dates are not
+    provided by the endpoint; show 'unknown' availability.
+    """
 
     try:
         url = "https://store.steampowered.com/api/featuredcategories"
@@ -287,19 +309,38 @@ def fetch_steam_free_games(limit: int = 5) -> str:
 
             # Free-to-keep if price drops to zero from a positive initial price
             if initial > 0 and final == 0 and (discount is None or discount >= 100):
+                # Try to extract an image URL if present
+                image = None
+                for key in (
+                    "small_capsule_image",
+                    "capsule_image",
+                    "large_capsule_image",
+                    "header_image",
+                    "tiny_image",
+                ):
+                    val = item.get(key)
+                    if isinstance(val, str) and val:
+                        image = val
+                        break
+
                 freebies.append(
                     {
                         "name": item.get("name", "Unknown"),
                         "id": item.get("id") or item.get("appid"),
                         "discount": discount,
+                        "image": image,
                     }
                 )
 
         if not freebies:
-            return "🎮 <b>Steam</b>\n\nNo limited-time free-to-keep games right now."
+            return (
+                "🎮 <b>Steam</b>\n\nNo limited-time free-to-keep games right now.",
+                [],
+            )
 
         freebies = freebies[: max(1, min(limit, 10))]
         lines = ["🎮 <b>Steam - Free to Keep</b>\n"]
+        image_urls: list[str] = []
         for idx, game in enumerate(freebies, 1):
             name = html.escape(game["name"])
             appid = game.get("id")
@@ -311,9 +352,14 @@ def fetch_steam_free_games(limit: int = 5) -> str:
             discount_txt = (
                 f"- {game['discount']}%" if game.get("discount") is not None else ""
             )
-            lines.append(f"{idx}. <a href='{link}'>{name}</a> {discount_txt}")
+            lines.append(
+                f"{idx}. <a href='{link}'>{name}</a> {discount_txt}\n🗓️ unknown → unknown"
+            )
 
-        return "\n".join(lines)
+            if game.get("image"):
+                image_urls.append(game["image"])
+
+        return ("\n".join(lines), image_urls[:1])
 
     except requests.RequestException as e:
         logger.exception("Failed to fetch Steam free games")
@@ -384,7 +430,7 @@ def fetch_gog_free_games() -> tuple[str, list[str]]:
         for game in free_games:
             title = html.escape(game["title"])
             url = game.get("url", "https://www.gog.com")
-            lines.append(f"🎁 <a href='{url}'>{title}</a>")
+            lines.append(f"🎁 <a href='{url}'>{title}</a>\n🗓️ unknown → unknown")
 
             if game.get("image"):
                 image_urls.append(game["image"])
@@ -522,7 +568,7 @@ def fetch_humble_free_games() -> tuple[str, list[str]]:
         for game in free_games:
             title = html.escape(game["title"])
             url = game.get("url", "https://www.humblebundle.com/store")
-            lines.append(f"🎁 <a href='{url}'>{title}</a>")
+            lines.append(f"🎁 <a href='{url}'>{title}</a>\n🗓️ unknown → unknown")
 
             if game.get("image"):
                 image_urls.append(game["image"])
@@ -539,3 +585,42 @@ def fetch_humble_free_games() -> tuple[str, list[str]]:
     except Exception as e:
         logger.exception("Error processing Humble Bundle data")
         return (f"❌ Error processing Humble Bundle: {html.escape(str(e))}", [])
+
+
+def build_combined_game_offers(limit_steam: int = 5) -> str:
+    """Combine Epic, Steam, GOG, and Humble offers into one HTML message."""
+    sections: list[str] = []
+
+    try:
+        epic_msg, _ = fetch_epic_free_games()
+        if epic_msg:
+            sections.append(epic_msg)
+    except Exception:
+        logger.exception("Failed to include Epic section")
+
+    try:
+        steam_msg = fetch_steam_free_games(limit_steam)
+        if steam_msg:
+            sections.append(steam_msg)
+    except Exception:
+        logger.exception("Failed to include Steam section")
+
+    try:
+        gog_msg, _ = fetch_gog_free_games()
+        if gog_msg:
+            sections.append(gog_msg)
+    except Exception:
+        logger.exception("Failed to include GOG section")
+
+    try:
+        humble_msg, _ = fetch_humble_free_games()
+        if humble_msg:
+            sections.append(humble_msg)
+    except Exception:
+        logger.exception("Failed to include Humble section")
+
+    if not sections:
+        return "🎮 <b>Game Offers</b>\n\nNo current free offers found."
+
+    # Join sections with a clear separator
+    return "\n\n".join(sections)

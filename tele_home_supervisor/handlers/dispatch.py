@@ -42,9 +42,10 @@ cmd_torrent_delete = rate_limit(torrents.cmd_torrent_delete)
 cmd_subscribe = rate_limit(torrents.cmd_subscribe)
 
 # Notifications
-cmd_mute_epicgames = rate_limit(notifications.cmd_mute_epicgames)
+cmd_mute_gameoffers = rate_limit(notifications.cmd_mute_gameoffers)
 cmd_mute_hackernews = rate_limit(notifications.cmd_mute_hackernews)
 cmd_epicgames_now = rate_limit(notifications.cmd_epicgames_now)
+cmd_gameoffers_now = rate_limit(notifications.cmd_gameoffers_now)
 cmd_hackernews_now = rate_limit(notifications.cmd_hackernews_now)
 cmd_steamfree_now = rate_limit(notifications.cmd_steamfree_now)
 cmd_gogfree_now = rate_limit(notifications.cmd_gogfree_now)
