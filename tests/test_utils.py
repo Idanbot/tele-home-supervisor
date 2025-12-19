@@ -54,8 +54,8 @@ async def test_speedtest_parser_success():
         result = await utils.speedtest_download(10)
         assert "Size: 10.0MB" in result
         assert "Time: 2.00s" in result
-        # 10MB / 2s = 5MB/s. 5MB/s * 8 = 40Mbps
-        assert "40.0 Mbps" in result
+        # 10MB / 2s = 5MB/s. 5MB/s * 8 = 40Mbps = 40.00 Mb/s
+        assert "40.00 Mb/s" in result
 
 
 @pytest.mark.asyncio
