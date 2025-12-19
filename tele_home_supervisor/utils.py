@@ -479,7 +479,7 @@ async def speedtest_download(mb: int = 100) -> str:
             "-o",
             "/dev/null",
             "-w",
-            "%{{time_total}} %{{size_download}}\n",
+            "TIME:%{time_total} SIZE:%{size_download}\n",
             url,
         ],
         timeout=35,
@@ -489,20 +489,21 @@ async def speedtest_download(mb: int = 100) -> str:
         return f"Speedtest failed: {err or out}"
 
     try:
-        # Attempt to extract two numeric fields: time_total and size_download
-        out_clean = out.strip()
-        # Prefer regex to be robust against extra content
-        m = re.search(r"([0-9]+\.[0-9]+|[0-9]+)\s+([0-9]+\.[0-9]+|[0-9]+)", out_clean)
+        out_clean = (out.strip() + "\n" + err.strip()).strip()
+        m = re.search(r"TIME:([0-9.]+)\s+SIZE:([0-9.]+)", out_clean)
         if m:
-            parts = [m.group(1), m.group(2)]
+            seconds = float(m.group(1))
+            downloaded = float(m.group(2))
         else:
-            parts = out_clean.split()
-        if len(parts) < 2:
-            logger.warning(f"Speedtest output has insufficient parts: {out_clean}")
-            return "Speedtest failed: invalid output format"
-
-        seconds = float(parts[0])
-        downloaded = float(parts[1])
+            m = re.search(
+                r"([0-9]+\.[0-9]+|[0-9]+)\s+([0-9]+\.[0-9]+|[0-9]+)",
+                out_clean,
+            )
+            if not m:
+                logger.warning("Speedtest output has insufficient parts: %s", out_clean)
+                return "Speedtest failed: invalid output format"
+            seconds = float(m.group(1))
+            downloaded = float(m.group(2))
         if seconds <= 0:
             return "Invalid duration"
 

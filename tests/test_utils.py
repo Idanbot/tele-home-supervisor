@@ -47,9 +47,9 @@ async def test_speedtest_parser_success():
         patch("shutil.which", return_value="/usr/bin/curl"),
         patch("tele_home_supervisor.cli.run_cmd", new_callable=AsyncMock) as mock_run,
     ):
-        # curl -w "%{{time_total}} %{{size_download}}" output
+        # curl -w "TIME:%{time_total} SIZE:%{size_download}" output
         # 2.0 seconds, 10,000,000 bytes (10MB)
-        mock_run.return_value = (0, "2.0 10000000", "")
+        mock_run.return_value = (0, "TIME:2.0 SIZE:10000000", "")
 
         result = await utils.speedtest_download(10)
         assert "Size: 10.0MB" in result

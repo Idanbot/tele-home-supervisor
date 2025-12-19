@@ -47,6 +47,7 @@ QBT_USER=admin
 QBT_PASS=adminadmin
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3
+DOCKER_GID=your_docker_gid
 EOF
 
 # Create the external network
@@ -57,6 +58,10 @@ docker compose up -d
 ```
 
 The included Watchtower service auto-updates the bot when new images are pushed.
+
+Note: the container runs as a non-root user. Set `DOCKER_GID` to your host's
+docker group id (e.g. `getent group docker | cut -d: -f3`) so Docker commands
+work inside the container.
 
 ## Commands
 
@@ -141,6 +146,7 @@ The included Watchtower service auto-updates the bot when new images are pushed.
 | `QBT_PORT` | `8080` | qBittorrent WebUI port |
 | `QBT_USER` | `admin` | qBittorrent username |
 | `QBT_PASS` | `adminadmin` | qBittorrent password |
+| `QBT_TIMEOUT_S` | `8` | qBittorrent API timeout in seconds |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
 | `OLLAMA_MODEL` | `llama2` | Default model for AI queries |
 

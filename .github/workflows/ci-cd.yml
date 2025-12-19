@@ -187,6 +187,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
 
     steps:
       - name: Checkout repository
@@ -242,6 +243,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless)
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE_NAME_LOW: ${{ env.IMAGE_NAME_LOW }}
+          IMAGE_DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: |
+          if [ -z "$IMAGE_DIGEST" ]; then
+            echo "No image digest available; skipping signing."
+            exit 0
+          fi
+          cosign sign --yes "${REGISTRY}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}"
+
+      - name: Generate SBOM (image)
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}:latest
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
       # Scan the built image (ARM64)
       - name: Trivy Image Scan
         if: github.event_name != 'pull_request'
@@ -284,6 +316,101 @@ jobs:
           🔗 <b>Commit:</b> <code>$VERSION</code>
           🏗️ <b>Build:</b> <code>$BUILD_VERSION</code>
           👤 <b>Author:</b> ${{ github.actor }}
+          ━━━━━━━━━━━━━━━━━━━━
+          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
+
+          jq -n \
+            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --arg parse_mode "HTML" \
+            --arg text "$MSG" \
+            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
+          | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d @-
+
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Smoke import and build
+        env:
+          BOT_TOKEN: "test-token"
+          ALLOWED_CHAT_IDS: "123"
+        run: |
+          uv run python - <<'PY'
+          from tele_home_supervisor.main import build_application
+          app = build_application()
+          assert app is not None
+          print("Smoke OK")
+          PY
+
+      - name: Notify Telegram (Failure)
+        if: failure()
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          VERSION=$(echo "$SHA" | cut -c1-7)
+          MSG="<b>❌ Smoke Test Failed</b>
+          ━━━━━━━━━━━━━━━━━━━━
+          📦 <b>Repo:</b> <code>${{ github.repository }}</code>
+          🌿 <b>Branch:</b> <code>$REF_NAME</code>
+          🔗 <b>Commit:</b> <code>$VERSION</code>
+          ━━━━━━━━━━━━━━━━━━━━
+          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
+
+          jq -n \
+            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --arg parse_mode "HTML" \
+            --arg text "$MSG" \
+            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
+            | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d @-
+
+  notify:
+    name: Notify Telegram (Summary)
+    if: always()
+    needs: [quality, test, smoke-test, build-and-push]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Telegram (Summary)
+        env:
+          STATUS_QUALITY: ${{ needs.quality.result }}
+          STATUS_TEST: ${{ needs.test.result }}
+          STATUS_SMOKE: ${{ needs.smoke-test.result }}
+          STATUS_BUILD: ${{ needs.build-and-push.result }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          VERSION=$(echo "$SHA" | cut -c1-7)
+          MSG="<b>🧭 Workflow Summary</b>
+          ━━━━━━━━━━━━━━━━━━━━
+          📦 <b>Repo:</b> <code>${{ github.repository }}</code>
+          🌿 <b>Branch:</b> <code>$REF_NAME</code>
+          🔗 <b>Commit:</b> <code>$VERSION</code>
+          ━━━━━━━━━━━━━━━━━━━━
+          ✅ <b>Quality:</b> $STATUS_QUALITY
+          ✅ <b>Tests:</b> $STATUS_TEST
+          ✅ <b>Smoke:</b> $STATUS_SMOKE
+          ✅ <b>Build:</b> $STATUS_BUILD
           ━━━━━━━━━━━━━━━━━━━━
           <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
 
