@@ -259,14 +259,23 @@ jobs:
           fi
           cosign sign --yes "${REGISTRY}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}"
 
+      - name: Install Syft
+        if: github.event_name != 'pull_request'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+
       - name: Generate SBOM (image)
         if: github.event_name != 'pull_request'
-        uses: anchore/sbom-action@v0
-        with:
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}:latest
-          image-platform: linux/arm64
-          format: spdx-json
-          output-file: sbom.spdx.json
+        env:
+          SYFT_REGISTRY_USERNAME: ${{ github.actor }}
+          SYFT_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          syft \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}:latest" \
+            --platform linux/arm64 \
+            -o spdx-json \
+            --file sbom.spdx.json
 
       - name: Upload SBOM artifact
         if: github.event_name != 'pull_request'
