@@ -93,11 +93,25 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                         await asyncio.sleep(e.retry_after)
                     except Exception as e:
                         logger.debug(f"Stream edit skipped: {e}")
-                        if "Retry in" in str(e):
-                            await asyncio.sleep(1)
+                        try:
+                            await msg.edit_text(
+                                _strip_markdown_formatting(current_text)
+                            )
+                            last_sent_text = current_text
+                            pending_tokens.clear()
+                            last_update_time = now
+                        except Exception:
+                            if "Retry in" in str(e):
+                                await asyncio.sleep(1)
 
         final_text = _format_text("".join(full_response), done=True)
-        await msg.edit_text(final_text, parse_mode=ParseMode.MARKDOWN_V2)
+        try:
+            await msg.edit_text(final_text, parse_mode=ParseMode.MARKDOWN_V2)
+        except Exception as e:
+            logger.warning(
+                "MarkdownV2 render failed; falling back to plain text: %s", e
+            )
+            await msg.edit_text(_strip_markdown_formatting(final_text))
 
     except Exception as e:
         logger.exception("Ollama request failed")
@@ -134,34 +148,35 @@ def _sanitize_output(text: str) -> str:
     return text
 
 
+def _escape_md_v2_all(text: str) -> str:
+    return re.sub(r"([\\_\*\[\]\(\)~`>#\+\-=\|\{\}\.\!])", r"\\\1", text)
+
+
 def _escape_md_v2_segment(text: str) -> str:
     """Escape Telegram MarkdownV2 special characters in non-code text.
 
-    Preserves valid formatting: **bold**, __bold__, *italic*, _italic_, ~~strikethrough~~.
+    Preserves basic formatting while still escaping inside it.
     """
-    # Temporarily mark formatting patterns so we don't escape them
-    # Use markers that don't contain escapable characters
-    placeholders = {}
+    placeholders: dict[str, str] = {}
     counter = [0]
 
-    def mark_pattern(m):
-        # Use a marker that won't be escaped (only alphanumeric and specific safe chars)
+    def preserve(m: re.Match[str], marker: str) -> str:
+        inner = m.group(1)
+        escaped_inner = _escape_md_v2_all(inner)
         placeholder = f"KEEP{counter[0]}MARKER"
-        placeholders[placeholder] = m.group(0)
+        placeholders[placeholder] = f"{marker}{escaped_inner}{marker}"
         counter[0] += 1
         return placeholder
 
-    # Preserve valid formatting patterns
-    text = re.sub(r"\*\*[^\*]+\*\*", mark_pattern, text)  # **bold**
-    text = re.sub(r"__[^_]+__", mark_pattern, text)  # __bold__
-    text = re.sub(r"\*[^\*]+\*", mark_pattern, text)  # *italic*
-    text = re.sub(r"_[^_]+_", mark_pattern, text)  # _italic_
-    text = re.sub(r"~~[^~]+~~", mark_pattern, text)  # ~~strikethrough~~
+    # Preserve formatting markers while escaping their inner text.
+    text = re.sub(r"\*\*([^*]+)\*\*", lambda m: preserve(m, "**"), text)
+    text = re.sub(r"__([^_]+)__", lambda m: preserve(m, "__"), text)
+    text = re.sub(r"~~([^~]+)~~", lambda m: preserve(m, "~~"), text)
+    text = re.sub(r"\*([^*]+)\*", lambda m: preserve(m, "*"), text)
+    text = re.sub(r"_([^_]+)_", lambda m: preserve(m, "_"), text)
 
-    # Now escape special characters
-    text = re.sub(r"([_\*\[\]\(\)~`>#\+\-=\|\{\}\.\!])", r"\\\1", text)
+    text = _escape_md_v2_all(text)
 
-    # Restore formatting patterns unescaped
     for placeholder, original in placeholders.items():
         text = text.replace(placeholder, original)
 
@@ -228,6 +243,11 @@ def _to_markdown_v2(text: str, done: bool) -> str:
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
+
+
+def _strip_markdown_formatting(text: str) -> str:
+    """Remove Markdown formatting characters for a plain-text fallback."""
+    return re.sub(r"[*_`~]", "", text)
 
 
 def _parse_generation_flags(
