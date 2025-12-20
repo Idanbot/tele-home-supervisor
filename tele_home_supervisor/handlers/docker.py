@@ -6,14 +6,14 @@ from telegram.constants import ParseMode
 
 from .. import services, view
 from ..state import BotState
-from .common import guard, get_state, reply_usage_with_suggestions
+from .common import guard_sensitive, get_state, reply_usage_with_suggestions
 from .callbacks import build_docker_keyboard
 
 logger = logging.getLogger(__name__)
 
 
 async def cmd_docker(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     state = get_state(context.application)
     try:
@@ -47,7 +47,7 @@ async def cmd_dockerstats(update, context) -> None:
 
 
 async def cmd_dstats_rich(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     stats = await services.container_stats_rich()
     msg = view.render_container_stats(stats)
@@ -57,7 +57,7 @@ async def cmd_dstats_rich(update, context) -> None:
 
 async def cmd_dlogs(update, context) -> None:
     """Fetch container logs."""
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
 
     state: BotState = get_state(context.application)
@@ -102,7 +102,7 @@ async def cmd_dlogs(update, context) -> None:
 
 
 async def cmd_dhealth(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     state: BotState = get_state(context.application)
     await state.maybe_refresh("containers")
@@ -126,7 +126,7 @@ async def cmd_dhealth(update, context) -> None:
 
 
 async def cmd_ports(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
 
     msg = await services.get_listening_ports()

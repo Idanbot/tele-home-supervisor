@@ -10,6 +10,7 @@ from . import meta, system, docker, network, torrents, notifications, ai
 cmd_start = rate_limit(meta.cmd_start)
 cmd_help = rate_limit(meta.cmd_help)
 cmd_whoami = rate_limit(meta.cmd_whoami)
+cmd_auth = rate_limit(meta.cmd_auth)
 cmd_version = rate_limit(meta.cmd_version)
 
 # System

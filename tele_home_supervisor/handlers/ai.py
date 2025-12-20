@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
 from typing import Any, Dict, Tuple
 
@@ -94,9 +93,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     except Exception as e:
                         logger.debug(f"Stream edit skipped: {e}")
                         try:
-                            await msg.edit_text(
-                                _strip_markdown_formatting(current_text)
-                            )
+                            await msg.edit_text(current_text)
                             last_sent_text = current_text
                             pending_tokens.clear()
                             last_update_time = now
@@ -111,7 +108,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.warning(
                 "MarkdownV2 render failed; falling back to plain text: %s", e
             )
-            await msg.edit_text(_strip_markdown_formatting(final_text))
+            await msg.edit_text(final_text)
 
     except Exception as e:
         logger.exception("Ollama request failed")
@@ -128,7 +125,7 @@ async def cmd_askreset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 def _format_text(text: str, done: bool) -> str:
-    text = _sanitize_output(text.strip())
+    text = text.strip()
 
     if not text:
         return "⏳ thinking..."
@@ -138,116 +135,11 @@ def _format_text(text: str, done: bool) -> str:
             text += " "
         text += "▌"
 
-    return _to_markdown_v2(text, done=done)
-
-
-def _sanitize_output(text: str) -> str:
-    """Strip common formatting artifacts the model might emit."""
-    # keep backticks and code fences; strip HTML tags only
-    text = re.sub(r"<[^>]+>", "", text)
     return text
-
-
-def _escape_md_v2_all(text: str) -> str:
-    return re.sub(r"([\\_\*\[\]\(\)~`>#\+\-=\|\{\}\.\!])", r"\\\1", text)
-
-
-def _escape_md_v2_segment(text: str) -> str:
-    """Escape Telegram MarkdownV2 special characters in non-code text.
-
-    Preserves basic formatting while still escaping inside it.
-    """
-    placeholders: dict[str, str] = {}
-    counter = [0]
-
-    def preserve(m: re.Match[str], marker: str) -> str:
-        inner = m.group(1)
-        escaped_inner = _escape_md_v2_all(inner)
-        placeholder = f"KEEP{counter[0]}MARKER"
-        placeholders[placeholder] = f"{marker}{escaped_inner}{marker}"
-        counter[0] += 1
-        return placeholder
-
-    # Preserve formatting markers while escaping their inner text.
-    text = re.sub(r"\*\*([^*]+)\*\*", lambda m: preserve(m, "**"), text)
-    text = re.sub(r"__([^_]+)__", lambda m: preserve(m, "__"), text)
-    text = re.sub(r"~~([^~]+)~~", lambda m: preserve(m, "~~"), text)
-    text = re.sub(r"\*([^*]+)\*", lambda m: preserve(m, "*"), text)
-    text = re.sub(r"_([^_]+)_", lambda m: preserve(m, "_"), text)
-
-    text = _escape_md_v2_all(text)
-
-    for placeholder, original in placeholders.items():
-        text = text.replace(placeholder, original)
-
-    return text
-
-
-def _escape_inline_and_text(segment: str) -> str:
-    """Escape a non-fenced segment but preserve inline code spans delimited by backticks."""
-    parts = re.split(r"(`[^`]*`)", segment)
-    out: list[str] = []
-    for p in parts:
-        if len(p) >= 2 and p.startswith("`") and p.endswith("`"):
-            out.append(p)
-        else:
-            out.append(_escape_md_v2_segment(p))
-    return "".join(out)
-
-
-def _to_markdown_v2(text: str, done: bool) -> str:
-    """Convert text to MarkdownV2 safely, preserving code fences/inline code and escaping others.
-
-    For streaming (done=False), temporarily close any unbalanced fences/inline backticks
-    so Telegram parser accepts the message.
-    """
-    if not text:
-        return text
-
-    # First, handle complete fenced code blocks with optional language line.
-    fence_re = re.compile(r"```([^\n`]*)\n([\s\S]*?)```", re.MULTILINE)
-    out: list[str] = []
-    last = 0
-    for m in fence_re.finditer(text):
-        # Escape preceding non-code text preserving inline code
-        before = text[last : m.start()]
-        if before:
-            out.append(_escape_inline_and_text(before))
-        lang = m.group(1) or ""
-        code_body = m.group(2)
-        # Re-emit the code fence as-is (language + body)
-        out.append(f"```{lang}\n{code_body}```")
-        last = m.end()
-
-    tail = text[last:]
-    if tail:
-        out.append(_escape_inline_and_text(tail))
-
-    result = "".join(out)
-
-    if not done:
-        # If number of triple backticks is odd, append a closing fence
-        if text.count("```") % 2 == 1:
-            result += "\n```"
-        # If number of single backticks (outside fences) appears odd, append a closing backtick.
-        # Approximation: count total backticks minus fenced ones; if odd, close.
-        total_backticks = text.count("`")
-        fenced_backticks = 6 * (
-            text.count("```") // 2
-        )  # each complete fence pair contributes 6 backticks
-        if (total_backticks - fenced_backticks) % 2 == 1:
-            result += "`"
-
-    return result
 
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
-
-
-def _strip_markdown_formatting(text: str) -> str:
-    """Remove Markdown formatting characters for a plain-text fallback."""
-    return re.sub(r"[*_`~]", "", text)
 
 
 def _parse_generation_flags(

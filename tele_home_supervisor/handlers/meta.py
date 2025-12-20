@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
+import re
+import time
 
 from telegram.constants import ParseMode
 
-from .. import services
+from .. import config, services
 from ..background import ensure_started
 from ..commands import COMMANDS, GROUP_ORDER
-from .common import guard
+from .common import get_state, guard
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,15 @@ def _render_help() -> str:
         lines.extend(entries)
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def _escape_md_v2(text: str) -> str:
+    return re.sub(r"([\\_*[\]()~`>#+\-=\|{}.!])", r"\\\1", text)
+
+
+def _code(text: str) -> str:
+    escaped = text.replace("\\", "\\\\").replace("`", "\\`")
+    return f"`{escaped}`"
 
 
 async def cmd_start(update, context) -> None:
@@ -54,8 +65,51 @@ async def cmd_version(update, context) -> None:
     if not await guard(update, context):
         return
     try:
-        msg = await services.get_version_info()
-        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        info = await services.get_version_info()
+        lines = ["*Version Info*"]
+
+        def add(label: str, key: str) -> None:
+            val = info.get(key)
+            if val:
+                lines.append(f"• {_escape_md_v2(label)}: {_code(val)}")
+
+        add("Build", "build")
+        add("Deployed", "started")
+        add("Run Number", "run_number")
+        add("Run ID", "run_id")
+        add("Workflow", "workflow")
+        add("Repository", "repository")
+        add("Ref", "ref_name")
+        add("Commit", "commit_hash")
+        add("Commit Time", "last_commit")
+        add("Image", "image")
+        add("Image Tag", "image_tag")
+        add("Image Digest", "image_digest")
+        add("Python", "python")
+        add("Host", "host")
+
+        msg = "\n".join(lines)
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     except Exception as e:
         logger.exception("Version command failed")
         await update.message.reply_text(f"❌ Error getting version info: {e}")
+
+
+async def cmd_auth(update, context) -> None:
+    if not await guard(update, context):
+        return
+    if not config.BOT_AUTH_SECRET:
+        await update.message.reply_text("⛔ BOT_AUTH_SECRET is not configured.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /auth <secret>")
+        return
+    provided = " ".join(context.args).strip()
+    if provided != config.BOT_AUTH_SECRET:
+        await update.message.reply_text("❌ Invalid auth secret.")
+        return
+    state = get_state(context.application)
+    user_id = update.effective_user.id
+    expiry = time.monotonic() + (15 * 60)
+    state.auth_grants[user_id] = expiry
+    await update.message.reply_text("✅ Authorized for 15 minutes.")

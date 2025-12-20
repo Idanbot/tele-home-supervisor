@@ -25,6 +25,7 @@ _last_command_ts = 0.0
 # We use a simple timestamp check. Since we are in asyncio,
 # strictly speaking race conditions are only possible at await points.
 # A simple float comparison is atomic enough for this use case.
+_AUTH_TTL_S = 15 * 60
 
 
 def get_state(app) -> BotState:
@@ -53,8 +54,12 @@ def allowed(update: "Update") -> bool:
     """
     if not config.ALLOWED:
         return False
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    return chat_id in config.ALLOWED
+    if not update.effective_chat or not update.effective_user:
+        return False
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    # Allow only private chats where chat_id == user_id and user is on the allowlist.
+    return chat_id == user_id and user_id in config.ALLOWED
 
 
 async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
@@ -74,6 +79,38 @@ async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
         return True
     if update and update.effective_chat:
         await update.effective_chat.send_message("⛔ Not authorized")
+    return False
+
+
+def _auth_valid(state: BotState, user_id: int) -> bool:
+    now = time.monotonic()
+    expiry = state.auth_grants.get(user_id)
+    if not expiry or expiry <= now:
+        state.auth_grants.pop(user_id, None)
+        return False
+    return True
+
+
+async def guard_sensitive(
+    update: "Update", context: "ContextTypes.DEFAULT_TYPE"
+) -> bool:
+    if not await guard(update, context):
+        return False
+    if not config.BOT_AUTH_SECRET:
+        if update and update.effective_chat:
+            await update.effective_chat.send_message(
+                "⛔ Auth secret not configured. Set BOT_AUTH_SECRET."
+            )
+        return False
+    if not update or not update.effective_user:
+        return False
+    state = get_state(context.application)
+    if _auth_valid(state, update.effective_user.id):
+        return True
+    if update and update.effective_chat:
+        await update.effective_chat.send_message(
+            "🔒 Please authenticate with /auth <secret> (valid for 15 minutes)."
+        )
     return False
 
 

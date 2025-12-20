@@ -199,6 +199,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BUILD_VERSION=${{ steps.buildver.outputs.version }}
+            BUILD_RUN_NUMBER=${{ github.run_number }}
+            BUILD_RUN_ID=${{ github.run_id }}
+            BUILD_REF_NAME=${{ github.ref_name }}
+            BUILD_WORKFLOW=${{ github.workflow }}
+            BUILD_REPOSITORY=${{ github.repository }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_COMMIT_TIME=${{ github.event.head_commit.timestamp }}
           # ARM64 ONLY
           platforms: linux/arm64
           cache-from: type=gha

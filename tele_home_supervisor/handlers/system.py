@@ -6,11 +6,11 @@ from telegram.constants import ParseMode
 
 from .. import config, services
 from .. import view
-from .common import guard
+from .common import guard_sensitive
 
 
 async def cmd_ip(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     lan = await services.utils.get_primary_ip()
     # We can invoke get_wan_ip if we want, or just let the user use the health command?
@@ -23,7 +23,7 @@ async def cmd_ip(update, context) -> None:
 
 
 async def cmd_health(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
 
     data = await services.host_health(config.SHOW_WAN, config.WATCH_PATHS)
@@ -32,7 +32,7 @@ async def cmd_health(update, context) -> None:
 
 
 async def cmd_uptime(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     uptime = await services.get_uptime_info()
     msg = f"<b>Uptime:</b> {uptime}"
@@ -40,7 +40,7 @@ async def cmd_uptime(update, context) -> None:
 
 
 async def cmd_ping(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     if not context.args or len(context.args) == 0:
         await update.message.reply_text(
@@ -59,14 +59,14 @@ async def cmd_ping(update, context) -> None:
 
 
 async def cmd_temp(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     msg = await services.utils.get_cpu_temp()
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
 async def cmd_top(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     raw = await services.utils.get_top_processes()
     msg = f"<b>Top Processes:</b>\n<pre>{html.escape(raw)}</pre>"

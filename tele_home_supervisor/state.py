@@ -62,6 +62,9 @@ class BotState:
     gameoffers_muted: set[int] = field(default_factory=set)
     hackernews_muted: set[int] = field(default_factory=set)
 
+    # Auth grants (user_id -> monotonic expiry timestamp)
+    auth_grants: dict[int, float] = field(default_factory=dict)
+
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
 
     async def refresh_containers(self) -> set[str]:

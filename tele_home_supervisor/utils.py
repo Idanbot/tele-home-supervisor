@@ -440,17 +440,32 @@ async def get_uptime_info() -> str:
 async def get_version_info() -> dict[str, str]:
     info = {}
     info["build"] = os.environ.get("TELE_HOME_SUPERVISOR_BUILD_VERSION", "")
+    info["commit_hash"] = os.environ.get("TELE_HOME_SUPERVISOR_COMMIT", "")
+    info["last_commit"] = os.environ.get("TELE_HOME_SUPERVISOR_COMMIT_TIME", "")
+    info["image"] = os.environ.get("TELE_HOME_SUPERVISOR_IMAGE", "")
+    info["image_tag"] = os.environ.get("TELE_HOME_SUPERVISOR_IMAGE_TAG", "")
+    info["image_digest"] = os.environ.get("TELE_HOME_SUPERVISOR_IMAGE_DIGEST", "")
+    info["host"] = os.environ.get("HOSTNAME", "")
+    info["run_number"] = os.environ.get("GITHUB_RUN_NUMBER", "")
+    info["run_id"] = os.environ.get("GITHUB_RUN_ID", "")
+    info["ref_name"] = os.environ.get("GITHUB_REF_NAME", "")
+    info["workflow"] = os.environ.get("GITHUB_WORKFLOW", "")
+    info["repository"] = os.environ.get("GITHUB_REPOSITORY", "")
 
-    rc, out, _ = await cli.run_cmd(
-        ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"],
-        timeout=3,
-    )
-    if rc == 0:
-        info["last_commit"] = out.strip()
+    if not info["last_commit"]:
+        rc, out, _ = await cli.run_cmd(
+            ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d %H:%M:%S"],
+            timeout=3,
+        )
+        if rc == 0:
+            info["last_commit"] = out.strip()
 
-    rc, out, _ = await cli.run_cmd(["git", "rev-parse", "--short", "HEAD"], timeout=3)
-    if rc == 0:
-        info["commit_hash"] = out.strip()
+    if not info["commit_hash"]:
+        rc, out, _ = await cli.run_cmd(
+            ["git", "rev-parse", "--short", "HEAD"], timeout=3
+        )
+        if rc == 0:
+            info["commit_hash"] = out.strip()
 
     import sys
 
@@ -463,6 +478,7 @@ async def get_version_info() -> dict[str, str]:
     except ImportError:
         pass
 
+    info = {k: v for k, v in info.items() if v}
     return info
 
 

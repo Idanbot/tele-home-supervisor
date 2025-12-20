@@ -30,6 +30,14 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "whoami", (), "Info", "/whoami", "show chat and user info", handler="cmd_whoami"
     ),
     CommandSpec(
+        "auth",
+        (),
+        "Info",
+        "/auth <secret>",
+        "authorize sensitive commands for 15 minutes",
+        handler="cmd_auth",
+    ),
+    CommandSpec(
         "version",
         (),
         "Info",

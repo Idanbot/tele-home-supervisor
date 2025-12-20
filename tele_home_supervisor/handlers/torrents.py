@@ -8,7 +8,7 @@ from telegram.constants import ParseMode
 from .. import services, view
 from ..background import ensure_started
 from ..state import BotState
-from .common import guard, get_state, reply_usage_with_suggestions
+from .common import guard_sensitive, get_state, reply_usage_with_suggestions
 from .callbacks import build_torrent_keyboard
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ def _has_torrent_match(names: set[str], query: str) -> bool:
 
 async def cmd_torrent_add(update, context) -> None:
     """Add a torrent to qBittorrent (magnet/URL)."""
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     if not context.args:
         await update.message.reply_text(
@@ -39,7 +39,7 @@ async def cmd_torrent_add(update, context) -> None:
 
 
 async def cmd_torrent_status(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     try:
         await get_state(context.application).refresh_torrents()
@@ -61,7 +61,7 @@ async def cmd_torrent_status(update, context) -> None:
 
 
 async def cmd_torrent_stop(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     state: BotState = get_state(context.application)
     await state.maybe_refresh("torrents")
@@ -81,7 +81,7 @@ async def cmd_torrent_stop(update, context) -> None:
 
 
 async def cmd_torrent_start(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     state: BotState = get_state(context.application)
     await state.maybe_refresh("torrents")
@@ -101,7 +101,7 @@ async def cmd_torrent_start(update, context) -> None:
 
 
 async def cmd_torrent_delete(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     state: BotState = get_state(context.application)
     await state.maybe_refresh("torrents")
@@ -149,7 +149,7 @@ async def cmd_torrent_delete(update, context) -> None:
 
 
 async def cmd_subscribe(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     chat_id = update.effective_chat.id if update and update.effective_chat else None
     if chat_id is None:

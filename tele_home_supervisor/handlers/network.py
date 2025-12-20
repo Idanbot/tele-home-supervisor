@@ -2,11 +2,11 @@ from __future__ import annotations
 from telegram.constants import ParseMode
 
 from .. import services, view
-from .common import guard
+from .common import guard_sensitive
 
 
 async def cmd_dns(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     if not context.args:
         await update.message.reply_text("Usage: /dns <name>", parse_mode=ParseMode.HTML)
@@ -19,7 +19,7 @@ async def cmd_dns(update, context) -> None:
 
 
 async def cmd_traceroute(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     if not context.args:
         await update.message.reply_text(
@@ -41,7 +41,7 @@ async def cmd_traceroute(update, context) -> None:
 
 
 async def cmd_speedtest(update, context) -> None:
-    if not await guard(update, context):
+    if not await guard_sensitive(update, context):
         return
     mb = 100
     if context.args and context.args[0].isdigit():

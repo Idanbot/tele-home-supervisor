@@ -93,6 +93,8 @@ class TorrentManager:
                     username=self.username,
                     password=self.password,
                 )
+            if not hasattr(self.qbt_client, "_http_session"):
+                self.qbt_client._http_session = None
             for attr in ("timeout", "request_timeout"):
                 if hasattr(self.qbt_client, attr):
                     try:
