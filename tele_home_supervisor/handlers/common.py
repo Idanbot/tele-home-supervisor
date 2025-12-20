@@ -54,11 +54,14 @@ def allowed(update: "Update") -> bool:
     """
     if not config.ALLOWED:
         return False
-    if not update.effective_chat or not update.effective_user:
+    if not update.effective_chat:
         return False
     chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
+    effective_user = getattr(update, "effective_user", None)
+    user_id = getattr(effective_user, "id", None)
     # Allow only private chats where chat_id == user_id and user is on the allowlist.
+    if user_id is None:
+        return chat_id in config.ALLOWED
     return chat_id == user_id and user_id in config.ALLOWED
 
 
