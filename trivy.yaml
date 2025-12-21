@@ -1,3 +1,4 @@
+---
 # Trivy configuration
 timeout: 10m
 format: table

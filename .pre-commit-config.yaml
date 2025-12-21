@@ -1,3 +1,4 @@
+---
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.9
@@ -20,3 +21,24 @@ repos:
           - "high"
         pass_filenames: false
         exclude: '^(\.venv|venv|env)/'
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        files: '\.(yaml|yml)$'
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.1
+    hooks:
+      - id: actionlint
+        files: '^\.github/workflows/.*\.(yaml|yml)$'
+
+  - repo: local
+    hooks:
+      - id: docker-compose-config
+        name: docker compose config
+        entry: docker compose -f docker-compose.yml config
+        language: system
+        pass_filenames: false
+        files: '^docker-compose\.yml$'

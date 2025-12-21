@@ -1,3 +1,4 @@
+---
 services:
   rpi_telebot:
     image: ghcr.io/idanbot/tele-home-supervisor:latest
@@ -54,11 +55,15 @@ services:
 
     environment:
       - TZ=Asia/Jerusalem
-      - WATCHTOWER_CLEANUP=true # remove old images
-      - WATCHTOWER_POLL_INTERVAL=300 # check every 5 minutes
+      # remove old images
+      - WATCHTOWER_CLEANUP=true
+      # check every 5 minutes
+      - WATCHTOWER_POLL_INTERVAL=300
       - WATCHTOWER_INCLUDE_STOPPED=true
-      - WATCHTOWER_UPDATE_ON_START=true # also check immediately on startup
-      - DOCKER_API_VERSION=1.44 #Docker v29 raised the minimum API version to 1.44
+      # also check immediately on startup
+      - WATCHTOWER_UPDATE_ON_START=true
+      # Docker v29 raised the minimum API version to 1.44
+      - DOCKER_API_VERSION=1.44
 
     # Only update this specific container
     command:

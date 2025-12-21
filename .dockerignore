@@ -10,8 +10,17 @@ env
 __pycache__/
 *.py[cod]
 .git
+.github
 .venv
 venv/
 build/
 dist/
 *.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+coverage.xml
+tests
+scripts
+docs

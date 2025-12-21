@@ -1,11 +1,12 @@
+---
 name: CI/CD
 
-on:
+'on':
   push:
-    branches: [ "main" ]
-    tags: [ 'v*.*.*' ]
+    branches: ["main"]
+    tags: ["v*.*.*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 # Cancel previous runs on the same branch/PR
 concurrency:
@@ -17,13 +18,34 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  changes:
+    name: Detect Image-Relevant Changes
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Filter paths for image rebuild
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            image:
+              - Dockerfile
+              - .dockerignore
+              - pyproject.toml
+              - uv.lock
+              - bot.py
+              - tele_home_supervisor/**
+
   quality:
     name: Code Quality & Security
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -84,7 +106,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -128,7 +150,8 @@ jobs:
         run: |
           set -o pipefail
           docker run --rm -i hadolint/hadolint:v2.12.0 \
-            hadolint --failure-threshold error - < Dockerfile 2>&1 | tee hadolint.log
+            hadolint --failure-threshold error - < Dockerfile 2>&1 \
+              | tee hadolint.log
 
       - name: Upload container logs
         if: always()
@@ -142,9 +165,10 @@ jobs:
 
   build-and-push:
     name: Build & Push Docker Image
-    needs: [quality, test, container-validate]
+    needs: [changes, quality, test, container-validate]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    if: needs.changes.outputs.image == 'true'
     permissions:
       contents: read
       packages: write
@@ -230,7 +254,8 @@ jobs:
       - name: Install Syft
         if: github.event_name != 'pull_request'
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+          curl -sSfL \
+            https://raw.githubusercontent.com/anchore/syft/main/install.sh \
             | sh -s -- -b /usr/local/bin
 
       - name: Generate SBOM (image)
@@ -415,6 +440,12 @@ jobs:
             append_tail "Hadolint" "artifacts/container/hadolint.log" 40
           fi
 
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/"
+          RUN_URL+="${{ github.run_id }}"
+          TELEGRAM_API="https://api.telegram.org/bot"
+          TELEGRAM_API+="${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          TELEGRAM_API+="/sendMessage"
+
           MSG="<b>🧭 Workflow Summary</b>
           ━━━━━━━━━━━━━━━━━━━━
           🧾 <b>Workflow:</b> <code>${{ github.workflow }}</code>
@@ -428,13 +459,18 @@ jobs:
           $SUMMARY
           $DETAILS
           ━━━━━━━━━━━━━━━━━━━━
-          <a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>🔍 View Logs</a>"
+          <a href='$RUN_URL'>🔍 View Logs</a>"
 
           jq -n \
             --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
             --arg parse_mode "HTML" \
             --arg text "$MSG" \
-            '{chat_id:$chat_id, parse_mode:$parse_mode, disable_web_page_preview:true, text:$text}' \
-            | curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            '{
+              chat_id: $chat_id,
+              parse_mode: $parse_mode,
+              disable_web_page_preview: true,
+              text: $text
+            }' \
+            | curl -sf -X POST "$TELEGRAM_API" \
                 -H "Content-Type: application/json" \
                 -d @-
