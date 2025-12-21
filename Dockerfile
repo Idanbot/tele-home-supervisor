@@ -52,11 +52,10 @@ ENV TELE_HOME_SUPERVISOR_BUILD_VERSION=$BUILD_VERSION \
     TELE_HOME_SUPERVISOR_COMMIT=$BUILD_COMMIT \
     TELE_HOME_SUPERVISOR_COMMIT_TIME=$BUILD_COMMIT_TIME
 
-# Runtime deps (use distro-signed Docker CLI package)
+# Runtime deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl iproute2 tzdata git ca-certificates iputils-ping iputils-tracepath procps docker.io \
-    && rm -rf /var/lib/apt/lists/* \
-    && docker --version
+    curl iproute2 tzdata git ca-certificates iputils-ping iputils-tracepath procps \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -g ${APP_GID} app \
     && useradd -u ${APP_UID} -g ${APP_GID} -M -s /usr/sbin/nologin app \

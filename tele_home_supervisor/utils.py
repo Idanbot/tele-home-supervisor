@@ -318,35 +318,93 @@ async def list_container_names() -> set[str]:
 
 
 async def container_stats_rich() -> list[dict[str, str]]:
-    docker_cmd = cli.get_docker_cmd()
-    if not docker_cmd:
-        return []
+    def _safe_int(value: object, default: int = 0) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return default
 
-    fmt = "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}"
-    rc, out, err = await cli.run_cmd(
-        [docker_cmd, "stats", "--no-stream", "--format", fmt], timeout=6
-    )
+    def _calc_cpu_pct(stats: dict) -> float:
+        cpu_stats = stats.get("cpu_stats", {}) or {}
+        pre_cpu = stats.get("precpu_stats", {}) or {}
+        cpu_total = _safe_int((cpu_stats.get("cpu_usage", {}) or {}).get("total_usage"))
+        pre_total = _safe_int((pre_cpu.get("cpu_usage", {}) or {}).get("total_usage"))
+        system_total = _safe_int(cpu_stats.get("system_cpu_usage"))
+        pre_system_total = _safe_int(pre_cpu.get("system_cpu_usage"))
+        cpu_delta = cpu_total - pre_total
+        system_delta = system_total - pre_system_total
+        num_cpus = cpu_stats.get("online_cpus")
+        if not num_cpus:
+            per_cpu = (cpu_stats.get("cpu_usage", {}) or {}).get("percpu_usage") or []
+            num_cpus = len(per_cpu)
+        if cpu_delta > 0 and system_delta > 0 and num_cpus:
+            return (cpu_delta / system_delta) * float(num_cpus) * 100.0
+        return 0.0
 
-    if rc != 0 or not out:
-        return []
+    def _sum_network_io(stats: dict) -> tuple[int, int]:
+        rx = 0
+        tx = 0
+        networks = stats.get("networks") or {}
+        for entry in networks.values():
+            rx += _safe_int(entry.get("rx_bytes"))
+            tx += _safe_int(entry.get("tx_bytes"))
+        return rx, tx
 
-    stats = []
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) >= 7:
-            name, cpu, mem_pct, mem_usage, netio, blockio, pids = parts[:7]
-            stats.append(
+    def _sum_block_io(stats: dict) -> tuple[int, int]:
+        read = 0
+        write = 0
+        blk = stats.get("blkio_stats") or {}
+        for entry in blk.get("io_service_bytes_recursive") or []:
+            op = (entry.get("op") or "").lower()
+            if op == "read":
+                read += _safe_int(entry.get("value"))
+            elif op == "write":
+                write += _safe_int(entry.get("value"))
+        return read, write
+
+    def _collect():
+        try:
+            containers = client.containers.list(all=True)
+        except Exception as e:
+            logger.debug("container stats list failed: %s", e)
+            return []
+
+        result: list[dict[str, str]] = []
+        for c in containers:
+            try:
+                stats = c.stats(stream=False)
+            except Exception as e:
+                logger.debug("container stats failed for %s: %s", c.name, e)
+                continue
+
+            cpu_pct = _calc_cpu_pct(stats)
+            mem_stats = stats.get("memory_stats", {}) or {}
+            mem_used = _safe_int(mem_stats.get("usage"))
+            mem_limit = _safe_int(mem_stats.get("limit"))
+            mem_pct = (mem_used / mem_limit * 100.0) if mem_limit else 0.0
+            rx, tx = _sum_network_io(stats)
+            blk_read, blk_write = _sum_block_io(stats)
+            pids = _safe_int((stats.get("pids_stats") or {}).get("current"))
+
+            mem_usage = (
+                f"{fmt_bytes(mem_used)}/{fmt_bytes(mem_limit)}"
+                if mem_limit
+                else f"{fmt_bytes(mem_used)}/-"
+            )
+            result.append(
                 {
-                    "name": name,
-                    "cpu": cpu,
-                    "mem_pct": mem_pct,
+                    "name": getattr(c, "name", "unknown"),
+                    "cpu": f"{cpu_pct:.2f}%",
+                    "mem_pct": f"{mem_pct:.2f}%",
                     "mem_usage": mem_usage,
-                    "netio": netio,
-                    "blockio": blockio,
-                    "pids": pids,
+                    "netio": f"{fmt_bytes(rx)}/{fmt_bytes(tx)}",
+                    "blockio": f"{fmt_bytes(blk_read)}/{fmt_bytes(blk_write)}",
+                    "pids": str(pids),
                 }
             )
-    return stats
+        return result
+
+    return await asyncio.to_thread(_collect)
 
 
 async def get_container_logs(container_name: str, lines: int = 50) -> str:
@@ -363,59 +421,56 @@ async def get_container_logs(container_name: str, lines: int = 50) -> str:
         Negative line numbers retrieve from the start of the log (head),
         positive numbers retrieve from the end (tail).
     """
-    docker_cmd = cli.get_docker_cmd()
-    if not docker_cmd:
-        return "Docker command not found."
 
-    try:
-        if lines < 0:
-            rc, out, err = await cli.run_cmd(
-                [docker_cmd, "logs", container_name], timeout=15
-            )
-            if rc != 0:
-                return f"Error: {err or out}"
-            combined = (out + err).strip()
-            log_lines = combined.splitlines()
-            requested = abs(lines)
-            return "\n".join(log_lines[:requested])
-        else:
-            rc, out, err = await cli.run_cmd(
-                [docker_cmd, "logs", "--tail", str(lines), container_name], timeout=15
-            )
-            if rc != 0:
-                return f"Error: {err or out}"
-            return (out + err).strip()
+    def _decode(raw: object) -> str:
+        if isinstance(raw, bytes):
+            return raw.decode(errors="replace")
+        return str(raw)
 
-    except Exception as e:
-        logger.exception("Unexpected error getting container logs")
-        return f"Unexpected error: {e}"
+    def _fetch():
+        try:
+            container = client.containers.get(container_name)
+        except Exception as e:
+            return f"Error: {e}"
+
+        try:
+            if lines < 0:
+                raw = container.logs(stdout=True, stderr=True)
+                combined = _decode(raw).strip()
+                log_lines = combined.splitlines()
+                requested = abs(lines)
+                return "\n".join(log_lines[:requested])
+
+            raw = container.logs(stdout=True, stderr=True, tail=lines)
+            return _decode(raw).strip()
+        except Exception as e:
+            logger.exception("Unexpected error getting container logs")
+            return f"Unexpected error: {e}"
+
+    return await asyncio.to_thread(_fetch)
 
 
 async def healthcheck_container(container_name: str) -> str:
-    docker_cmd = cli.get_docker_cmd()
-    if not docker_cmd:
-        return "Docker CLI not available"
+    def _inspect():
+        try:
+            container = client.containers.get(container_name)
+        except Exception:
+            return f"Error inspecting {container_name}"
 
-    rc, out, err = await cli.run_cmd(
-        [docker_cmd, "inspect", "--format", "{{json .State}}", container_name],
-        timeout=4,
-    )
-    if rc != 0:
-        return f"Error inspecting {container_name}"
+        try:
+            container.reload()
+            state = container.attrs.get("State", {}) or {}
+            health = state.get("Health")
+            if health:
+                return f"Health: {health.get('Status', 'unknown')}"
+            status = state.get("Status") or (
+                "running" if state.get("Running") else "stopped"
+            )
+            return f"Status: {status}"
+        except Exception as e:
+            return f"Error parsing state: {e}"
 
-    import json
-
-    try:
-        state = json.loads(out)
-        health = state.get("Health")
-        if health:
-            return f"Health: {health.get('Status', 'unknown')}"
-        status = state.get("Status") or (
-            "running" if state.get("Running") else "stopped"
-        )
-        return f"Status: {status}"
-    except Exception as e:
-        return f"Error parsing state: {e}"
+    return await asyncio.to_thread(_inspect)
 
 
 async def ping_host(host: str, count: int = 3) -> str:

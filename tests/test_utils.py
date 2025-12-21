@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from tele_home_supervisor import utils
 
 
@@ -25,20 +25,40 @@ async def test_get_wan_ip_failure():
 
 @pytest.mark.asyncio
 async def test_container_stats_rich_parsing():
-    with (
-        patch(
-            "tele_home_supervisor.cli.get_docker_cmd", return_value="/usr/bin/docker"
-        ),
-        patch("tele_home_supervisor.cli.run_cmd", new_callable=AsyncMock) as mock_run,
-    ):
-        output = "my-container\t5.0%\t10.0%\t50MiB\t1KB/2KB\t0B/0B\t123"
-        mock_run.return_value = (0, output, "")
+    stats_payload = {
+        "cpu_stats": {
+            "cpu_usage": {"total_usage": 1250, "percpu_usage": [1, 1]},
+            "system_cpu_usage": 100000,
+            "online_cpus": 2,
+        },
+        "precpu_stats": {
+            "cpu_usage": {"total_usage": 1000, "percpu_usage": [1, 1]},
+            "system_cpu_usage": 90000,
+        },
+        "memory_stats": {"usage": 50 * 1024 * 1024, "limit": 500 * 1024 * 1024},
+        "networks": {"eth0": {"rx_bytes": 1024, "tx_bytes": 2048}},
+        "blkio_stats": {
+            "io_service_bytes_recursive": [
+                {"op": "Read", "value": 4096},
+                {"op": "Write", "value": 8192},
+            ]
+        },
+        "pids_stats": {"current": 123},
+    }
 
+    fake_container = Mock()
+    fake_container.name = "my-container"
+    fake_container.stats.return_value = stats_payload
+
+    fake_client = Mock()
+    fake_client.containers.list.return_value = [fake_container]
+
+    with patch("tele_home_supervisor.utils.client", fake_client):
         stats = await utils.container_stats_rich()
-        assert len(stats) == 1
-        assert stats[0]["name"] == "my-container"
-        assert stats[0]["cpu"] == "5.0%"
-        assert stats[0]["pids"] == "123"
+    assert len(stats) == 1
+    assert stats[0]["name"] == "my-container"
+    assert stats[0]["cpu"] == "5.00%"
+    assert stats[0]["pids"] == "123"
 
 
 @pytest.mark.asyncio
