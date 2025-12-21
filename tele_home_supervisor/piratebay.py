@@ -30,6 +30,9 @@ _ROW_RE = re.compile(r"<tr[^>]*>.*?</tr>", re.IGNORECASE | re.DOTALL)
 _MAGNET_RE = re.compile(r'href="(magnet:\?[^"]+)"', re.IGNORECASE)
 _NAME_RE = re.compile(r'class="detLink"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
 _RIGHT_TD_RE = re.compile(r'<td[^>]*align="right"[^>]*>(\d+)</td>', re.IGNORECASE)
+_NO_RESULTS_RE = re.compile(
+    r"no results returned|no matches found|no results", re.IGNORECASE
+)
 
 
 def category_help() -> str:
@@ -55,6 +58,24 @@ def _fetch(url: str) -> str:
     resp = requests.get(url, headers=headers, timeout=12)
     resp.raise_for_status()
     return resp.text
+
+
+def _ensure_not_blocked(html_text: str) -> None:
+    markers = (
+        "cf-chl",
+        "cloudflare",
+        "just a moment",
+        "attention required",
+        "captcha",
+        "access denied",
+    )
+    lower = html_text.lower()
+    if any(marker in lower for marker in markers):
+        raise RuntimeError("Pirate Bay blocked by anti-bot protection")
+
+
+def _is_no_results(html_text: str) -> bool:
+    return bool(_NO_RESULTS_RE.search(html_text))
 
 
 def _parse_rows(html_text: str) -> list[dict[str, object]]:
@@ -98,7 +119,11 @@ def top(category: str | None) -> list[dict[str, object]]:
     else:
         url = f"{BASE_URL}/top/{cat}"
     html_text = _fetch(url)
-    return _top_n(_parse_rows(html_text), 10)
+    _ensure_not_blocked(html_text)
+    results = _top_n(_parse_rows(html_text), 10)
+    if not results:
+        raise RuntimeError("Pirate Bay top parse failed")
+    return results
 
 
 def search(query: str) -> list[dict[str, object]]:
@@ -108,4 +133,10 @@ def search(query: str) -> list[dict[str, object]]:
     q_escaped = requests.utils.quote(q, safe="")
     url = f"{BASE_URL}/search/{q_escaped}/0/99/0"
     html_text = _fetch(url)
-    return _top_n(_parse_rows(html_text), 10)
+    _ensure_not_blocked(html_text)
+    results = _top_n(_parse_rows(html_text), 10)
+    if not results and _is_no_results(html_text):
+        return []
+    if not results:
+        raise RuntimeError("Pirate Bay search parse failed")
+    return results

@@ -25,6 +25,9 @@ try:
     import qbittorrentapi
 except Exception:  # pragma: no cover - import-time fallbacks
     qbittorrentapi = None  # type: ignore
+else:  # pragma: no cover - normalize missing attrs in some qbittorrentapi builds
+    if not hasattr(qbittorrentapi.Client, "_http_session"):
+        setattr(qbittorrentapi.Client, "_http_session", None)
 
 from .config import settings
 

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import html
+import logging
 
 from telegram.constants import ParseMode
 
 from .. import services
 from .common import guard
+
+logger = logging.getLogger(__name__)
 
 
 def _fmt_imdb(details: dict[str, object]) -> str:
@@ -76,7 +79,12 @@ async def cmd_imdb(update, context) -> None:
     if not query:
         await update.message.reply_text("Usage: /imdb <query>")
         return
-    details = await services.imdb_details(query)
+    try:
+        details = await services.imdb_details(query)
+    except Exception as e:
+        logger.exception("IMDB lookup failed")
+        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        return
     if not details:
         await update.message.reply_text("No results found.")
         return
@@ -89,7 +97,12 @@ async def cmd_imdb(update, context) -> None:
 async def cmd_imdbmovies(update, context) -> None:
     if not await guard(update, context):
         return
-    rows = await services.imdb_trending("movies")
+    try:
+        rows = await services.imdb_trending("movies")
+    except Exception as e:
+        logger.exception("IMDB trending movies failed")
+        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        return
     if not rows:
         await update.message.reply_text("No results found.")
         return
@@ -100,7 +113,12 @@ async def cmd_imdbmovies(update, context) -> None:
 async def cmd_imdbshows(update, context) -> None:
     if not await guard(update, context):
         return
-    rows = await services.imdb_trending("shows")
+    try:
+        rows = await services.imdb_trending("shows")
+    except Exception as e:
+        logger.exception("IMDB trending shows failed")
+        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        return
     if not rows:
         await update.message.reply_text("No results found.")
         return
@@ -111,7 +129,12 @@ async def cmd_imdbshows(update, context) -> None:
 async def cmd_rtmovies(update, context) -> None:
     if not await guard(update, context):
         return
-    rows = await services.rt_trending("movies")
+    try:
+        rows = await services.rt_trending("movies")
+    except Exception as e:
+        logger.exception("Rotten Tomatoes trending movies failed")
+        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        return
     if not rows:
         await update.message.reply_text("No results found.")
         return
@@ -122,7 +145,12 @@ async def cmd_rtmovies(update, context) -> None:
 async def cmd_rtshows(update, context) -> None:
     if not await guard(update, context):
         return
-    rows = await services.rt_trending("shows")
+    try:
+        rows = await services.rt_trending("shows")
+    except Exception as e:
+        logger.exception("Rotten Tomatoes trending shows failed")
+        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        return
     if not rows:
         await update.message.reply_text("No results found.")
         return
@@ -141,7 +169,12 @@ async def cmd_rtsearch(update, context) -> None:
         await update.message.reply_text("Usage: /rtsearch <query>")
         return
 
-    results = await services.rt_search(query)
+    try:
+        results = await services.rt_search(query)
+    except Exception as e:
+        logger.exception("Rotten Tomatoes search failed")
+        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        return
     if not results:
         await update.message.reply_text("No results found.")
         return

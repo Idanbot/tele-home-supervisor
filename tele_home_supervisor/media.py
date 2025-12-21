@@ -28,6 +28,12 @@ _IMDB_TITLE_RE = re.compile(
     r'<a href="/title/(tt\d+)/[^"]*">([^<]+)</a>', re.IGNORECASE
 )
 _IMDB_YEAR_RE = re.compile(r"\((\d{4})\)")
+_IMDB_FIND_RE = re.compile(r'href="/title/(tt\d+)/', re.IGNORECASE)
+
+_RT_NEXT_DATA_RE = re.compile(
+    r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
+)
 
 _RT_REVIEW_TEXT_RE = re.compile(
     r'data-qa="review-text"[^>]*>(.*?)</', re.IGNORECASE | re.DOTALL
@@ -54,6 +60,20 @@ def _strip_tags(text: str) -> str:
     cleaned = re.sub(r"<[^>]+>", "", text or "")
     cleaned = html.unescape(cleaned)
     return " ".join(cleaned.split())
+
+
+def _ensure_not_blocked(html_text: str, source: str) -> None:
+    markers = (
+        "cf-chl",
+        "cloudflare",
+        "just a moment",
+        "attention required",
+        "captcha",
+        "access denied",
+    )
+    lower = html_text.lower()
+    if any(marker in lower for marker in markers):
+        raise RuntimeError(f"{source} blocked by anti-bot protection")
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -91,13 +111,16 @@ def imdb_suggest(query: str) -> list[dict[str, Any]]:
 def imdb_details(query: str) -> dict[str, Any] | None:
     results = imdb_suggest(query)
     if not results:
-        return None
+        results = _imdb_search_fallback(query)
+        if not results:
+            return None
     first = results[0]
     imdb_id = first.get("id")
     if not imdb_id or not _IMDB_ID_RE.fullmatch(imdb_id):
         return None
     url = f"{IMDB_BASE_URL}/title/{imdb_id}/"
     html_text = _fetch(url)
+    _ensure_not_blocked(html_text, "IMDB")
     ld = _parse_ldjson(html_text) or {}
 
     title = ld.get("name") or first.get("l") or first.get("title") or imdb_id
@@ -138,19 +161,11 @@ def imdb_trending(kind: str) -> list[dict[str, Any]]:
     else:
         url = f"{IMDB_BASE_URL}/chart/moviemeter/"
     html_text = _fetch(url)
-    results: list[dict[str, Any]] = []
-    for row in _IMDB_ROW_RE.findall(html_text):
-        title_match = _IMDB_TITLE_RE.search(row)
-        if not title_match:
-            continue
-        imdb_id = title_match.group(1)
-        title = html.unescape(title_match.group(2))
-        year_match = _IMDB_YEAR_RE.search(row)
-        year = year_match.group(1) if year_match else ""
-        results.append({"id": imdb_id, "title": title, "year": year})
-        if len(results) >= 10:
-            break
-    return results
+    _ensure_not_blocked(html_text, "IMDB")
+    results = _imdb_trending_from_ldjson(html_text)
+    if results:
+        return results[:10]
+    return _imdb_trending_from_table(html_text)
 
 
 def rt_trending(kind: str) -> list[dict[str, Any]]:
@@ -162,9 +177,22 @@ def rt_trending(kind: str) -> list[dict[str, Any]]:
     try:
         text = _fetch(url, accept="application/json")
         data = json.loads(text)
-        return _rt_extract_items(data)
-    except Exception:
-        return []
+        items = _rt_extract_items(data)
+        if items:
+            return items
+    except Exception as exc:
+        _ = exc
+
+    browse_path = (
+        "/browse/tv_series_browse" if kind == "shows" else "/browse/movies_in_theaters"
+    )
+    html_text = _fetch(f"{RT_BASE_URL}{browse_path}")
+    _ensure_not_blocked(html_text, "Rotten Tomatoes")
+    data = _rt_extract_next_data(html_text)
+    items = _rt_extract_items(data)
+    if not items:
+        raise RuntimeError("Rotten Tomatoes trending parse failed")
+    return items
 
 
 def _rt_extract_items(payload: Any) -> list[dict[str, Any]]:
@@ -229,24 +257,34 @@ def rt_search(query: str) -> list[dict[str, Any]]:
         text = _fetch(url, accept="application/json")
         data = json.loads(text)
     except Exception:
-        return []
+        data = None
     results: list[dict[str, Any]] = []
-    for group in ("movies", "tvSeries"):
-        for item in data.get(group, []) or []:
-            title = item.get("name") or item.get("title")
-            if not title:
-                continue
-            url_path = item.get("url") or item.get("urlPath") or ""
-            results.append(
-                {
-                    "title": str(title),
-                    "url": str(url_path),
-                    "type": "movie" if group == "movies" else "tv",
-                }
-            )
-            if len(results) >= 10:
-                return results
-    return results
+    if data:
+        for group in ("movies", "tvSeries"):
+            for item in data.get(group, []) or []:
+                title = item.get("name") or item.get("title")
+                if not title:
+                    continue
+                url_path = item.get("url") or item.get("urlPath") or ""
+                results.append(
+                    {
+                        "title": str(title),
+                        "url": str(url_path),
+                        "type": "movie" if group == "movies" else "tv",
+                    }
+                )
+                if len(results) >= 10:
+                    return results
+        if results:
+            return results
+
+    html_text = _fetch(f"{RT_BASE_URL}/search?search={requests.utils.quote(q)}")
+    _ensure_not_blocked(html_text, "Rotten Tomatoes")
+    data = _rt_extract_next_data(html_text)
+    results = _rt_extract_search_items(data)
+    if not results:
+        raise RuntimeError("Rotten Tomatoes search parse failed")
+    return results[:10]
 
 
 def rt_random_critic_quote(url_path: str) -> str | None:
@@ -259,6 +297,7 @@ def rt_random_critic_quote(url_path: str) -> str | None:
         html_text = _fetch(reviews_url)
     except Exception:
         html_text = _fetch(f"{RT_BASE_URL}{url_path}")
+    _ensure_not_blocked(html_text, "Rotten Tomatoes")
 
     quotes = []
     for regex in (_RT_REVIEW_TEXT_RE, _RT_REVIEW_ALT_RE):
@@ -272,3 +311,108 @@ def rt_random_critic_quote(url_path: str) -> str | None:
     if consensus_match:
         return _strip_tags(consensus_match.group(1))
     return None
+
+
+def _imdb_search_fallback(query: str) -> list[dict[str, Any]]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    url = f"{IMDB_BASE_URL}/find/?q={requests.utils.quote(q)}&s=tt"
+    html_text = _fetch(url)
+    _ensure_not_blocked(html_text, "IMDB")
+    match = _IMDB_FIND_RE.search(html_text)
+    if not match:
+        return []
+    return [{"id": match.group(1), "title": q, "type": "title"}]
+
+
+def _imdb_trending_from_ldjson(html_text: str) -> list[dict[str, Any]]:
+    ld = _parse_ldjson(html_text)
+    if not ld or ld.get("@type") != "ItemList":
+        return []
+    items = _as_list(ld.get("itemListElement"))
+    results: list[dict[str, Any]] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        item = entry.get("item") or {}
+        if isinstance(item, dict):
+            name = item.get("name") or ""
+            url = item.get("url") or ""
+        else:
+            name = ""
+            url = ""
+        imdb_id = ""
+        if url:
+            match = _IMDB_ID_RE.search(url)
+            if match:
+                imdb_id = match.group(0)
+        if not imdb_id:
+            continue
+        results.append({"id": imdb_id, "title": str(name), "year": ""})
+        if len(results) >= 10:
+            break
+    return results
+
+
+def _imdb_trending_from_table(html_text: str) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for row in _IMDB_ROW_RE.findall(html_text):
+        title_match = _IMDB_TITLE_RE.search(row)
+        if not title_match:
+            continue
+        imdb_id = title_match.group(1)
+        title = html.unescape(title_match.group(2))
+        year_match = _IMDB_YEAR_RE.search(row)
+        year = year_match.group(1) if year_match else ""
+        results.append({"id": imdb_id, "title": title, "year": year})
+        if len(results) >= 10:
+            break
+    if not results:
+        raise RuntimeError("IMDB trending parse failed")
+    return results
+
+
+def _rt_extract_next_data(html_text: str) -> dict[str, Any]:
+    match = _RT_NEXT_DATA_RE.search(html_text)
+    if not match:
+        raise RuntimeError("Rotten Tomatoes page missing next data")
+    payload = match.group(1).strip()
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Rotten Tomatoes next data parse failed") from exc
+
+
+def _rt_extract_search_items(data: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+
+    def add_item(obj: dict[str, Any]) -> None:
+        title = obj.get("title") or obj.get("name")
+        url = obj.get("url") or obj.get("urlPath") or ""
+        if not title or not url:
+            return
+        results.append({"title": str(title), "url": str(url)})
+
+    def walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            if "title" in obj or "name" in obj:
+                add_item(obj)
+            for value in obj.values():
+                walk(value)
+        elif isinstance(obj, list):
+            for value in obj:
+                walk(value)
+
+    walk(data)
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for item in results:
+        key = f"{item.get('title')}|{item.get('url')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+        if len(deduped) >= 10:
+            break
+    return deduped
