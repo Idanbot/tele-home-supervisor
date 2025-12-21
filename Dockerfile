@@ -59,9 +59,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && ARCH=$(dpkg --print-architecture) \
     && if [ "$ARCH" = "arm64" ]; then DOCKER_ARCH="aarch64"; elif [ "$ARCH" = "amd64" ]; then DOCKER_ARCH="x86_64"; else DOCKER_ARCH="$ARCH"; fi \
-    && echo "Downloading Docker CLI for architecture: $DOCKER_ARCH" \
-    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz" -o docker.tgz \
-    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz.sha256" -o docker.tgz.sha256 \
+    && base_url="https://download.docker.com/linux/static/stable/${DOCKER_ARCH}" \
+    && echo "Downloading Docker CLI for architecture: ${DOCKER_ARCH}" \
+    && if ! curl -fsSL "${base_url}/docker-${DOCKER_VERSION}.tgz" -o docker.tgz; then \
+         echo "Docker ${DOCKER_VERSION} not found for ${DOCKER_ARCH}, selecting latest available"; \
+         latest="$(curl -fsSL "${base_url}/" | grep -oE 'docker-[0-9]+(\\.[0-9]+)*\\.tgz' | sed 's/^docker-//; s/\\.tgz$//' | sort -V | tail -n1)"; \
+         if [ -z "${latest}" ]; then echo "Failed to determine latest Docker CLI version"; exit 1; fi; \
+         curl -fsSL "${base_url}/docker-${latest}.tgz" -o docker.tgz; \
+         curl -fsSL "${base_url}/docker-${latest}.tgz.sha256" -o docker.tgz.sha256; \
+       else \
+         curl -fsSL "${base_url}/docker-${DOCKER_VERSION}.tgz.sha256" -o docker.tgz.sha256; \
+       fi \
     && expected_sha="$(awk '{print $1}' docker.tgz.sha256)" \
     && echo "${expected_sha}  docker.tgz" | sha256sum -c - \
     && tar -xzf docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
