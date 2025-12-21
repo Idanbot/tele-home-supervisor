@@ -101,6 +101,10 @@ work inside the container.
 | `/tstart <name>` | Resume torrent(s) |
 | `/tdelete <name> yes` | Delete torrent(s) and files |
 | `/subscribe [on/off]` | Toggle completion notifications |
+| `/pbtop [category]` | Pirate Bay top 10 (optional category) |
+| `/pbsearch <query>` | Pirate Bay search (top 10 by seeds) |
+
+Categories for `/pbtop`: audio, video, apps, games, porn, other.
 
 ### Free Games & News
 | Command | Description |
@@ -112,6 +116,16 @@ work inside the container.
 | `/hackernews [n]` | Top Hacker News stories |
 | `/mute_epicgames` | Toggle daily Epic digest (8 PM) |
 | `/mute_hackernews` | Toggle daily HN digest (8 AM) |
+
+### Media
+| Command | Description |
+|---------|-------------|
+| `/imdb <query>` | IMDB lookup (storyline, rating, cast) |
+| `/imdbmovies` | IMDB trending movies |
+| `/imdbshows` | IMDB trending shows |
+| `/rtmovies` | Rotten Tomatoes trending movies |
+| `/rtshows` | Rotten Tomatoes trending shows |
+| `/rtsearch <query>` | Rotten Tomatoes search with critic quote |
 
 ### AI
 | Command | Description |
@@ -152,6 +166,9 @@ work inside the container.
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
 | `OLLAMA_MODEL` | `llama2` | Default model for AI queries |
 | `BOT_AUTH_TOTP_SECRET` | (none) | Base32 TOTP seed for `/auth` (Google Authenticator) |
+| `TPB_BASE_URL` | `https://thepiratebay.org` | Pirate Bay base URL (mirror override) |
+| `IMDB_BASE_URL` | `https://www.imdb.com` | IMDB base URL (mirror override) |
+| `RT_BASE_URL` | `https://www.rottentomatoes.com` | Rotten Tomatoes base URL |
 
 ### TOTP Auth Setup
 

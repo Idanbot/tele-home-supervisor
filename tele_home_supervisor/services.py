@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from . import utils
+from . import media, piratebay, utils
 from . import torrent as torrent_mod
 
 
@@ -61,6 +61,34 @@ async def traceroute_host(host: str, max_hops: int = 20) -> str:
 
 async def speedtest_download(mb: int = 100) -> str:
     return await utils.speedtest_download(mb)
+
+
+async def piratebay_top(category: str | None) -> list[dict[str, object]]:
+    return await asyncio.to_thread(piratebay.top, category)
+
+
+async def piratebay_search(query: str) -> list[dict[str, object]]:
+    return await asyncio.to_thread(piratebay.search, query)
+
+
+async def imdb_details(query: str) -> dict[str, object] | None:
+    return await asyncio.to_thread(media.imdb_details, query)
+
+
+async def imdb_trending(kind: str) -> list[dict[str, object]]:
+    return await asyncio.to_thread(media.imdb_trending, kind)
+
+
+async def rt_trending(kind: str) -> list[dict[str, object]]:
+    return await asyncio.to_thread(media.rt_trending, kind)
+
+
+async def rt_search(query: str) -> list[dict[str, object]]:
+    return await asyncio.to_thread(media.rt_search, query)
+
+
+async def rt_random_critic_quote(url_path: str) -> str | None:
+    return await asyncio.to_thread(media.rt_random_critic_quote, url_path)
 
 
 # Torrent helpers (Sync wrappers)

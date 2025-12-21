@@ -3,9 +3,10 @@ from __future__ import annotations
 import html
 import logging
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-from .. import services, view
+from .. import piratebay, services, view
 from ..background import ensure_started
 from ..state import BotState
 from .common import guard_sensitive, get_state, reply_usage_with_suggestions
@@ -191,4 +192,100 @@ async def cmd_subscribe(update, context) -> None:
     await update.message.reply_text(
         f"Torrent completion notifications: <b>{'ON' if is_on else 'OFF'}</b>",
         parse_mode=ParseMode.HTML,
+    )
+
+
+def _build_piratebay_keyboard(
+    state: BotState, results: list[dict[str, object]]
+) -> InlineKeyboardMarkup | None:
+    buttons = []
+    for idx, item in enumerate(results, start=1):
+        name = str(item.get("name", "Unknown"))
+        seeds = int(item.get("seeders", 0))
+        magnet = str(item.get("magnet", ""))
+        if not magnet:
+            continue
+        key = state.store_magnet(name, magnet)
+        label = f"{idx}. {name} ({seeds})"
+        if len(label) > 60:
+            label = f"{label[:57]}..."
+        buttons.append([InlineKeyboardButton(label, callback_data=f"pbmagnet:{key}")])
+    if not buttons:
+        return None
+    return InlineKeyboardMarkup(buttons)
+
+
+def _format_piratebay_list(title: str, results: list[dict[str, object]]) -> str:
+    lines = [f"<b>{html.escape(title)}</b>"]
+    for idx, item in enumerate(results, start=1):
+        name = html.escape(str(item.get("name", "Unknown")))
+        seeds = int(item.get("seeders", 0))
+        leech = int(item.get("leechers", 0))
+        lines.append(f"{idx}. {name} - {seeds} seeds / {leech} leech")
+    return "\n".join(lines)
+
+
+async def cmd_pbtop(update, context) -> None:
+    if not await guard_sensitive(update, context):
+        return
+    category = context.args[0] if context.args else None
+    if category and piratebay.resolve_category(category) is None:
+        usage = f"Usage: /pbtop [category]\nCategories: {piratebay.category_help()}"
+        await update.message.reply_text(usage, parse_mode=ParseMode.HTML)
+        return
+
+    try:
+        results = await services.piratebay_top(category)
+    except Exception as e:
+        logger.exception("Pirate Bay top failed")
+        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        return
+
+    if not results:
+        await update.message.reply_text("No results found.")
+        return
+
+    state = get_state(context.application)
+    title = "Pirate Bay Top 10"
+    if category:
+        title = f"Pirate Bay Top 10 ({category})"
+    msg = _format_piratebay_list(title, results)
+    keyboard = _build_piratebay_keyboard(state, results)
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def cmd_pbsearch(update, context) -> None:
+    if not await guard_sensitive(update, context):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /pbsearch <query>", parse_mode=ParseMode.HTML
+        )
+        return
+    query = " ".join(context.args).strip()
+    if not query:
+        await update.message.reply_text(
+            "Usage: /pbsearch <query>", parse_mode=ParseMode.HTML
+        )
+        return
+
+    try:
+        results = await services.piratebay_search(query)
+    except Exception as e:
+        logger.exception("Pirate Bay search failed")
+        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        return
+
+    if not results:
+        await update.message.reply_text("No results found.")
+        return
+
+    state = get_state(context.application)
+    title = f"Pirate Bay Search: {query}"
+    msg = _format_piratebay_list(title, results)
+    keyboard = _build_piratebay_keyboard(state, results)
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
     )

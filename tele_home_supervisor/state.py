@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,6 +29,8 @@ class CacheEntry:
 
 
 MAX_LATENCY_SAMPLES = 200
+_MAGNET_CACHE_TTL_S = 30 * 60
+_MAGNET_CACHE_MAX = 200
 
 
 @dataclass
@@ -82,6 +86,10 @@ class BotState:
     auth_grants: dict[int, float] = field(default_factory=dict)
 
     command_metrics: dict[str, CommandMetrics] = field(default_factory=dict)
+
+    magnet_cache: OrderedDict[str, tuple[float, str, str]] = field(
+        default_factory=OrderedDict
+    )
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
 
@@ -208,6 +216,37 @@ class BotState:
     def record_rate_limited(self, name: str) -> None:
         metrics = self.metrics_for(name)
         metrics.rate_limited += 1
+
+    def store_magnet(self, name: str, magnet: str) -> str:
+        key = secrets.token_urlsafe(8)
+        self.magnet_cache[key] = (time.monotonic(), name, magnet)
+        self._prune_magnets()
+        return key
+
+    def get_magnet(self, key: str) -> tuple[str, str] | None:
+        self._prune_magnets()
+        entry = self.magnet_cache.get(key)
+        if not entry:
+            return None
+        ts, name, magnet = entry
+        if (time.monotonic() - ts) > _MAGNET_CACHE_TTL_S:
+            self.magnet_cache.pop(key, None)
+            return None
+        return name, magnet
+
+    def _prune_magnets(self) -> None:
+        if not self.magnet_cache:
+            return
+        now = time.monotonic()
+        stale_keys = [
+            key
+            for key, (ts, _, _) in self.magnet_cache.items()
+            if (now - ts) > _MAGNET_CACHE_TTL_S
+        ]
+        for key in stale_keys:
+            self.magnet_cache.pop(key, None)
+        while len(self.magnet_cache) > _MAGNET_CACHE_MAX:
+            self.magnet_cache.popitem(last=False)
 
     def _save_state(self) -> None:
         """Persist mute preferences to disk."""

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .common import rate_limit
-from . import meta, system, docker, network, torrents, notifications, ai
+from . import meta, system, docker, network, torrents, notifications, ai, media
 
 
 # Meta
@@ -42,6 +42,8 @@ cmd_torrent_stop = rate_limit(torrents.cmd_torrent_stop, name="torrentstop")
 cmd_torrent_start = rate_limit(torrents.cmd_torrent_start, name="torrentstart")
 cmd_torrent_delete = rate_limit(torrents.cmd_torrent_delete, name="torrentdelete")
 cmd_subscribe = rate_limit(torrents.cmd_subscribe, name="subscribe")
+cmd_pbtop = rate_limit(torrents.cmd_pbtop, name="pbtop")
+cmd_pbsearch = rate_limit(torrents.cmd_pbsearch, name="pbsearch")
 
 # Notifications
 cmd_mute_gameoffers = rate_limit(notifications.cmd_mute_gameoffers, name="muteoffers")
@@ -56,3 +58,11 @@ cmd_humblefree_now = rate_limit(notifications.cmd_humblefree_now, name="humblefr
 # AI
 cmd_ask = rate_limit(ai.cmd_ask, name="ask")
 cmd_askreset = rate_limit(ai.cmd_askreset, name="askreset")
+
+# Media
+cmd_imdb = rate_limit(media.cmd_imdb, name="imdb")
+cmd_imdbmovies = rate_limit(media.cmd_imdbmovies, name="imdbmovies")
+cmd_imdbshows = rate_limit(media.cmd_imdbshows, name="imdbshows")
+cmd_rtmovies = rate_limit(media.cmd_rtmovies, name="rtmovies")
+cmd_rtshows = rate_limit(media.cmd_rtshows, name="rtshows")
+cmd_rtsearch = rate_limit(media.cmd_rtsearch, name="rtsearch")

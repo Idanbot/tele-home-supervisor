@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from typing import Literal
 
 Group = Literal[
-    "System", "Docker", "Network", "Torrents", "Notifications", "AI", "Info"
+    "System",
+    "Docker",
+    "Network",
+    "Torrents",
+    "Notifications",
+    "Media",
+    "AI",
+    "Info",
 ]
 Needs = Literal["none", "container", "torrent"]
 
@@ -204,6 +211,22 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "torrent completion notifications",
         handler="cmd_subscribe",
     ),
+    CommandSpec(
+        "pbtop",
+        (),
+        "Torrents",
+        "/pbtop [category]",
+        "top Pirate Bay torrents (audio, video, apps, games, porn, other)",
+        handler="cmd_pbtop",
+    ),
+    CommandSpec(
+        "pbsearch",
+        (),
+        "Torrents",
+        "/pbsearch <query>",
+        "search Pirate Bay torrents",
+        handler="cmd_pbsearch",
+    ),
     # Notifications
     CommandSpec(
         "mute_gameoffers",
@@ -269,6 +292,55 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "show current Humble Bundle free games",
         handler="cmd_humblefree_now",
     ),
+    # Media
+    CommandSpec(
+        "imdb",
+        (),
+        "Media",
+        "/imdb <query>",
+        "IMDB lookup (storyline, rating, cast)",
+        handler="cmd_imdb",
+    ),
+    CommandSpec(
+        "imdbmovies",
+        (),
+        "Media",
+        "/imdbmovies",
+        "IMDB trending movies",
+        handler="cmd_imdbmovies",
+    ),
+    CommandSpec(
+        "imdbshows",
+        (),
+        "Media",
+        "/imdbshows",
+        "IMDB trending shows",
+        handler="cmd_imdbshows",
+    ),
+    CommandSpec(
+        "rtmovies",
+        (),
+        "Media",
+        "/rtmovies",
+        "Rotten Tomatoes trending movies",
+        handler="cmd_rtmovies",
+    ),
+    CommandSpec(
+        "rtshows",
+        (),
+        "Media",
+        "/rtshows",
+        "Rotten Tomatoes trending shows",
+        handler="cmd_rtshows",
+    ),
+    CommandSpec(
+        "rtsearch",
+        (),
+        "Media",
+        "/rtsearch <query>",
+        "Rotten Tomatoes search with critic quote",
+        handler="cmd_rtsearch",
+    ),
     # AI
     CommandSpec(
         "ask",
@@ -295,6 +367,7 @@ GROUP_ORDER: tuple[Group, ...] = (
     "Network",
     "Torrents",
     "Notifications",
+    "Media",
     "AI",
     "Info",
 )

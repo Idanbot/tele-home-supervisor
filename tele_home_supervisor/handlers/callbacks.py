@@ -110,6 +110,9 @@ async def handle_callback_query(update, context) -> None:
         elif data.startswith("games:"):
             game_type = data[6:]
             await _handle_games_callback(query, game_type)
+        elif data.startswith("pbmagnet:"):
+            key = data[len("pbmagnet:") :]
+            await _handle_piratebay_magnet(query, context, key)
         else:
             await query.edit_message_text("❓ Unknown action")
     except Exception as e:
@@ -271,3 +274,16 @@ async def _handle_games_callback(query, game_type: str) -> None:
         await query.message.reply_text(
             message, parse_mode=ParseMode.HTML, disable_web_page_preview=True
         )
+
+
+async def _handle_piratebay_magnet(query, context, key: str) -> None:
+    state: BotState = get_state(context.application)
+    entry = state.get_magnet(key)
+    if not entry:
+        await query.message.reply_text("❌ Torrent link expired.")
+        return
+    name, magnet = entry
+    safe_name = html.escape(name)
+    safe_magnet = html.escape(magnet)
+    msg = f"<b>{safe_name}</b>\n<code>{safe_magnet}</code>"
+    await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
