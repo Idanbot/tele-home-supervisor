@@ -117,7 +117,7 @@ async def guard_sensitive(
     return False
 
 
-def rate_limit(func: Callable) -> Callable:
+def rate_limit(func: Callable, name: str | None = None) -> Callable:
     """Decorator to enforce global rate limiting on command handlers.
 
     Args:
@@ -130,6 +130,8 @@ def rate_limit(func: Callable) -> Callable:
         Uses a global timestamp check. Rate limit applies across all commands.
         If rate limit is exceeded, sends a message to the user with wait time.
     """
+
+    command_name = name or func.__name__.removeprefix("cmd_")
 
     @functools.wraps(func)
     async def wrapper(
@@ -147,10 +149,35 @@ def rate_limit(func: Callable) -> Callable:
                     )
             except Exception as e:
                 logger.debug("rate-limit notice failed to send: %s", e)
+            try:
+                state = get_state(context.application)
+                state.record_rate_limited(command_name)
+            except Exception as e:
+                logger.debug("metrics rate-limit record failed: %s", e)
             return
 
         _last_command_ts = now
-        return await func(update, context, *args, **kwargs)
+        start = time.perf_counter()
+        try:
+            result = await func(update, context, *args, **kwargs)
+        except Exception as e:
+            latency_s = time.perf_counter() - start
+            try:
+                state = get_state(context.application)
+                state.record_command(
+                    command_name, latency_s, ok=False, error_msg=str(e)
+                )
+            except Exception as metrics_error:
+                logger.debug("metrics record failed: %s", metrics_error)
+            raise
+        else:
+            latency_s = time.perf_counter() - start
+            try:
+                state = get_state(context.application)
+                state.record_command(command_name, latency_s, ok=True, error_msg=None)
+            except Exception as metrics_error:
+                logger.debug("metrics record failed: %s", metrics_error)
+            return result
 
     return wrapper
 

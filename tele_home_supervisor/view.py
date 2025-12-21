@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import html
+import math
+import time
 
 
 def bold(text: str) -> str:
@@ -57,6 +59,40 @@ def render_host_health(data: dict, show_wan: bool = False) -> str:
             f"{bold('Disks:')} {disks_html}",
         ]
     )
+    return "\n".join(lines)
+
+
+def _format_timestamp(ts: float | None) -> str:
+    if not ts:
+        return "never"
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+
+
+def _p95(samples: list[float]) -> float:
+    if not samples:
+        return 0.0
+    ordered = sorted(samples)
+    idx = max(0, math.ceil(0.95 * len(ordered)) - 1)
+    return ordered[idx]
+
+
+def render_command_metrics(metrics: dict) -> str:
+    if not metrics:
+        return "<i>No command metrics recorded yet.</i>"
+
+    lines = [bold("Command Metrics:")]
+    for name in sorted(metrics.keys()):
+        entry = metrics[name]
+        avg = (entry.total_latency_s / entry.count) if entry.count else 0.0
+        p95 = _p95(entry.latencies_s)
+        last_run = _format_timestamp(entry.last_run_ts)
+        line = (
+            f"{code(name)} runs {entry.count} ok {entry.success} err {entry.error} "
+            f"rl {entry.rate_limited} avg {avg * 1000:.1f}ms "
+            f"p95 {p95 * 1000:.1f}ms max {entry.max_latency_s * 1000:.1f}ms "
+            f"last {html.escape(last_run)}"
+        )
+        lines.append(line)
     return "\n".join(lines)
 
 

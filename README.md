@@ -122,7 +122,9 @@ work inside the container.
 ### Info
 | Command | Description |
 |---------|-------------|
+| `/auth <code>` | Authorize sensitive commands for 15 minutes |
 | `/help` | Show all commands |
+| `/metrics` | Command metrics summary |
 | `/whoami` | Chat and user info |
 | `/version` | Bot version and build info |
 

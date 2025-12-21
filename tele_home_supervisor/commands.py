@@ -45,6 +45,14 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "bot version and build info",
         handler="cmd_version",
     ),
+    CommandSpec(
+        "metrics",
+        (),
+        "Info",
+        "/metrics",
+        "command metrics summary",
+        handler="cmd_metrics",
+    ),
     # System
     CommandSpec("ip", (), "System", "/ip", "private LAN IP", handler="cmd_ip"),
     CommandSpec(

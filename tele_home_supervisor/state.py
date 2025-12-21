@@ -26,6 +26,22 @@ class CacheEntry:
     items: set[str]
 
 
+MAX_LATENCY_SAMPLES = 200
+
+
+@dataclass
+class CommandMetrics:
+    count: int = 0
+    success: int = 0
+    error: int = 0
+    rate_limited: int = 0
+    total_latency_s: float = 0.0
+    max_latency_s: float = 0.0
+    latencies_s: list[float] = field(default_factory=list)
+    last_error: str | None = None
+    last_run_ts: float | None = None
+
+
 def _normalize(items: set[str]) -> set[str]:
     """Normalize a set of strings by trimming whitespace and removing empty values.
 
@@ -64,6 +80,8 @@ class BotState:
 
     # Auth grants (user_id -> monotonic expiry timestamp)
     auth_grants: dict[int, float] = field(default_factory=dict)
+
+    command_metrics: dict[str, CommandMetrics] = field(default_factory=dict)
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
 
@@ -166,6 +184,30 @@ class BotState:
 
     def is_hackernews_muted(self, chat_id: int) -> bool:
         return chat_id in self.hackernews_muted
+
+    def metrics_for(self, name: str) -> CommandMetrics:
+        return self.command_metrics.setdefault(name, CommandMetrics())
+
+    def record_command(
+        self, name: str, latency_s: float, ok: bool, error_msg: str | None
+    ) -> None:
+        metrics = self.metrics_for(name)
+        metrics.count += 1
+        metrics.last_run_ts = time.time()
+        if ok:
+            metrics.success += 1
+        else:
+            metrics.error += 1
+            metrics.last_error = error_msg
+        metrics.total_latency_s += latency_s
+        metrics.max_latency_s = max(metrics.max_latency_s, latency_s)
+        metrics.latencies_s.append(latency_s)
+        if len(metrics.latencies_s) > MAX_LATENCY_SAMPLES:
+            metrics.latencies_s.pop(0)
+
+    def record_rate_limited(self, name: str) -> None:
+        metrics = self.metrics_for(name)
+        metrics.rate_limited += 1
 
     def _save_state(self) -> None:
         """Persist mute preferences to disk."""

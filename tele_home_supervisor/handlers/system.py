@@ -6,7 +6,7 @@ from telegram.constants import ParseMode
 
 from .. import config, services
 from .. import view
-from .common import guard_sensitive
+from .common import guard_sensitive, get_state
 
 
 async def cmd_ip(update, context) -> None:
@@ -28,6 +28,8 @@ async def cmd_health(update, context) -> None:
 
     data = await services.host_health(config.SHOW_WAN, config.WATCH_PATHS)
     msg = view.render_host_health(data, show_wan=config.SHOW_WAN)
+    metrics = get_state(context.application).command_metrics
+    msg = f"{msg}\n\n{view.render_command_metrics(metrics)}"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 

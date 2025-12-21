@@ -81,9 +81,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 current_text = _format_text("".join(full_response), done=False)
                 if current_text != last_sent_text:
                     try:
-                        await msg.edit_text(
-                            current_text, parse_mode=ParseMode.MARKDOWN_V2
-                        )
+                        await msg.edit_text(current_text)
                         last_sent_text = current_text
                         pending_tokens.clear()
                         last_update_time = now
@@ -91,17 +89,12 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                         # Respect Telegram flood control by backing off
                         await asyncio.sleep(e.retry_after)
                     except Exception as e:
-                        logger.debug(f"Stream edit skipped: {e}")
-                        try:
-                            await msg.edit_text(current_text)
-                            last_sent_text = current_text
-                            pending_tokens.clear()
-                            last_update_time = now
-                        except Exception:
-                            if "Retry in" in str(e):
-                                await asyncio.sleep(1)
+                        logger.debug("Stream edit skipped: %s", e)
+                        if "Retry in" in str(e):
+                            await asyncio.sleep(1)
 
         final_text = _format_text("".join(full_response), done=True)
+        final_text = _close_unbalanced_fences(final_text)
         try:
             await msg.edit_text(final_text, parse_mode=ParseMode.MARKDOWN_V2)
         except Exception as e:
@@ -135,6 +128,12 @@ def _format_text(text: str, done: bool) -> str:
             text += " "
         text += "▌"
 
+    return text
+
+
+def _close_unbalanced_fences(text: str) -> str:
+    if text.count("```") % 2 == 1:
+        return f"{text}\n```"
     return text
 
 

@@ -7,10 +7,10 @@ import time
 import pyotp
 from telegram.constants import ParseMode
 
-from .. import config, services
+from .. import config, services, view
 from ..background import ensure_started
 from ..commands import COMMANDS, GROUP_ORDER
-from .common import get_state, guard
+from .common import get_state, guard, guard_sensitive
 
 logger = logging.getLogger(__name__)
 
@@ -124,3 +124,11 @@ async def cmd_auth(update, context) -> None:
     expiry = time.monotonic() + (15 * 60)
     state.auth_grants[user_id] = expiry
     await update.message.reply_text("✅ Authorized for 15 minutes.")
+
+
+async def cmd_metrics(update, context) -> None:
+    if not await guard_sensitive(update, context):
+        return
+    state = get_state(context.application)
+    msg = view.render_command_metrics(state.command_metrics)
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
