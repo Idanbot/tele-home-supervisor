@@ -85,8 +85,8 @@ jobs:
           trivy-config: trivy.yaml
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
           output: 'trivy-fs.txt'
-        continue-on-error: true
 
       - name: Upload quality logs
         if: always()
@@ -215,25 +215,97 @@ jobs:
 
       - name: Build and push Docker image
         id: build-and-push
-        uses: docker/build-push-action@v6
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG_ARGS=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then
+              TAG_ARGS+=(--tag "$tag")
+            fi
+          done <<< "${{ steps.meta.outputs.tags }}"
+
+          LABEL_ARGS=()
+          while IFS= read -r label; do
+            if [ -n "$label" ]; then
+              LABEL_ARGS+=(--label "$label")
+            fi
+          done <<< "${{ steps.meta.outputs.labels }}"
+
+          BUILD_ARGS=(
+            --build-arg "BUILD_VERSION=${{ steps.buildver.outputs.version }}"
+            --build-arg "BUILD_RUN_NUMBER=${{ github.run_number }}"
+            --build-arg "BUILD_RUN_ID=${{ github.run_id }}"
+            --build-arg "BUILD_REF_NAME=${{ github.ref_name }}"
+            --build-arg "BUILD_WORKFLOW=${{ github.workflow }}"
+            --build-arg "BUILD_REPOSITORY=${{ github.repository }}"
+            --build-arg "BUILD_COMMIT=${{ github.sha }}"
+            --build-arg
+            "BUILD_COMMIT_TIME=${{ github.event.head_commit.timestamp }}"
+          )
+
+          PUSH_FLAG=""
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            PUSH_FLAG="--push"
+          fi
+
+          ATTEST_ARGS=()
+          if [ -n "$PUSH_FLAG" ]; then
+            ATTEST_ARGS+=(--attest "type=provenance,mode=max")
+          fi
+
+          rm -f build.log build-metadata.json
+          set +e
+          docker buildx build \
+            --platform linux/arm64 \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --metadata-file build-metadata.json \
+            "${ATTEST_ARGS[@]}" \
+            "${TAG_ARGS[@]}" \
+            "${LABEL_ARGS[@]}" \
+            "${BUILD_ARGS[@]}" \
+            ${PUSH_FLAG} \
+            . 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            pattern="error:|failed to|returned error|rpc error"
+            if command -v rg >/dev/null 2>&1; then
+              reason="$(rg -i "$pattern" build.log | tail -n 1 || true)"
+            else
+              reason="$(grep -Ei "$pattern" build.log | tail -n 1 || true)"
+            fi
+            if [ -z "$reason" ]; then
+              reason="$(tail -n 1 build.log)"
+            fi
+            echo "Build failed: ${reason}" >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
+
+          digest=""
+          if [ -f build-metadata.json ]; then
+            jq_filter='."containerimage.digest" // empty'
+            digest="$(jq -r "$jq_filter" build-metadata.json || true)"
+          fi
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          if [ -n "$digest" ]; then
+            echo "Build succeeded: ${digest}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Build succeeded." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v6
         with:
-          context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            BUILD_VERSION=${{ steps.buildver.outputs.version }}
-            BUILD_RUN_NUMBER=${{ github.run_number }}
-            BUILD_RUN_ID=${{ github.run_id }}
-            BUILD_REF_NAME=${{ github.ref_name }}
-            BUILD_WORKFLOW=${{ github.workflow }}
-            BUILD_REPOSITORY=${{ github.repository }}
-            BUILD_COMMIT=${{ github.sha }}
-            BUILD_COMMIT_TIME=${{ github.event.head_commit.timestamp }}
-          # ARM64 ONLY
-          platforms: linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: build-logs
+          path: |
+            build.log
+            build-metadata.json
+          if-no-files-found: ignore
 
       - name: Install Cosign
         if: github.event_name != 'pull_request'
@@ -249,26 +321,61 @@ jobs:
             echo "No image digest available; skipping signing."
             exit 0
           fi
-          cosign sign --yes "${REGISTRY}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}"
+          cosign sign --yes --recursive \
+            "${REGISTRY}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}"
 
       - name: Install Syft
         if: github.event_name != 'pull_request'
         run: |
-          curl -sSfL \
-            https://raw.githubusercontent.com/anchore/syft/main/install.sh \
-            | sh -s -- -b /usr/local/bin
+          SYFT_VERSION="1.20.0"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64) SYFT_ARCH="amd64" ;;
+            aarch64|arm64) SYFT_ARCH="arm64" ;;
+            *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+          esac
+          BASE_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
+          ASSET="syft_${SYFT_VERSION}_linux_${SYFT_ARCH}.tar.gz"
+          curl -sSfL "${BASE_URL}/${ASSET}" -o syft.tgz
+          curl -sSfL "${BASE_URL}/syft_${SYFT_VERSION}_checksums.txt" \
+            -o syft.checksums
+          grep " ${ASSET}$" syft.checksums | sha256sum -c -
+          tar -xzf syft.tgz -C /usr/local/bin syft
+          rm -f syft.tgz syft.checksums
+          syft version
 
       - name: Generate SBOM (image)
         if: github.event_name != 'pull_request'
         env:
           SYFT_REGISTRY_USERNAME: ${{ github.actor }}
           SYFT_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_NAME_LOW: ${{ env.IMAGE_NAME_LOW }}
+          IMAGE_DIGEST: ${{ steps.build-and-push.outputs.digest }}
         run: |
+          if [ -z "$IMAGE_DIGEST" ]; then
+            echo "No image digest available; cannot generate SBOM." >&2
+            exit 1
+          fi
           syft \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}:latest" \
+            "${{ env.REGISTRY }}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}" \
             --platform linux/arm64 \
             -o spdx-json \
             --file sbom.spdx.json
+
+      - name: Sign SBOM attestation
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE_NAME_LOW: ${{ env.IMAGE_NAME_LOW }}
+          IMAGE_DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: |
+          if [ -z "$IMAGE_DIGEST" ]; then
+            echo "No image digest available; skipping SBOM signing."
+            exit 0
+          fi
+          cosign attest --yes \
+            --type spdxjson \
+            --predicate sbom.spdx.json \
+            "${REGISTRY}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}"
 
       - name: Upload SBOM artifact
         if: github.event_name != 'pull_request'
@@ -282,12 +389,13 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}:latest
+          image-ref: >-
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}@${{
+            steps.build-and-push.outputs.digest }}
           format: 'table'
-          exit-code: '0'
+          exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
-        continue-on-error: true
         env:
           TRIVY_USERNAME: ${{ github.actor }}
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
