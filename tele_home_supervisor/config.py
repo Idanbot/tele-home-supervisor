@@ -66,7 +66,7 @@ class Settings:
     QBT_TIMEOUT_S: float
     OLLAMA_HOST: str
     OLLAMA_MODEL: str
-    BOT_AUTH_SECRET: str | None
+    BOT_AUTH_TOTP_SECRET: str | None
 
 
 def _read_settings() -> Settings:
@@ -105,7 +105,7 @@ def _read_settings() -> Settings:
     # Ollama
     ollama_host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
     ollama_model = os.environ.get("OLLAMA_MODEL") or "llama2"
-    bot_auth_secret = os.environ.get("BOT_AUTH_SECRET") or None
+    bot_auth_totp_secret = os.environ.get("BOT_AUTH_TOTP_SECRET") or None
 
     return Settings(
         BOT_TOKEN=token,
@@ -120,7 +120,7 @@ def _read_settings() -> Settings:
         QBT_TIMEOUT_S=qbt_timeout,
         OLLAMA_HOST=ollama_host,
         OLLAMA_MODEL=ollama_model,
-        BOT_AUTH_SECRET=bot_auth_secret,
+        BOT_AUTH_TOTP_SECRET=bot_auth_totp_secret,
     )
 
 
@@ -139,8 +139,8 @@ def validate_settings() -> None:
         logger.warning(
             "ALLOWED_CHAT_IDS is empty; guarded commands will be unauthorized."
         )
-    if settings.BOT_AUTH_SECRET is None:
-        logger.warning("BOT_AUTH_SECRET is not set; /auth will be unavailable.")
+    if settings.BOT_AUTH_TOTP_SECRET is None:
+        logger.warning("BOT_AUTH_TOTP_SECRET is not set; /auth will be unavailable.")
 
 
 # Exported constants
@@ -152,6 +152,6 @@ WATCH_PATHS: list[str] = settings.WATCH_PATHS
 OLLAMA_HOST: str = settings.OLLAMA_HOST
 OLLAMA_MODEL: str = settings.OLLAMA_MODEL
 QBT_TIMEOUT_S: float = settings.QBT_TIMEOUT_S
-BOT_AUTH_SECRET: str | None = settings.BOT_AUTH_SECRET
+BOT_AUTH_TOTP_SECRET: str | None = settings.BOT_AUTH_TOTP_SECRET
 
 validate_settings()

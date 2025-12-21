@@ -33,7 +33,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "auth",
         (),
         "Info",
-        "/auth <secret>",
+        "/auth <code>",
         "authorize sensitive commands for 15 minutes",
         handler="cmd_auth",
     ),

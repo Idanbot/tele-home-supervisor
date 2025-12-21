@@ -12,6 +12,7 @@ dependencies = [
     "urllib3>=2.6.2",
     "qbittorrent-api>=2025.11.1",
     "httpx>=0.27.0",
+    "pyotp>=2.9.0",
 ]
 
 [dependency-groups]

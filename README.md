@@ -149,6 +149,21 @@ work inside the container.
 | `QBT_TIMEOUT_S` | `8` | qBittorrent API timeout in seconds |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
 | `OLLAMA_MODEL` | `llama2` | Default model for AI queries |
+| `BOT_AUTH_TOTP_SECRET` | (none) | Base32 TOTP seed for `/auth` (Google Authenticator) |
+
+### TOTP Auth Setup
+
+Set `BOT_AUTH_TOTP_SECRET` to a Base32 secret and add it to Google Authenticator
+(manual entry). Example generator:
+
+```bash
+python - <<'PY'
+import base64
+import secrets
+
+print(base64.b32encode(secrets.token_bytes(20)).decode("utf-8").strip("="))
+PY
+```
 
 ### Volume Mounts
 

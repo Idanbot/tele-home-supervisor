@@ -99,10 +99,10 @@ async def guard_sensitive(
 ) -> bool:
     if not await guard(update, context):
         return False
-    if not config.BOT_AUTH_SECRET:
+    if not config.BOT_AUTH_TOTP_SECRET:
         if update and update.effective_chat:
             await update.effective_chat.send_message(
-                "⛔ Auth secret not configured. Set BOT_AUTH_SECRET."
+                "⛔ Auth secret not configured. Set BOT_AUTH_TOTP_SECRET."
             )
         return False
     if not update or not update.effective_user:

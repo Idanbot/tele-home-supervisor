@@ -4,6 +4,7 @@ import logging
 import re
 import time
 
+import pyotp
 from telegram.constants import ParseMode
 
 from .. import config, services
@@ -98,15 +99,25 @@ async def cmd_version(update, context) -> None:
 async def cmd_auth(update, context) -> None:
     if not await guard(update, context):
         return
-    if not config.BOT_AUTH_SECRET:
-        await update.message.reply_text("⛔ BOT_AUTH_SECRET is not configured.")
+    if not config.BOT_AUTH_TOTP_SECRET:
+        await update.message.reply_text("⛔ BOT_AUTH_TOTP_SECRET is not configured.")
         return
     if not context.args:
-        await update.message.reply_text("Usage: /auth <secret>")
+        await update.message.reply_text("Usage: /auth <code>")
         return
-    provided = " ".join(context.args).strip()
-    if provided != config.BOT_AUTH_SECRET:
-        await update.message.reply_text("❌ Invalid auth secret.")
+    provided = "".join(context.args).strip().replace("-", "")
+    if not provided.isdigit():
+        await update.message.reply_text("❌ Invalid auth code.")
+        return
+    try:
+        totp = pyotp.TOTP(config.BOT_AUTH_TOTP_SECRET)
+        valid = totp.verify(provided, valid_window=1)
+    except Exception as e:
+        logger.exception("TOTP validation failed")
+        await update.message.reply_text(f"❌ Auth error: {e}")
+        return
+    if not valid:
+        await update.message.reply_text("❌ Invalid auth code.")
         return
     state = get_state(context.application)
     user_id = update.effective_user.id
