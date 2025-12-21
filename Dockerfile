@@ -42,7 +42,6 @@ ARG BUILD_WORKFLOW=""
 ARG BUILD_REPOSITORY=""
 ARG BUILD_COMMIT=""
 ARG BUILD_COMMIT_TIME=""
-ARG DOCKER_VERSION=29.1.2
 
 ENV TELE_HOME_SUPERVISOR_BUILD_VERSION=$BUILD_VERSION \
     GITHUB_RUN_NUMBER=$BUILD_RUN_NUMBER \
@@ -53,28 +52,10 @@ ENV TELE_HOME_SUPERVISOR_BUILD_VERSION=$BUILD_VERSION \
     TELE_HOME_SUPERVISOR_COMMIT=$BUILD_COMMIT \
     TELE_HOME_SUPERVISOR_COMMIT_TIME=$BUILD_COMMIT_TIME
 
-# Runtime deps
+# Runtime deps (use distro-signed Docker CLI package)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl iproute2 tzdata git ca-certificates iputils-ping iputils-tracepath procps \
+    curl iproute2 tzdata git ca-certificates iputils-ping iputils-tracepath procps docker.io \
     && rm -rf /var/lib/apt/lists/* \
-    && ARCH=$(dpkg --print-architecture) \
-    && if [ "$ARCH" = "arm64" ]; then DOCKER_ARCH="aarch64"; elif [ "$ARCH" = "amd64" ]; then DOCKER_ARCH="x86_64"; else DOCKER_ARCH="$ARCH"; fi \
-    && base_url="https://download.docker.com/linux/static/stable/${DOCKER_ARCH}" \
-    && echo "Downloading Docker CLI for architecture: ${DOCKER_ARCH}" \
-    && if ! curl -fsSL "${base_url}/docker-${DOCKER_VERSION}.tgz" -o docker.tgz; then \
-         echo "Docker ${DOCKER_VERSION} not found for ${DOCKER_ARCH}, selecting latest available"; \
-         latest="$(curl -fsSL "${base_url}/" | grep -oE 'docker-[0-9]+(\\.[0-9]+)*\\.tgz' | sed 's/^docker-//; s/\\.tgz$//' | sort -V | tail -n1)"; \
-         if [ -z "${latest}" ]; then echo "Failed to determine latest Docker CLI version"; exit 1; fi; \
-         curl -fsSL "${base_url}/docker-${latest}.tgz" -o docker.tgz; \
-         curl -fsSL "${base_url}/docker-${latest}.tgz.sha256" -o docker.tgz.sha256; \
-       else \
-         curl -fsSL "${base_url}/docker-${DOCKER_VERSION}.tgz.sha256" -o docker.tgz.sha256; \
-       fi \
-    && expected_sha="$(awk '{print $1}' docker.tgz.sha256)" \
-    && echo "${expected_sha}  docker.tgz" | sha256sum -c - \
-    && tar -xzf docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
-    && rm docker.tgz docker.tgz.sha256 \
-    && chmod +x /usr/local/bin/docker \
     && docker --version
 
 RUN groupadd -g ${APP_GID} app \
