@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 import os
-import random
+import secrets
 import re
 from typing import Any
 
@@ -267,7 +267,7 @@ def rt_random_critic_quote(url_path: str) -> str | None:
         if quotes:
             break
     if quotes:
-        return random.choice(quotes)
+        return secrets.choice(quotes)
     consensus_match = _RT_CONSENSUS_RE.search(html_text)
     if consensus_match:
         return _strip_tags(consensus_match.group(1))
