@@ -336,12 +336,12 @@ jobs:
           esac
           BASE_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
           ASSET="syft_${SYFT_VERSION}_linux_${SYFT_ARCH}.tar.gz"
-          curl -sSfL "${BASE_URL}/${ASSET}" -o syft.tgz
+          curl -sSfL "${BASE_URL}/${ASSET}" -o "${ASSET}"
           curl -sSfL "${BASE_URL}/syft_${SYFT_VERSION}_checksums.txt" \
             -o syft.checksums
           grep " ${ASSET}$" syft.checksums | sha256sum -c -
-          tar -xzf syft.tgz -C /usr/local/bin syft
-          rm -f syft.tgz syft.checksums
+          tar -xzf "${ASSET}" -C /usr/local/bin syft
+          rm -f "${ASSET}" syft.checksums
           syft version
 
       - name: Generate SBOM (image)
