@@ -50,7 +50,7 @@ Casio AE1200WH
 - World time, "Casio Royale" vibe.
 - Thinner and more retro.
 
-If you want solar + analog, pick AQ-S820W. If you want compact + world time, pick AE1200WH.
+If you want solar + analog, pick AQ-S820W. compact + world time, pick AE1200WH.
 """
     out = ai._format_text(text, done=True)
     assert out == text.strip()
@@ -64,6 +64,21 @@ Here is a quick example:
 def hello(name: str) -> str:
     return f"Hello, {name}"
 ```
+"""
+    out = ai._format_text(text, done=True)
+    assert out == text.strip()
+
+
+def test_real_answer_code_block_spaced_preserved() -> None:
+    text = """
+Here is a quick example:
+
+```python
+def hello(name: str) -> str:
+    return f"Hello, {name}"
+```
+
+here is a bunch of text after code block
 """
     out = ai._format_text(text, done=True)
     assert out == text.strip()

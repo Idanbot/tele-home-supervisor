@@ -9,9 +9,9 @@ import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-from .. import services, view, config
+from .. import services, view
 from ..state import BotState
-from .common import get_state
+from .common import allowed, get_state
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +79,8 @@ async def handle_callback_query(update, context) -> None:
     await query.answer()
 
     data = query.data
-    chat_id = update.effective_chat.id if update.effective_chat else None
 
-    if chat_id not in config.ALLOWED:
+    if not allowed(update):
         await query.edit_message_text("⛔ Not authorized")
         return
 
@@ -215,7 +214,7 @@ async def _handle_torrent_info(query, context, torrent_hash: str) -> None:
 
 async def _handle_torrent_refresh(query, context) -> None:
     state: BotState = get_state(context.application)
-    state.refresh_torrents()
+    await state.refresh_torrents()
 
     torrents = await services.get_torrent_list()
     msg = view.render_torrent_list(torrents)

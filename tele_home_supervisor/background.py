@@ -7,7 +7,7 @@ import html
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from telegram.constants import ParseMode
@@ -206,7 +206,7 @@ def _seconds_until_time(target_hour: int, target_minute: int = 0) -> float:
 
     if now >= target:
         # Target time has passed today, schedule for tomorrow
-        target = target.replace(day=target.day + 1)
+        target = target + timedelta(days=1)
 
     delta = (target - now).total_seconds()
     return max(0.0, delta)

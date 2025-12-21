@@ -42,6 +42,7 @@ ARG BUILD_WORKFLOW=""
 ARG BUILD_REPOSITORY=""
 ARG BUILD_COMMIT=""
 ARG BUILD_COMMIT_TIME=""
+ARG DOCKER_VERSION=29.1.2
 
 ENV TELE_HOME_SUPERVISOR_BUILD_VERSION=$BUILD_VERSION \
     GITHUB_RUN_NUMBER=$BUILD_RUN_NUMBER \
@@ -59,9 +60,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ARCH=$(dpkg --print-architecture) \
     && if [ "$ARCH" = "arm64" ]; then DOCKER_ARCH="aarch64"; elif [ "$ARCH" = "amd64" ]; then DOCKER_ARCH="x86_64"; else DOCKER_ARCH="$ARCH"; fi \
     && echo "Downloading Docker CLI for architecture: $DOCKER_ARCH" \
-    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-29.1.2.tgz" -o docker.tgz \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz" -o docker.tgz \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz.sha256" -o docker.tgz.sha256 \
+    && expected_sha="$(awk '{print $1}' docker.tgz.sha256)" \
+    && echo "${expected_sha}  docker.tgz" | sha256sum -c - \
     && tar -xzf docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
-    && rm docker.tgz \
+    && rm docker.tgz docker.tgz.sha256 \
     && chmod +x /usr/local/bin/docker \
     && docker --version
 
