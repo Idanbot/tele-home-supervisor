@@ -35,16 +35,16 @@ async def test_debug_command_filters_by_command(monkeypatch) -> None:
 
     monkeypatch.setattr(meta, "guard_sensitive", allow_guard)
     update = DummyUpdate()
-    context = DummyContext(args=["imdb"])
+    context = DummyContext(args=["tmdb"])
     state = get_state(context.application)
-    state.add_debug("imdb", "imdb error")
+    state.add_debug("tmdb", "tmdb error")
     state.add_debug("docker", "docker error")
 
     await meta.cmd_debug(update, context)
 
     assert update.message.replies
     text = update.message.replies[0]
-    assert "imdb" in text
+    assert "tmdb" in text
     assert "docker" not in text
 
 
@@ -57,7 +57,7 @@ async def test_debug_command_truncates_details(monkeypatch) -> None:
     update = DummyUpdate()
     context = DummyContext(args=[])
     state = get_state(context.application)
-    state.add_debug("imdb", "imdb error", "x" * 2000)
+    state.add_debug("tmdb", "tmdb error", "x" * 2000)
 
     await meta.cmd_debug(update, context)
 

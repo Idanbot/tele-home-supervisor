@@ -157,6 +157,20 @@ def render_container_stats(stats: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
+def render_tmdb_list(title: str, items: list[dict[str, object]]) -> str:
+    if not items:
+        return "<i>No results found.</i>"
+    lines = [bold(title)]
+    for idx, item in enumerate(items, start=1):
+        name = html.escape(str(item.get("title") or item.get("name") or "Unknown"))
+        year = html.escape(str(item.get("year") or ""))
+        rating = item.get("rating")
+        rating_text = f"{rating:.1f}" if isinstance(rating, (int, float)) else "-"
+        suffix = f" ({year})" if year else ""
+        lines.append(f"{idx}. {name}{suffix} - ⭐ {rating_text}")
+    return "\n".join(lines)
+
+
 def render_logs(container: str, logs: str, direction: str, count: str) -> str:
     safe_name = html.escape(container)
     return (

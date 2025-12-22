@@ -1,144 +1,140 @@
-"""Media command handlers (IMDB)."""
+"""Media command handlers (TMDB)."""
 
 from __future__ import annotations
 
-import html
-
 from telegram.constants import ParseMode
 
-from .. import services
+from .. import services, tmdb, view
+from .callbacks import build_tmdb_keyboard
 from .common import guard, get_state_and_recorder, record_error
 
 
-def _fmt_imdb(details: dict[str, object]) -> str:
-    title = html.escape(str(details.get("title", "Unknown")))
-    url = html.escape(str(details.get("url", "")))
-    description = html.escape(str(details.get("description", "")))
-    genres = ", ".join(str(g) for g in details.get("genres", []) if g) or "-"
-    content_rating = html.escape(str(details.get("content_rating", ""))) or "-"
-    runtime = html.escape(str(details.get("runtime", ""))) or "-"
-    rating = details.get("rating")
-    rating_count = details.get("rating_count")
-    release = html.escape(str(details.get("release", ""))) or "-"
-    cast = details.get("cast", [])
-    cast_line = ", ".join(html.escape(str(c)) for c in cast if c) or "-"
-    rating_line = "-"
-    if rating:
-        rating_line = str(rating)
-        if rating_count:
-            rating_line = f"{rating_line} ({rating_count} votes)"
-
-    lines = [
-        f"<b>{title}</b>",
-        f"Release: {release}",
-        f"Rating: {rating_line}",
-        f"Genres: {html.escape(genres)}",
-        f"Runtime: {runtime}",
-        f"Content: {content_rating}",
-        f"Cast: {cast_line}",
-    ]
-    if description:
-        lines.append("")
-        lines.append(description)
-    if url:
-        lines.append("")
-        lines.append(f'<a href="{url}">IMDB</a>')
-    return "\n".join(lines)
-
-
-def _fmt_list(title: str, rows: list[dict[str, object]], with_scores: bool) -> str:
-    lines = [f"<b>{html.escape(title)}</b>"]
-    for idx, row in enumerate(rows, start=1):
-        name = html.escape(str(row.get("title", "Unknown")))
-        year = html.escape(str(row.get("year", ""))).strip()
-        suffix = f" ({year})" if year else ""
-        if with_scores:
-            tom = row.get("tomatometer")
-            aud = row.get("audience")
-            score = "-"
-            if tom is not None:
-                score = f"{tom}%"
-                if aud is not None:
-                    score = f"{score} / {aud}%"
-            lines.append(f"{idx}. {name}{suffix} - {score}")
-        else:
-            lines.append(f"{idx}. {name}{suffix}")
-    return "\n".join(lines)
-
-
-async def cmd_imdb(update, context) -> None:
+async def cmd_movies(update, context) -> None:
     if not await guard(update, context):
         return
-    if not context.args:
-        await update.message.reply_text("Usage: /imdb <query>")
-        return
-    query = " ".join(context.args).strip()
-    if not query:
-        await update.message.reply_text("Usage: /imdb <query>")
-        return
+    state, recorder = get_state_and_recorder(context)
     try:
-        _, recorder = get_state_and_recorder(context)
-        debug_sink = recorder.capture("imdb", "imdb fetch failed")
-        details = await services.imdb_details(query, debug_sink=debug_sink)
+        data = await services.tmdb_trending_movies()
     except Exception as e:
         await record_error(
             recorder,
-            "imdb",
-            f"imdb failed for query: {query}",
+            "movies",
+            "tmdb trending movies failed",
             e,
             update.message.reply_text,
         )
         return
-    if not details:
+    items = tmdb.extract_items(data, default_type="movie")
+    if not items:
         await update.message.reply_text("No results found.")
         return
-    msg = _fmt_imdb(details)
+    total_pages = int(data.get("total_pages") or 1)
+    key = state.new_tmdb_key()
+    state.store_tmdb_results(
+        key, "movies", None, page=1, total_pages=total_pages, items=items
+    )
+    msg = view.render_tmdb_list("TMDB Trending Movies", items)
+    keyboard = build_tmdb_keyboard(key, items, 1, total_pages)
     await update.message.reply_text(
-        msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
     )
 
 
-async def cmd_imdbmovies(update, context) -> None:
+async def cmd_shows(update, context) -> None:
     if not await guard(update, context):
         return
+    state, recorder = get_state_and_recorder(context)
     try:
-        _, recorder = get_state_and_recorder(context)
-        debug_sink = recorder.capture("imdbmovies", "imdb trending fetch failed")
-        rows = await services.imdb_trending("movies", debug_sink=debug_sink)
+        data = await services.tmdb_trending_shows()
     except Exception as e:
         await record_error(
             recorder,
-            "imdbmovies",
-            "imdb trending movies failed",
+            "shows",
+            "tmdb trending shows failed",
             e,
             update.message.reply_text,
         )
         return
-    if not rows:
+    items = tmdb.extract_items(data, default_type="tv")
+    if not items:
         await update.message.reply_text("No results found.")
         return
-    msg = _fmt_list("IMDB Trending Movies", rows, with_scores=False)
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    total_pages = int(data.get("total_pages") or 1)
+    key = state.new_tmdb_key()
+    state.store_tmdb_results(
+        key, "shows", None, page=1, total_pages=total_pages, items=items
+    )
+    msg = view.render_tmdb_list("TMDB Trending Shows", items)
+    keyboard = build_tmdb_keyboard(key, items, 1, total_pages)
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
 
 
-async def cmd_imdbshows(update, context) -> None:
+async def cmd_incinema(update, context) -> None:
     if not await guard(update, context):
         return
+    state, recorder = get_state_and_recorder(context)
     try:
-        _, recorder = get_state_and_recorder(context)
-        debug_sink = recorder.capture("imdbshows", "imdb trending fetch failed")
-        rows = await services.imdb_trending("shows", debug_sink=debug_sink)
+        data = await services.tmdb_in_cinema()
     except Exception as e:
         await record_error(
             recorder,
-            "imdbshows",
-            "imdb trending shows failed",
+            "incinema",
+            "tmdb in cinema failed",
             e,
             update.message.reply_text,
         )
         return
-    if not rows:
+    items = tmdb.extract_items(data, default_type="movie")
+    if not items:
         await update.message.reply_text("No results found.")
         return
-    msg = _fmt_list("IMDB Trending Shows", rows, with_scores=False)
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    total_pages = int(data.get("total_pages") or 1)
+    key = state.new_tmdb_key()
+    state.store_tmdb_results(
+        key, "incinema", None, page=1, total_pages=total_pages, items=items
+    )
+    msg = view.render_tmdb_list("TMDB In Cinemas", items)
+    keyboard = build_tmdb_keyboard(key, items, 1, total_pages)
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def cmd_tmdb(update, context) -> None:
+    if not await guard(update, context):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /tmdb <query>")
+        return
+    query = " ".join(context.args).strip()
+    if not query:
+        await update.message.reply_text("Usage: /tmdb <query>")
+        return
+    state, recorder = get_state_and_recorder(context)
+    try:
+        data = await services.tmdb_search_multi(query)
+    except Exception as e:
+        await record_error(
+            recorder,
+            "tmdb",
+            f"tmdb search failed for query: {query}",
+            e,
+            update.message.reply_text,
+        )
+        return
+    items = tmdb.extract_items(data)
+    if not items:
+        await update.message.reply_text("No results found.")
+        return
+    total_pages = int(data.get("total_pages") or 1)
+    key = state.new_tmdb_key()
+    state.store_tmdb_results(
+        key, "search", query, page=1, total_pages=total_pages, items=items
+    )
+    msg = view.render_tmdb_list(f"TMDB Search: {query}", items)
+    keyboard = build_tmdb_keyboard(key, items, 1, total_pages)
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )

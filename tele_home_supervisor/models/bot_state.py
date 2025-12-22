@@ -14,6 +14,7 @@ from .. import services
 from .cache import CacheEntry, LogCacheEntry
 from .debug import DebugEntry, DebugRecorder
 from .metrics import CommandMetrics
+from .tmdb_cache import TmdbCacheEntry
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,8 @@ _MAGNET_CACHE_MAX = 200
 _LOG_CACHE_TTL_S = 5 * 60
 _DEBUG_TTL_S = 60 * 60
 _DEBUG_MAX_PER_CMD = 50
+_TMDB_CACHE_TTL_S = 15 * 60
+_TMDB_CACHE_MAX = 200
 
 
 def _normalize(items: set[str]) -> set[str]:
@@ -54,6 +57,7 @@ class BotState:
     )
     log_cache: dict[str, LogCacheEntry] = field(default_factory=dict)
     debug_cache: dict[str, list[DebugEntry]] = field(default_factory=dict)
+    tmdb_cache: OrderedDict[str, TmdbCacheEntry] = field(default_factory=OrderedDict)
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
     _debug_recorder: DebugRecorder | None = field(default=None, init=False, repr=False)
@@ -146,6 +150,52 @@ class BotState:
         if self._debug_recorder is None:
             self._debug_recorder = DebugRecorder(self)
         return self._debug_recorder
+
+    def store_tmdb_results(
+        self,
+        key: str,
+        kind: str,
+        query: str | None,
+        page: int,
+        total_pages: int,
+        items: list[dict[str, object]],
+    ) -> None:
+        entry = TmdbCacheEntry(
+            updated_at=time.monotonic(),
+            kind=kind,
+            query=query,
+            page=page,
+            total_pages=total_pages,
+            items=items,
+        )
+        self.tmdb_cache[key] = entry
+        self._prune_tmdb_cache()
+
+    def get_tmdb_results(self, key: str) -> TmdbCacheEntry | None:
+        entry = self.tmdb_cache.get(key)
+        if not entry:
+            return None
+        if (time.monotonic() - entry.updated_at) > _TMDB_CACHE_TTL_S:
+            self.tmdb_cache.pop(key, None)
+            return None
+        return entry
+
+    def new_tmdb_key(self) -> str:
+        return secrets.token_urlsafe(8)
+
+    def _prune_tmdb_cache(self) -> None:
+        if not self.tmdb_cache:
+            return
+        now = time.monotonic()
+        stale_keys = [
+            key
+            for key, entry in self.tmdb_cache.items()
+            if (now - entry.updated_at) > _TMDB_CACHE_TTL_S
+        ]
+        for key in stale_keys:
+            self.tmdb_cache.pop(key, None)
+        while len(self.tmdb_cache) > _TMDB_CACHE_MAX:
+            self.tmdb_cache.popitem(last=False)
 
     def metrics_for(self, name: str) -> CommandMetrics:
         return self.command_metrics.setdefault(name, CommandMetrics())

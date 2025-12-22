@@ -33,16 +33,9 @@ services:
       - TPB_USER_AGENT=${TPB_USER_AGENT:-}
       - TPB_COOKIE=${TPB_COOKIE:-}
       - TPB_REFERER=${TPB_REFERER:-}
-      - IMDB_BASE_URL=${IMDB_BASE_URL:-https://www.imdb.com}
-      - MEDIA_USER_AGENT=${MEDIA_USER_AGENT:-}
-      - IMDB_COOKIE=${IMDB_COOKIE:-}
-      - IMDB_REFERER=${IMDB_REFERER:-}
-      - IMDB_USER_AGENT=${IMDB_USER_AGENT:-}
-      - IMDB_MINIMAL_HEADERS=${IMDB_MINIMAL_HEADERS:-true}
-      - RT_BASE_URL=${RT_BASE_URL:-https://www.rottentomatoes.com}
-      - RT_ALGOLIA_APP_ID=${RT_ALGOLIA_APP_ID:-}
-      - RT_ALGOLIA_API_KEY=${RT_ALGOLIA_API_KEY:-}
-      - RT_ALGOLIA_INDEX=${RT_ALGOLIA_INDEX:-}
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - TMDB_BASE_URL=${TMDB_BASE_URL:-https://api.themoviedb.org/3}
+      - TMDB_USER_AGENT=${TMDB_USER_AGENT:-}
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

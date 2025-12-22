@@ -262,25 +262,32 @@ _NOTIFICATIONS_COMMANDS = (
 
 _MEDIA_COMMANDS = (
     CommandSpec(
-        "imdb",
+        "movies",
         "Media",
-        "/imdb <query>",
-        "IMDB lookup (storyline, rating, cast)",
-        "cmd_imdb",
+        "/movies",
+        "TMDB trending movies",
+        "cmd_movies",
     ),
     CommandSpec(
-        "imdbmovies",
+        "shows",
         "Media",
-        "/imdbmovies",
-        "IMDB trending movies",
-        "cmd_imdbmovies",
+        "/shows",
+        "TMDB trending shows",
+        "cmd_shows",
     ),
     CommandSpec(
-        "imdbshows",
+        "incinema",
         "Media",
-        "/imdbshows",
-        "IMDB trending shows",
-        "cmd_imdbshows",
+        "/incinema",
+        "TMDB in cinemas now",
+        "cmd_incinema",
+    ),
+    CommandSpec(
+        "tmdb",
+        "Media",
+        "/tmdb <query>",
+        "TMDB search (movies + shows)",
+        "cmd_tmdb",
     ),
 )
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from . import media, piratebay, utils
+from . import piratebay, utils, tmdb
 from . import torrent as torrent_mod
 
 
@@ -81,12 +81,28 @@ async def piratebay_search(query: str, debug_sink=None) -> list[dict[str, object
     return await asyncio.to_thread(piratebay.search, query, debug_sink)
 
 
-async def imdb_details(query: str, debug_sink=None) -> dict[str, object] | None:
-    return await asyncio.to_thread(media.imdb_details, query, debug_sink)
+async def tmdb_trending_movies(page: int = 1) -> dict[str, object]:
+    return await asyncio.to_thread(tmdb.trending_movies, page)
 
 
-async def imdb_trending(kind: str, debug_sink=None) -> list[dict[str, object]]:
-    return await asyncio.to_thread(media.imdb_trending, kind, debug_sink)
+async def tmdb_trending_shows(page: int = 1) -> dict[str, object]:
+    return await asyncio.to_thread(tmdb.trending_shows, page)
+
+
+async def tmdb_in_cinema(page: int = 1) -> dict[str, object]:
+    return await asyncio.to_thread(tmdb.in_cinema, page)
+
+
+async def tmdb_search_multi(query: str, page: int = 1) -> dict[str, object]:
+    return await asyncio.to_thread(tmdb.search_multi, query, page)
+
+
+async def tmdb_movie_details(movie_id: int) -> dict[str, object]:
+    return await asyncio.to_thread(tmdb.movie_details, movie_id)
+
+
+async def tmdb_tv_details(tv_id: int) -> dict[str, object]:
+    return await asyncio.to_thread(tmdb.tv_details, tv_id)
 
 
 # Torrent helpers (Sync wrappers)

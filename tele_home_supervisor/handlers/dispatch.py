@@ -62,6 +62,7 @@ cmd_ask = rate_limit(ai.cmd_ask, name="ask")
 cmd_askreset = rate_limit(ai.cmd_askreset, name="askreset")
 
 # Media
-cmd_imdb = rate_limit(media.cmd_imdb, name="imdb")
-cmd_imdbmovies = rate_limit(media.cmd_imdbmovies, name="imdbmovies")
-cmd_imdbshows = rate_limit(media.cmd_imdbshows, name="imdbshows")
+cmd_movies = rate_limit(media.cmd_movies, name="movies")
+cmd_shows = rate_limit(media.cmd_shows, name="shows")
+cmd_incinema = rate_limit(media.cmd_incinema, name="incinema")
+cmd_tmdb = rate_limit(media.cmd_tmdb, name="tmdb")

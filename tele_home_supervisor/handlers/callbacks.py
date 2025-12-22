@@ -6,12 +6,13 @@ import asyncio
 import html
 import logging
 import math
+import time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
-from .. import services, view
+from .. import services, tmdb, view
 from ..state import BotState
 from .common import allowed, get_state
 
@@ -225,6 +226,46 @@ def build_torrent_keyboard(torrents: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+def build_tmdb_keyboard(
+    key: str, items: list[dict[str, object]], page: int, total_pages: int
+) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for idx, item in enumerate(items, start=1):
+        title = str(item.get("title") or item.get("name") or "Unknown")
+        media_type = str(item.get("media_type") or "")
+        item_id = item.get("id")
+        if not item_id or media_type not in {"movie", "tv"}:
+            continue
+        label = f"{idx}. {title}"
+        if len(label) > 60:
+            label = f"{label[:57]}..."
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    label, callback_data=f"tmdbinfo:{media_type}:{item_id}"
+                )
+            ]
+        )
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav_row.append(
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"tmdbpage:{key}:{page - 1}")
+        )
+    nav_row.append(
+        InlineKeyboardButton(
+            f"📄 {page}/{max(total_pages, 1)}",
+            callback_data=f"tmdbpage:{key}:{page}",
+        )
+    )
+    if page < total_pages:
+        nav_row.append(
+            InlineKeyboardButton("Next ➡️", callback_data=f"tmdbpage:{key}:{page + 1}")
+        )
+    if nav_row:
+        buttons.append(nav_row)
+    return InlineKeyboardMarkup(buttons)
+
+
 def build_free_games_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [
@@ -300,6 +341,10 @@ async def handle_callback_query(update, context) -> None:
         elif data.startswith("pbmagnet:"):
             key = data[len("pbmagnet:") :]
             await _handle_piratebay_magnet(query, context, key)
+        elif data.startswith("tmdbpage:"):
+            await _handle_tmdb_page(query, context, data)
+        elif data.startswith("tmdbinfo:"):
+            await _handle_tmdb_info(query, context, data)
         else:
             await _safe_edit_message_text(query, "❓ Unknown action")
     except Exception as e:
@@ -372,6 +417,124 @@ async def _handle_dstats_callback(query, context, container: str) -> None:
         msg = view.render_container_stats(target_stats)
 
     await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+def _parse_tmdb_page_payload(data: str) -> tuple[str, int] | None:
+    payload = data[len("tmdbpage:") :]
+    parts = payload.split(":")
+    if len(parts) != 2:
+        return None
+    key = parts[0]
+    try:
+        page = int(parts[1])
+    except ValueError:
+        return None
+    return key, max(1, page)
+
+
+async def _handle_tmdb_page(query, context, data: str) -> None:
+    payload = _parse_tmdb_page_payload(data)
+    if not payload:
+        await query.message.reply_text("❌ Invalid TMDB page request.")
+        return
+    key, page = payload
+    state: BotState = get_state(context.application)
+    entry = state.get_tmdb_results(key)
+    if not entry:
+        await query.message.reply_text("❌ TMDB results expired. Re-run command.")
+        return
+
+    try:
+        if entry.kind == "movies":
+            data = await services.tmdb_trending_movies(page)
+            items = tmdb.extract_items(data, default_type="movie")
+        elif entry.kind == "shows":
+            data = await services.tmdb_trending_shows(page)
+            items = tmdb.extract_items(data, default_type="tv")
+        elif entry.kind == "incinema":
+            data = await services.tmdb_in_cinema(page)
+            items = tmdb.extract_items(data, default_type="movie")
+        elif entry.kind == "search":
+            data = await services.tmdb_search_multi(entry.query or "", page)
+            items = tmdb.extract_items(data)
+        else:
+            await query.message.reply_text("❌ Unsupported TMDB list.")
+            return
+    except Exception as exc:
+        await query.message.reply_text(f"❌ TMDB error: {html.escape(str(exc))}")
+        return
+
+    total_pages = int(data.get("total_pages") or 1)
+    entry.page = page
+    entry.total_pages = total_pages
+    entry.items = items
+    entry.updated_at = time.monotonic()
+    state.tmdb_cache[key] = entry
+
+    title = "TMDB"
+    if entry.kind == "movies":
+        title = "TMDB Trending Movies"
+    elif entry.kind == "shows":
+        title = "TMDB Trending Shows"
+    elif entry.kind == "incinema":
+        title = "TMDB In Cinemas"
+    elif entry.kind == "search":
+        title = f"TMDB Search: {entry.query}"
+    msg = view.render_tmdb_list(title, items)
+    keyboard = build_tmdb_keyboard(key, items, page, total_pages)
+    await _safe_edit_message_text(
+        query, msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def _handle_tmdb_info(query, context, data: str) -> None:
+    payload = data[len("tmdbinfo:") :]
+    parts = payload.split(":")
+    if len(parts) != 2:
+        await query.message.reply_text("❌ Invalid TMDB info request.")
+        return
+    media_type, id_str = parts
+    try:
+        tmdb_id = int(id_str)
+    except ValueError:
+        await query.message.reply_text("❌ Invalid TMDB id.")
+        return
+    try:
+        if media_type == "movie":
+            info = await services.tmdb_movie_details(tmdb_id)
+        elif media_type == "tv":
+            info = await services.tmdb_tv_details(tmdb_id)
+        else:
+            await query.message.reply_text("❌ Unknown TMDB media type.")
+            return
+    except Exception as exc:
+        await query.message.reply_text(f"❌ TMDB error: {html.escape(str(exc))}")
+        return
+
+    title = info.get("title") or info.get("name") or "Unknown"
+    overview = info.get("overview") or ""
+    rating = info.get("vote_average")
+    date = info.get("release_date") or info.get("first_air_date") or ""
+    genres = ", ".join(g.get("name") for g in info.get("genres", []) if g.get("name"))
+    url = (
+        f"https://www.themoviedb.org/movie/{tmdb_id}"
+        if media_type == "movie"
+        else f"https://www.themoviedb.org/tv/{tmdb_id}"
+    )
+    lines = [
+        f"<b>{html.escape(str(title))}</b>",
+        f"Date: {html.escape(str(date))}" if date else "Date: -",
+        f"Rating: {rating:.1f}" if isinstance(rating, (int, float)) else "Rating: -",
+        f"Genres: {html.escape(genres) if genres else '-'}",
+    ]
+    if overview:
+        lines.append("")
+        lines.append(html.escape(str(overview)))
+    lines.append("")
+    lines.append(f'<a href="{url}">TMDB</a>')
+    await query.message.reply_text(
+        "\n".join(lines), parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
 
 
 async def _handle_docker_refresh(query, context, page: int) -> None:
