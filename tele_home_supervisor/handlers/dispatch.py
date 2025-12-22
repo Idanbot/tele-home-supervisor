@@ -29,6 +29,7 @@ cmd_dockerstats = rate_limit(docker.cmd_dockerstats, name="dockerstats")
 cmd_dstats_rich = rate_limit(docker.cmd_dstats_rich, name="dstatsrich")
 cmd_dlogs = rate_limit(docker.cmd_dlogs, name="dlogs")
 cmd_dhealth = rate_limit(docker.cmd_dhealth, name="dhealth")
+cmd_dinspect = rate_limit(docker.cmd_dinspect, name="dinspect")
 cmd_ports = rate_limit(docker.cmd_ports, name="ports")
 
 # Network

@@ -77,9 +77,10 @@ async def cmd_imdb(update, context) -> None:
         await update.message.reply_text("Usage: /imdb <query>")
         return
     try:
-        details = await services.imdb_details(query)
-    except Exception as e:
         _, recorder = get_state_and_recorder(context)
+        debug_sink = recorder.capture("imdb", "imdb fetch failed")
+        details = await services.imdb_details(query, debug_sink=debug_sink)
+    except Exception as e:
         await record_error(
             recorder,
             "imdb",
@@ -101,9 +102,10 @@ async def cmd_imdbmovies(update, context) -> None:
     if not await guard(update, context):
         return
     try:
-        rows = await services.imdb_trending("movies")
-    except Exception as e:
         _, recorder = get_state_and_recorder(context)
+        debug_sink = recorder.capture("imdbmovies", "imdb trending fetch failed")
+        rows = await services.imdb_trending("movies", debug_sink=debug_sink)
+    except Exception as e:
         await record_error(
             recorder,
             "imdbmovies",
@@ -123,9 +125,10 @@ async def cmd_imdbshows(update, context) -> None:
     if not await guard(update, context):
         return
     try:
-        rows = await services.imdb_trending("shows")
-    except Exception as e:
         _, recorder = get_state_and_recorder(context)
+        debug_sink = recorder.capture("imdbshows", "imdb trending fetch failed")
+        rows = await services.imdb_trending("shows", debug_sink=debug_sink)
+    except Exception as e:
         await record_error(
             recorder,
             "imdbshows",
@@ -145,9 +148,10 @@ async def cmd_rtmovies(update, context) -> None:
     if not await guard(update, context):
         return
     try:
-        rows = await services.rt_trending("movies")
-    except Exception as e:
         _, recorder = get_state_and_recorder(context)
+        debug_sink = recorder.capture("rtmovies", "rt trending fetch failed")
+        rows = await services.rt_trending("movies", debug_sink=debug_sink)
+    except Exception as e:
         await record_error(
             recorder,
             "rtmovies",
@@ -167,9 +171,10 @@ async def cmd_rtshows(update, context) -> None:
     if not await guard(update, context):
         return
     try:
-        rows = await services.rt_trending("shows")
-    except Exception as e:
         _, recorder = get_state_and_recorder(context)
+        debug_sink = recorder.capture("rtshows", "rt trending fetch failed")
+        rows = await services.rt_trending("shows", debug_sink=debug_sink)
+    except Exception as e:
         await record_error(
             recorder,
             "rtshows",
@@ -197,9 +202,10 @@ async def cmd_rtsearch(update, context) -> None:
         return
 
     try:
-        results = await services.rt_search(query)
-    except Exception as e:
         _, recorder = get_state_and_recorder(context)
+        debug_sink = recorder.capture("rtsearch", "rt search fetch failed")
+        results = await services.rt_search(query, debug_sink=debug_sink)
+    except Exception as e:
         await record_error(
             recorder,
             "rtsearch",
@@ -213,7 +219,11 @@ async def cmd_rtsearch(update, context) -> None:
         return
 
     primary = results[0]
-    quote = await services.rt_random_critic_quote(str(primary.get("url", "")))
+    _, recorder = get_state_and_recorder(context)
+    quote = await services.rt_random_critic_quote(
+        str(primary.get("url", "")),
+        debug_sink=recorder.capture("rtsearch", "rt reviews fetch failed"),
+    )
     lines = [
         f"<b>Rotten Tomatoes Search:</b> {html.escape(query)}",
         f"Top result: {html.escape(str(primary.get('title', 'Unknown')))}",

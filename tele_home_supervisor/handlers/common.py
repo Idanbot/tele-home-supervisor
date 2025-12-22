@@ -51,9 +51,14 @@ def get_state_and_recorder(context) -> tuple[BotState, DebugRecorder]:
 
 
 async def record_error(
-    recorder, log, command: str, message: str, exc: Exception, reply
+    recorder,
+    command: str,
+    message: str,
+    exc: Exception,
+    reply,
+    log: logging.Logger | None = None,
 ):
-    log.exception(message)
+    (log or logger).exception(message)
     recorder.record(command, message, str(exc))
     await reply(f"❌ Error: {html.escape(str(exc))}", parse_mode=ParseMode.HTML)
 

@@ -123,7 +123,12 @@ def _render_logs_page(
                 ),
             )
         )
-    nav_row.append(InlineKeyboardButton("📄", callback_data="dlogs:noop"))
+    nav_row.append(
+        InlineKeyboardButton(
+            "⬇️ Tail",
+            callback_data=_format_log_callback(container, max_start, since, "page"),
+        )
+    )
     if start < max_start:
         next_start = min(max_start, start + LOG_PAGE_STEP)
         nav_row.append(
@@ -259,8 +264,6 @@ async def handle_callback_query(update, context) -> None:
                 await _handle_dlogs_page(
                     query, context, container, start, since=since, refresh=True
                 )
-        elif data == "dlogs:noop":
-            return
         elif data.startswith("dlogs:"):
             container = data[6:]
             await _handle_dlogs_callback(query, context, container)

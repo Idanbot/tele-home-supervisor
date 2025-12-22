@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import re
 import time
@@ -188,6 +189,8 @@ async def cmd_dlogs(update, context) -> None:
     if invalid_since:
         await update.message.reply_text("❌ Invalid --since value.")
         return
+    if page is None and not as_file:
+        as_file = True
     container_names = state.get_cached("containers")
     if container_names and container_name not in container_names:
         await reply_usage_with_suggestions(
@@ -288,3 +291,49 @@ async def cmd_ports(update, context) -> None:
 
     for part in view.chunk(formatted, size=4000):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+
+
+async def cmd_dinspect(update, context) -> None:
+    if not await guard_sensitive(update, context):
+        return
+    state, recorder = get_state_and_recorder(context)
+    await state.maybe_refresh("containers")
+    if not context.args:
+        await reply_usage_with_suggestions(
+            update,
+            "/dinspect &lt;container&gt;",
+            state.suggest("containers", limit=5),
+        )
+        return
+    name = context.args[0]
+    container_names = state.get_cached("containers")
+    if container_names and name not in container_names:
+        await reply_usage_with_suggestions(
+            update,
+            "/dinspect &lt;container&gt;",
+            state.suggest("containers", query=name, limit=5),
+        )
+        return
+    try:
+        data = await services.get_container_inspect(name)
+    except Exception as e:
+        await record_error(
+            recorder,
+            "docker",
+            f"docker inspect failed for {name}",
+            e,
+            update.message.reply_text,
+        )
+        return
+
+    payload = json.dumps(data, indent=2, ensure_ascii=True)
+    if len(payload) > 3500:
+        filename = f"{name}-inspect.json"
+        file_obj = io.BytesIO(payload.encode(errors="replace"))
+        file_obj.name = filename
+        await update.message.reply_document(document=file_obj)
+        return
+    await update.message.reply_text(
+        f"{view.bold('Docker Inspect:')}\n{view.pre(payload)}",
+        parse_mode=ParseMode.HTML,
+    )

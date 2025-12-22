@@ -502,6 +502,22 @@ async def healthcheck_container(container_name: str) -> str:
     return await asyncio.to_thread(_inspect)
 
 
+async def get_container_inspect(container_name: str) -> dict:
+    def _inspect():
+        try:
+            container = client.containers.get(container_name)
+        except Exception as exc:
+            raise RuntimeError(f"Error inspecting {container_name}: {exc}") from exc
+        try:
+            return container.attrs
+        except Exception as exc:
+            raise RuntimeError(
+                f"Error reading inspect data for {container_name}: {exc}"
+            ) from exc
+
+    return await asyncio.to_thread(_inspect)
+
+
 async def ping_host(host: str, count: int = 3) -> str:
     ping_bin = shutil.which("ping") or "/bin/ping"
     rc, out, err = await cli.run_cmd(

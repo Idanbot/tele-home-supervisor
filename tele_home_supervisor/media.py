@@ -69,7 +69,12 @@ _RT_CONSENSUS_RE = re.compile(
 )
 
 
-def _fetch(url: str, accept: str = "text/html") -> str:
+def _fetch(
+    url: str,
+    accept: str = "text/html",
+    debug_sink=None,
+    debug_label: str | None = None,
+) -> str:
     accept_header = accept
     if accept == "text/html":
         accept_header = (
@@ -92,8 +97,18 @@ def _fetch(url: str, accept: str = "text/html") -> str:
         headers["Upgrade-Insecure-Requests"] = "1"
     if referer:
         headers["Referer"] = referer
-    resp = requests.get(url, headers=headers, timeout=12)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(url, headers=headers, timeout=12)
+    except requests.RequestException as exc:
+        if debug_sink:
+            debug_sink(f"{debug_label or 'request failed'}: {url}", str(exc))
+        raise
+    if not resp.ok:
+        snippet = resp.text[:500].replace("\n", " ")
+        detail = f"{resp.status_code} {resp.reason} {snippet}".strip()
+        if debug_sink:
+            debug_sink(f"{debug_label or 'http error'}: {url}", detail)
+        raise RuntimeError(f"HTTP {resp.status_code} for {url}: {snippet}")
     return resp.text
 
 
@@ -103,7 +118,9 @@ def _strip_tags(text: str) -> str:
     return " ".join(cleaned.split())
 
 
-def _ensure_not_blocked(html_text: str, source: str) -> None:
+def _ensure_not_blocked(
+    html_text: str, source: str, debug_sink=None, debug_label: str | None = None
+) -> None:
     markers = (
         "cf-chl",
         "cloudflare",
@@ -118,7 +135,10 @@ def _ensure_not_blocked(html_text: str, source: str) -> None:
     )
     lower = html_text.lower()
     if any(marker in lower for marker in markers):
-        raise RuntimeError(f"{source} blocked by anti-bot protection")
+        snippet = html_text[:500].replace("\n", " ")
+        if debug_sink:
+            debug_sink(debug_label or f"{source} blocked", snippet)
+        raise RuntimeError(f"{source} blocked by anti-bot protection: {snippet}")
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -140,7 +160,7 @@ def _parse_ldjson(html_text: str) -> dict[str, Any] | None:
         return None
 
 
-def imdb_suggest(query: str) -> list[dict[str, Any]]:
+def imdb_suggest(query: str, debug_sink=None) -> list[dict[str, Any]]:
     q = (query or "").strip()
     if not q:
         return []
@@ -148,15 +168,20 @@ def imdb_suggest(query: str) -> list[dict[str, Any]]:
         return [{"id": q, "title": q, "type": "title"}]
     first = re.sub(r"[^a-z0-9]", "", q.lower())[:1] or "a"
     url = f"{_IMDB_SUGGEST_URL}/{first}/{requests.utils.quote(q)}.json"
-    text = _fetch(url, accept="application/json")
+    text = _fetch(
+        url,
+        accept="application/json",
+        debug_sink=debug_sink,
+        debug_label="imdb suggest",
+    )
     data = json.loads(text)
     return data.get("d", []) or []
 
 
-def imdb_details(query: str) -> dict[str, Any] | None:
-    results = imdb_suggest(query)
+def imdb_details(query: str, debug_sink=None) -> dict[str, Any] | None:
+    results = imdb_suggest(query, debug_sink=debug_sink)
     if not results:
-        results = _imdb_search_fallback(query)
+        results = _imdb_search_fallback(query, debug_sink=debug_sink)
         if not results:
             return None
     first = results[0]
@@ -164,8 +189,10 @@ def imdb_details(query: str) -> dict[str, Any] | None:
     if not imdb_id or not _IMDB_ID_RE.fullmatch(imdb_id):
         return None
     url = f"{IMDB_BASE_URL}/title/{imdb_id}/"
-    html_text = _fetch(url)
-    _ensure_not_blocked(html_text, "IMDB")
+    html_text = _fetch(url, debug_sink=debug_sink, debug_label="imdb title")
+    _ensure_not_blocked(
+        html_text, "IMDB", debug_sink=debug_sink, debug_label="imdb blocked"
+    )
     ld = _parse_ldjson(html_text) or {}
 
     title = ld.get("name") or first.get("l") or first.get("title") or imdb_id
@@ -200,20 +227,22 @@ def imdb_details(query: str) -> dict[str, Any] | None:
     }
 
 
-def imdb_trending(kind: str) -> list[dict[str, Any]]:
+def imdb_trending(kind: str, debug_sink=None) -> list[dict[str, Any]]:
     if kind == "shows":
         url = f"{IMDB_BASE_URL}/chart/tvmeter/"
     else:
         url = f"{IMDB_BASE_URL}/chart/moviemeter/"
-    html_text = _fetch(url)
-    _ensure_not_blocked(html_text, "IMDB")
+    html_text = _fetch(url, debug_sink=debug_sink, debug_label="imdb trending")
+    _ensure_not_blocked(
+        html_text, "IMDB", debug_sink=debug_sink, debug_label="imdb blocked"
+    )
     results = _imdb_trending_from_ldjson(html_text)
     if results:
         return results[:10]
     return _imdb_trending_from_table(html_text)
 
 
-def rt_trending(kind: str) -> list[dict[str, Any]]:
+def rt_trending(kind: str, debug_sink=None) -> list[dict[str, Any]]:
     api_paths = [
         "/napi/browse/tv_series_browse"
         if kind == "shows"
@@ -225,25 +254,42 @@ def rt_trending(kind: str) -> list[dict[str, Any]]:
     for path in api_paths:
         url = f"{RT_BASE_URL}{path}"
         try:
-            text = _fetch(url, accept="application/json")
+            text = _fetch(
+                url,
+                accept="application/json",
+                debug_sink=debug_sink,
+                debug_label="rt trending api",
+            )
             data = json.loads(text)
             items = _rt_extract_items(data)
             if items:
                 return items
         except Exception as exc:
-            _ = exc
+            if debug_sink:
+                debug_sink(f"rt trending api failed: {url}", str(exc))
 
     browse_path = (
         "/browse/tv_series_browse" if kind == "shows" else "/browse/movies_in_theaters"
     )
-    html_text = _fetch(f"{RT_BASE_URL}{browse_path}")
-    _ensure_not_blocked(html_text, "Rotten Tomatoes")
+    html_text = _fetch(
+        f"{RT_BASE_URL}{browse_path}",
+        debug_sink=debug_sink,
+        debug_label="rt trending page",
+    )
+    _ensure_not_blocked(
+        html_text,
+        "Rotten Tomatoes",
+        debug_sink=debug_sink,
+        debug_label="rt blocked",
+    )
     try:
         data = _rt_extract_next_data(html_text)
         items = _rt_extract_items(data)
         if items:
             return items
     except Exception as exc:
+        if debug_sink:
+            debug_sink("rt trending next data parse failed", str(exc))
         logger.debug("rt trending next data parse failed: %s", exc)
 
     items = _rt_extract_tiles(html_text)
@@ -305,13 +351,18 @@ def _rt_extract_items(payload: Any) -> list[dict[str, Any]]:
     return deduped
 
 
-def rt_search(query: str) -> list[dict[str, Any]]:
+def rt_search(query: str, debug_sink=None) -> list[dict[str, Any]]:
     q = (query or "").strip()
     if not q:
         return []
     url = f"{RT_BASE_URL}/napi/search/?query={requests.utils.quote(q)}"
     try:
-        text = _fetch(url, accept="application/json")
+        text = _fetch(
+            url,
+            accept="application/json",
+            debug_sink=debug_sink,
+            debug_label="rt search api",
+        )
         data = json.loads(text)
     except Exception:
         data = None
@@ -335,14 +386,25 @@ def rt_search(query: str) -> list[dict[str, Any]]:
         if results:
             return results
 
-    html_text = _fetch(f"{RT_BASE_URL}/search?search={requests.utils.quote(q)}")
-    _ensure_not_blocked(html_text, "Rotten Tomatoes")
+    html_text = _fetch(
+        f"{RT_BASE_URL}/search?search={requests.utils.quote(q)}",
+        debug_sink=debug_sink,
+        debug_label="rt search page",
+    )
+    _ensure_not_blocked(
+        html_text,
+        "Rotten Tomatoes",
+        debug_sink=debug_sink,
+        debug_label="rt blocked",
+    )
     try:
         data = _rt_extract_next_data(html_text)
         results = _rt_extract_search_items(data)
         if results:
             return results[:10]
     except Exception as exc:
+        if debug_sink:
+            debug_sink("rt search next data parse failed", str(exc))
         logger.debug("rt search next data parse failed: %s", exc)
 
     results = _rt_search_algolia(q, html_text)
@@ -351,17 +413,28 @@ def rt_search(query: str) -> list[dict[str, Any]]:
     return results[:10]
 
 
-def rt_random_critic_quote(url_path: str) -> str | None:
+def rt_random_critic_quote(url_path: str, debug_sink=None) -> str | None:
     if not url_path:
         return None
     if not url_path.startswith("/"):
         url_path = f"/{url_path}"
     reviews_url = f"{RT_BASE_URL}{url_path}/reviews?type=top_critics"
     try:
-        html_text = _fetch(reviews_url)
+        html_text = _fetch(
+            reviews_url, debug_sink=debug_sink, debug_label="rt reviews page"
+        )
     except Exception:
-        html_text = _fetch(f"{RT_BASE_URL}{url_path}")
-    _ensure_not_blocked(html_text, "Rotten Tomatoes")
+        html_text = _fetch(
+            f"{RT_BASE_URL}{url_path}",
+            debug_sink=debug_sink,
+            debug_label="rt title page",
+        )
+    _ensure_not_blocked(
+        html_text,
+        "Rotten Tomatoes",
+        debug_sink=debug_sink,
+        debug_label="rt blocked",
+    )
 
     quotes = []
     for regex in (_RT_REVIEW_TEXT_RE, _RT_REVIEW_ALT_RE):
@@ -377,13 +450,15 @@ def rt_random_critic_quote(url_path: str) -> str | None:
     return None
 
 
-def _imdb_search_fallback(query: str) -> list[dict[str, Any]]:
+def _imdb_search_fallback(query: str, debug_sink=None) -> list[dict[str, Any]]:
     q = (query or "").strip()
     if not q:
         return []
     url = f"{IMDB_BASE_URL}/find/?q={requests.utils.quote(q)}&s=tt"
-    html_text = _fetch(url)
-    _ensure_not_blocked(html_text, "IMDB")
+    html_text = _fetch(url, debug_sink=debug_sink, debug_label="imdb search")
+    _ensure_not_blocked(
+        html_text, "IMDB", debug_sink=debug_sink, debug_label="imdb blocked"
+    )
     match = _IMDB_FIND_RE.search(html_text)
     if not match:
         return []
@@ -510,7 +585,8 @@ def _rt_extract_next_data(html_text: str) -> dict[str, Any]:
         bool(_RT_DATA_PAGE_RE.search(html_text)),
         any(marker in html_text for marker in _RT_STATE_MARKERS),
     )
-    raise RuntimeError("Rotten Tomatoes page missing next data")
+    snippet = html_text[:500].replace("\n", " ")
+    raise RuntimeError(f"Rotten Tomatoes page missing next data: {snippet}")
 
 
 def _rt_extract_search_items(data: dict[str, Any]) -> list[dict[str, Any]]:

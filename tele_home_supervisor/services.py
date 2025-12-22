@@ -39,6 +39,10 @@ async def healthcheck_container(container_name: str) -> str:
     return await utils.healthcheck_container(container_name)
 
 
+async def get_container_inspect(container_name: str) -> dict:
+    return await utils.get_container_inspect(container_name)
+
+
 async def get_uptime_info() -> str:
     return await utils.get_uptime_info()
 
@@ -77,24 +81,24 @@ async def piratebay_search(query: str, debug_sink=None) -> list[dict[str, object
     return await asyncio.to_thread(piratebay.search, query, debug_sink)
 
 
-async def imdb_details(query: str) -> dict[str, object] | None:
-    return await asyncio.to_thread(media.imdb_details, query)
+async def imdb_details(query: str, debug_sink=None) -> dict[str, object] | None:
+    return await asyncio.to_thread(media.imdb_details, query, debug_sink)
 
 
-async def imdb_trending(kind: str) -> list[dict[str, object]]:
-    return await asyncio.to_thread(media.imdb_trending, kind)
+async def imdb_trending(kind: str, debug_sink=None) -> list[dict[str, object]]:
+    return await asyncio.to_thread(media.imdb_trending, kind, debug_sink)
 
 
-async def rt_trending(kind: str) -> list[dict[str, object]]:
-    return await asyncio.to_thread(media.rt_trending, kind)
+async def rt_trending(kind: str, debug_sink=None) -> list[dict[str, object]]:
+    return await asyncio.to_thread(media.rt_trending, kind, debug_sink)
 
 
-async def rt_search(query: str) -> list[dict[str, object]]:
-    return await asyncio.to_thread(media.rt_search, query)
+async def rt_search(query: str, debug_sink=None) -> list[dict[str, object]]:
+    return await asyncio.to_thread(media.rt_search, query, debug_sink)
 
 
-async def rt_random_critic_quote(url_path: str) -> str | None:
-    return await asyncio.to_thread(media.rt_random_critic_quote, url_path)
+async def rt_random_critic_quote(url_path: str, debug_sink=None) -> str | None:
+    return await asyncio.to_thread(media.rt_random_critic_quote, url_path, debug_sink)
 
 
 # Torrent helpers (Sync wrappers)

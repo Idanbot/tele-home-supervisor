@@ -68,6 +68,14 @@ _DOCKER_COMMANDS = (
         "cmd_docker",
     ),
     CommandSpec(
+        "dinspect",
+        "Docker",
+        "/dinspect <container>",
+        "inspect container (JSON, file if large)",
+        "cmd_dinspect",
+        needs="container",
+    ),
+    CommandSpec(
         "dockerstats",
         "Docker",
         "/dockerstats",
@@ -85,7 +93,7 @@ _DOCKER_COMMANDS = (
         "dlogs",
         "Docker",
         "/dlogs <container> [page] [--since <time>] [--file]",
-        "container logs with pagination/filtering",
+        "container logs (default sends file; use page for pagination)",
         "cmd_dlogs",
         needs="container",
     ),

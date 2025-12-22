@@ -78,9 +78,10 @@ work inside the container.
 | Command | Description |
 |---------|-------------|
 | `/docker [page]` | List containers with interactive buttons (optional page) |
+| `/dinspect <container>` | Docker inspect (JSON, sent as file if large) |
 | `/dockerstats` | CPU/memory per container |
 | `/dstatsrich` | Detailed stats with network/block IO |
-| `/dlogs <container> [page] [--since <time>] [--file]` | Container logs with pagination (50 lines) |
+| `/dlogs <container> [page] [--since <time>] [--file]` | Container logs (default sends file; pagination is 50 lines) |
 | `/dhealth <container>` | Health check status |
 | `/ports` | Listening ports inside the bot container |
 
