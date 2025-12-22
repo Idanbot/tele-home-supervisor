@@ -114,6 +114,27 @@ def render_container_list(containers: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def render_container_list_page(
+    containers: list[dict], page: int, total_pages: int
+) -> str:
+    if not containers:
+        return "<i>No containers found.</i>"
+
+    page_label = f"Containers (page {page + 1}/{max(total_pages, 1)}):"
+    lines = [bold(page_label)]
+    for c in containers:
+        if "error" in c:
+            lines.append(f"{code(c.get('name', 'unknown'))} • error")
+            continue
+
+        name = code(c["name"])
+        image = code(c["image"])
+        status = html.escape(c["status"])
+        ports = html.escape(c["ports"])
+        lines.append(f"{name} • {status} • {image} • {ports}")
+    return "\n".join(lines)
+
+
 def render_container_stats(stats: list[dict]) -> str:
     if not stats:
         return "<i>No running containers.</i>"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import math
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -15,11 +16,22 @@ from .common import allowed, get_state
 
 logger = logging.getLogger(__name__)
 
+DOCKER_PAGE_SIZE = 8
 
-def build_docker_keyboard(containers: list[str]) -> InlineKeyboardMarkup:
+
+def normalize_docker_page(total_items: int, page: int) -> tuple[int, int]:
+    total_pages = max(1, math.ceil(total_items / DOCKER_PAGE_SIZE))
+    page = max(0, min(page, total_pages - 1))
+    return page, total_pages
+
+
+def build_docker_keyboard(containers: list[str], page: int = 0) -> InlineKeyboardMarkup:
     """Build inline keyboard with container action buttons."""
-    buttons = []
-    for name in containers[:8]:
+    buttons: list[list[InlineKeyboardButton]] = []
+    page, total_pages = normalize_docker_page(len(containers), page)
+    start = page * DOCKER_PAGE_SIZE
+    end = start + DOCKER_PAGE_SIZE
+    for name in containers[start:end]:
         buttons.append(
             [
                 InlineKeyboardButton(
@@ -29,7 +41,25 @@ def build_docker_keyboard(containers: list[str]) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("📊", callback_data=f"dstats:{name[:30]}"),
             ]
         )
-    buttons.append([InlineKeyboardButton("🔄 Refresh", callback_data="docker:refresh")])
+    if total_pages > 1:
+        nav_row = []
+        if page > 0:
+            nav_row.append(
+                InlineKeyboardButton("⬅️ Prev", callback_data=f"docker:page:{page - 1}")
+            )
+        nav_row.append(
+            InlineKeyboardButton(
+                f"📄 {page + 1}/{total_pages}", callback_data="docker:noop"
+            )
+        )
+        if page + 1 < total_pages:
+            nav_row.append(
+                InlineKeyboardButton("Next ➡️", callback_data=f"docker:page:{page + 1}")
+            )
+        buttons.append(nav_row)
+    buttons.append(
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f"docker:refresh:{page}")]
+    )
     return InlineKeyboardMarkup(buttons)
 
 
@@ -95,7 +125,15 @@ async def handle_callback_query(update, context) -> None:
             container = data[7:]
             await _handle_dstats_callback(query, context, container)
         elif data == "docker:refresh":
-            await _handle_docker_refresh(query, context)
+            await _handle_docker_refresh(query, context, 0)
+        elif data.startswith("docker:refresh:"):
+            page = _parse_page(data, "docker:refresh:")
+            await _handle_docker_refresh(query, context, page)
+        elif data.startswith("docker:page:"):
+            page = _parse_page(data, "docker:page:")
+            await _handle_docker_page(query, context, page)
+        elif data == "docker:noop":
+            return
         elif data.startswith("tstop:"):
             torrent_hash = data[6:]
             await _handle_torrent_stop(query, context, torrent_hash)
@@ -176,19 +214,43 @@ async def _handle_dstats_callback(query, context, container: str) -> None:
     await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def _handle_docker_refresh(query, context) -> None:
+async def _handle_docker_refresh(query, context, page: int) -> None:
+    await _update_docker_message(query, context, page=page, refresh=True)
+
+
+def _parse_page(data: str, prefix: str) -> int:
+    token = data[len(prefix) :].strip()
+    try:
+        return max(int(token), 0)
+    except ValueError:
+        return 0
+
+
+async def _update_docker_message(query, context, page: int, refresh: bool) -> None:
     state: BotState = get_state(context.application)
-    await state.refresh_containers()
+    if refresh:
+        await state.refresh_containers()
+    else:
+        await state.maybe_refresh("containers")
 
     containers = await services.list_containers()
-    msg = view.render_container_list(containers)
+    containers_sorted = sorted(containers, key=lambda item: str(item.get("name", "")))
+    page, total_pages = normalize_docker_page(len(containers_sorted), page)
+    start = page * DOCKER_PAGE_SIZE
+    end = start + DOCKER_PAGE_SIZE
+    page_containers = containers_sorted[start:end]
+    msg = view.render_container_list_page(page_containers, page, total_pages)
 
-    container_names = list(state.get_cached("containers"))
-    keyboard = build_docker_keyboard(container_names)
+    container_names = [c.get("name", "") for c in containers_sorted if c.get("name")]
+    keyboard = build_docker_keyboard(container_names, page=page)
 
     await query.edit_message_text(
         msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
     )
+
+
+async def _handle_docker_page(query, context, page: int) -> None:
+    await _update_docker_message(query, context, page=page, refresh=False)
 
 
 async def _handle_torrent_stop(query, context, torrent_hash: str) -> None:

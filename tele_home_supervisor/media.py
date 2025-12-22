@@ -21,6 +21,11 @@ RT_BASE_URL = os.environ.get("RT_BASE_URL", "https://www.rottentomatoes.com").rs
 RT_ALGOLIA_APP_ID = os.environ.get("RT_ALGOLIA_APP_ID", "")
 RT_ALGOLIA_API_KEY = os.environ.get("RT_ALGOLIA_API_KEY", "")
 RT_ALGOLIA_INDEX = os.environ.get("RT_ALGOLIA_INDEX", "")
+MEDIA_USER_AGENT = os.environ.get(
+    "MEDIA_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+)
 
 _IMDB_SUGGEST_URL = "https://v2.sg.media-imdb.com/suggestion"
 
@@ -44,6 +49,9 @@ _RT_DATA_JSON_RE = re.compile(r'data-json="([^"]+)"', re.IGNORECASE)
 _RT_DATA_PAGE_RE = re.compile(r'data-page="([^"]+)"', re.IGNORECASE)
 _RT_STATE_MARKERS = ("window.__INITIAL_STATE__", "window.__PRELOADED_STATE__")
 _RT_TILE_RE = re.compile(r"<tile-dynamic[^>]+>", re.IGNORECASE)
+_RT_TILE_GENERIC_RE = re.compile(
+    r"<[^>]+data-title=\"[^\"]+\"[^>]+data-url=\"[^\"]+\"[^>]*>", re.IGNORECASE
+)
 _RT_ATTR_RE = re.compile(r'([a-zA-Z0-9_-]+)="([^"]+)"')
 _RT_ALGOLIA_APP_RE = re.compile(r'algoliaAppId["\']\s*:\s*["\']([^"\']+)')
 _RT_ALGOLIA_KEY_RE = re.compile(r'algoliaApiKey["\']\s*:\s*["\']([^"\']+)')
@@ -62,9 +70,14 @@ _RT_CONSENSUS_RE = re.compile(
 
 def _fetch(url: str, accept: str = "text/html") -> str:
     headers = {
-        "User-Agent": "tele-home-supervisor/1.0",
+        "User-Agent": MEDIA_USER_AGENT,
         "Accept": accept,
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
+    if "text/html" in accept:
+        headers["Upgrade-Insecure-Requests"] = "1"
     resp = requests.get(url, headers=headers, timeout=12)
     resp.raise_for_status()
     return resp.text
@@ -522,7 +535,10 @@ def _rt_extract_search_items(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _rt_extract_tiles(html_text: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for tag in _RT_TILE_RE.findall(html_text):
+    tags = _RT_TILE_RE.findall(html_text)
+    if not tags:
+        tags = _RT_TILE_GENERIC_RE.findall(html_text)
+    for tag in tags:
         attrs = dict(_RT_ATTR_RE.findall(tag))
         title = attrs.get("data-title") or attrs.get("title") or ""
         url = attrs.get("data-url") or attrs.get("data-href") or ""
@@ -555,7 +571,7 @@ def _rt_search_algolia(query: str, html_text: str) -> list[dict[str, Any]]:
         "X-Algolia-API-Key": api_key,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "tele-home-supervisor/1.0",
+        "User-Agent": MEDIA_USER_AGENT,
     }
     body = {"params": f"query={requests.utils.quote(query)}&hitsPerPage=10"}
     try:

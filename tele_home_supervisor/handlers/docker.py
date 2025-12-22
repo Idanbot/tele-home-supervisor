@@ -7,7 +7,7 @@ from telegram.constants import ParseMode
 from .. import services, view
 from ..state import BotState
 from .common import guard_sensitive, get_state, reply_usage_with_suggestions
-from .callbacks import build_docker_keyboard
+from .callbacks import DOCKER_PAGE_SIZE, build_docker_keyboard, normalize_docker_page
 
 logger = logging.getLogger(__name__)
 
@@ -16,19 +16,29 @@ async def cmd_docker(update, context) -> None:
     if not await guard_sensitive(update, context):
         return
     state = get_state(context.application)
+    page = 0
+    if context.args and context.args[0].isdigit():
+        page = max(int(context.args[0]) - 1, 0)
     try:
         await state.refresh_containers()
     except Exception as e:
         logger.debug("refresh_containers failed: %s", e)
 
     containers = await services.list_containers()
-    msg = view.render_container_list(containers)
+    containers_sorted = sorted(containers, key=lambda item: str(item.get("name", "")))
+    page, total_pages = normalize_docker_page(len(containers_sorted), page)
+    start = page * DOCKER_PAGE_SIZE
+    end = start + DOCKER_PAGE_SIZE
+    page_containers = containers_sorted[start:end]
+    msg = view.render_container_list_page(page_containers, page, total_pages)
 
     # Get container names for inline keyboard
-    container_names = list(state.get_cached("containers"))
+    container_names = sorted(state.get_cached("containers"))
 
     # Build inline keyboard if we have containers
-    keyboard = build_docker_keyboard(container_names) if container_names else None
+    keyboard = (
+        build_docker_keyboard(container_names, page=page) if container_names else None
+    )
 
     parts = view.chunk(msg)
     for i, part in enumerate(parts):
