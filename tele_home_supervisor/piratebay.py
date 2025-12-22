@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import html
+import logging
 import os
 import re
 from typing import Iterable
 
 import requests
 
+logger = logging.getLogger(__name__)
 BASE_URL = os.environ.get("TPB_BASE_URL", "https://thepiratebay.org").rstrip("/")
+TPB_API_BASE_URL = os.environ.get("TPB_API_BASE_URL", "https://apibay.org").rstrip("/")
+TPB_API_BASE_URLS = os.environ.get("TPB_API_BASE_URLS", "")
+TPB_USER_AGENT = os.environ.get(
+    "TPB_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+)
+TPB_COOKIE = os.environ.get("TPB_COOKIE", "")
+TPB_REFERER = os.environ.get("TPB_REFERER", "")
 
 CATEGORY_ALIASES: dict[str, int] = {
     "audio": 100,
@@ -34,6 +45,15 @@ _NO_RESULTS_RE = re.compile(
     r"no results returned|no matches found|no results", re.IGNORECASE
 )
 
+_TRACKERS = [
+    "udp://tracker.openbittorrent.com:80/announce",
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.stealth.si:80/announce",
+]
+_NO_RESULTS_RE = re.compile(
+    r"no results returned|no matches found|no results", re.IGNORECASE
+)
+
 
 def category_help() -> str:
     return "audio, video, apps, games, porn, other"
@@ -51,13 +71,39 @@ def resolve_category(value: str | None) -> int | None:
 
 
 def _fetch(url: str) -> str:
+    logger.debug("piratebay fetch html: %s", url)
     headers = {
-        "User-Agent": "tele-home-supervisor/1.0",
-        "Accept": "text/html",
+        "User-Agent": TPB_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Upgrade-Insecure-Requests": "1",
     }
+    if TPB_REFERER:
+        headers["Referer"] = TPB_REFERER
+    if TPB_COOKIE:
+        headers["Cookie"] = TPB_COOKIE
     resp = requests.get(url, headers=headers, timeout=12)
     resp.raise_for_status()
     return resp.text
+
+
+def _fetch_json(url: str) -> list[dict[str, object]]:
+    logger.debug("piratebay fetch json: %s", url)
+    headers = {
+        "User-Agent": TPB_USER_AGENT,
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+    resp = requests.get(url, headers=headers, timeout=12)
+    resp.raise_for_status()
+    data = resp.json()
+    if isinstance(data, list):
+        return data
+    return []
 
 
 def _ensure_not_blocked(html_text: str) -> None:
@@ -68,6 +114,8 @@ def _ensure_not_blocked(html_text: str) -> None:
         "attention required",
         "captcha",
         "access denied",
+        "enable javascript",
+        "please enable",
     )
     lower = html_text.lower()
     if any(marker in lower for marker in markers):
@@ -112,15 +160,85 @@ def _top_n(
     return sorted(results, key=lambda r: int(r.get("seeders", 0)), reverse=True)[:n]
 
 
+def _magnet_from_hash(info_hash: str, name: str) -> str:
+    dn = requests.utils.quote(name, safe="")
+    trackers = "".join(f"&tr={requests.utils.quote(t, safe='')}" for t in _TRACKERS)
+    return f"magnet:?xt=urn:btih:{info_hash}&dn={dn}{trackers}"
+
+
+def _api_to_results(items: list[dict[str, object]]) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        info_hash = str(item.get("info_hash") or "").strip()
+        if not name or not info_hash:
+            continue
+        try:
+            seeders = int(item.get("seeders") or 0)
+            leechers = int(item.get("leechers") or 0)
+        except ValueError:
+            continue
+        results.append(
+            {
+                "name": name,
+                "magnet": _magnet_from_hash(info_hash, name),
+                "seeders": seeders,
+                "leechers": leechers,
+            }
+        )
+    return results
+
+
+def _api_top(category: str | None) -> list[dict[str, object]]:
+    cat = resolve_category(category) or 0
+    for base in _api_base_candidates():
+        url = f"{base}/precompiled/data_top100_{cat}.json"
+        try:
+            items = _fetch_json(url)
+        except Exception as exc:
+            logger.debug("piratebay api top failed for %s: %s", base, exc)
+            continue
+        results = _top_n(_api_to_results(items), 10)
+        if results:
+            return results
+    return []
+
+
+def _api_search(query: str, category: str | None = None) -> list[dict[str, object]]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    cat = resolve_category(category) or 0
+    for base in _api_base_candidates():
+        url = f"{base}/q.php?q={requests.utils.quote(q)}&cat={cat}"
+        try:
+            items = _fetch_json(url)
+        except Exception as exc:
+            logger.debug("piratebay api search failed for %s: %s", base, exc)
+            continue
+        results = _top_n(_api_to_results(items), 10)
+        if results:
+            return results
+    return []
+
+
 def top(category: str | None) -> list[dict[str, object]]:
     cat = resolve_category(category)
     if cat is None:
         url = f"{BASE_URL}/top/0"
     else:
         url = f"{BASE_URL}/top/{cat}"
-    html_text = _fetch(url)
-    _ensure_not_blocked(html_text)
-    results = _top_n(_parse_rows(html_text), 10)
+    try:
+        html_text = _fetch(url)
+        _ensure_not_blocked(html_text)
+        results = _top_n(_parse_rows(html_text), 10)
+        if results:
+            return results
+    except Exception as exc:
+        _ = exc
+    results = _api_top(category)
     if not results:
         raise RuntimeError("Pirate Bay top parse failed")
     return results
@@ -132,11 +250,42 @@ def search(query: str) -> list[dict[str, object]]:
         return []
     q_escaped = requests.utils.quote(q, safe="")
     url = f"{BASE_URL}/search/{q_escaped}/0/99/0"
-    html_text = _fetch(url)
-    _ensure_not_blocked(html_text)
-    results = _top_n(_parse_rows(html_text), 10)
-    if not results and _is_no_results(html_text):
-        return []
-    if not results:
-        raise RuntimeError("Pirate Bay search parse failed")
-    return results
+    try:
+        html_text = _fetch(url)
+        _ensure_not_blocked(html_text)
+        results = _top_n(_parse_rows(html_text), 10)
+        if results:
+            logger.debug("piratebay search html results: %s", len(results))
+            return results
+        if _is_no_results(html_text):
+            logger.debug("piratebay search html no results")
+            return []
+        logger.debug("piratebay search html parse empty; falling back to api")
+    except Exception as exc:
+        logger.debug("piratebay search html failed: %s", exc)
+
+    results = _api_search(q)
+    if results:
+        logger.debug("piratebay search api results: %s", len(results))
+        return results
+    logger.debug("piratebay search api empty")
+    raise RuntimeError("Pirate Bay search parse failed")
+
+
+def _api_base_candidates() -> list[str]:
+    bases: list[str] = []
+    if TPB_API_BASE_URLS:
+        for part in TPB_API_BASE_URLS.split(","):
+            b = part.strip().rstrip("/")
+            if b and b not in bases:
+                bases.append(b)
+    if TPB_API_BASE_URL and TPB_API_BASE_URL not in bases:
+        bases.append(TPB_API_BASE_URL)
+    expanded: list[str] = []
+    for base in bases:
+        expanded.append(base)
+        if base.startswith("https://"):
+            http_base = "http://" + base[len("https://") :]
+            if http_base not in expanded:
+                expanded.append(http_base)
+    return expanded

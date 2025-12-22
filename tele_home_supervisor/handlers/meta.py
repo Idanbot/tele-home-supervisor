@@ -10,7 +10,7 @@ from telegram.constants import ParseMode
 from .. import config, services, view
 from ..background import ensure_started
 from ..commands import COMMANDS, GROUP_ORDER
-from .common import get_state, guard, guard_sensitive
+from .common import auth_ttl_seconds, get_state, guard, guard_sensitive
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +121,9 @@ async def cmd_auth(update, context) -> None:
         return
     state = get_state(context.application)
     user_id = update.effective_user.id
-    expiry = time.monotonic() + (15 * 60)
+    expiry = time.monotonic() + auth_ttl_seconds()
     state.auth_grants[user_id] = expiry
-    await update.message.reply_text("✅ Authorized for 15 minutes.")
+    await update.message.reply_text("✅ Authorized for 24 hours.")
 
 
 async def cmd_metrics(update, context) -> None:

@@ -41,7 +41,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
         (),
         "Info",
         "/auth <code>",
-        "authorize sensitive commands for 15 minutes",
+        "authorize sensitive commands for 24 hours",
         handler="cmd_auth",
     ),
     CommandSpec(

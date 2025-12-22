@@ -156,6 +156,7 @@ Categories for `/pbtop`: audio, video, apps, games, porn, other.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RATE_LIMIT_S` | `1.0` | Command rate limit in seconds |
+| `LOG_LEVEL` | `INFO` | Logging level (e.g. DEBUG, INFO, WARNING) |
 | `SHOW_WAN` | `false` | Include WAN IP in `/health` |
 | `WATCH_PATHS` | `/,/srv/media` | Paths for disk usage reporting |
 | `QBT_HOST` | `qbittorrent` | qBittorrent hostname |
@@ -166,7 +167,9 @@ Categories for `/pbtop`: audio, video, apps, games, porn, other.
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
 | `OLLAMA_MODEL` | `llama2` | Default model for AI queries |
 | `BOT_AUTH_TOTP_SECRET` | (none) | Base32 TOTP seed for `/auth` (Google Authenticator) |
-| `TPB_BASE_URL` | `https://thepiratebay.org` | Pirate Bay base URL (mirror override) |
+| `TPB_BASE_URL` | `https://thepiratebay.org` | Pirate Bay HTML base URL (mirror override) |
+| `TPB_API_BASE_URL` | `https://apibay.org` | Pirate Bay API base URL (fallback) |
+| `TPB_API_BASE_URLS` | (none) | Comma-separated Pirate Bay API mirrors (tried in order) |
 | `IMDB_BASE_URL` | `https://www.imdb.com` | IMDB base URL (mirror override) |
 | `RT_BASE_URL` | `https://www.rottentomatoes.com` | Rotten Tomatoes base URL |
 

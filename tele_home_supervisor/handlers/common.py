@@ -25,7 +25,12 @@ _last_command_ts = 0.0
 # We use a simple timestamp check. Since we are in asyncio,
 # strictly speaking race conditions are only possible at await points.
 # A simple float comparison is atomic enough for this use case.
-_AUTH_TTL_S = 15 * 60
+_DAY_S = 24 * 60 * 60  # 24 hours
+_AUTH_TTL_S = _DAY_S
+
+
+def auth_ttl_seconds() -> int:
+    return _AUTH_TTL_S
 
 
 def get_state(app) -> BotState:
@@ -112,7 +117,7 @@ async def guard_sensitive(
         return True
     if update and update.effective_chat:
         await update.effective_chat.send_message(
-            "🔒 Please authenticate with /auth <secret> (valid for 15 minutes)."
+            "🔒 Please authenticate with /auth <secret> (valid for 24 hours)."
         )
     return False
 

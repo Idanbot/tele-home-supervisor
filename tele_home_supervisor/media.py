@@ -34,6 +34,10 @@ _RT_NEXT_DATA_RE = re.compile(
     r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>',
     re.IGNORECASE | re.DOTALL,
 )
+_RT_DATA_JSON_RE = re.compile(r'data-json="([^"]+)"', re.IGNORECASE)
+_RT_DATA_PAGE_RE = re.compile(r'data-page="([^"]+)"', re.IGNORECASE)
+_RT_STATE_MARKERS = ("window.__INITIAL_STATE__", "window.__PRELOADED_STATE__")
+_RT_DATA_JSON_RE = re.compile(r'data-json="([^"]+)"', re.IGNORECASE)
 
 _RT_REVIEW_TEXT_RE = re.compile(
     r'data-qa="review-text"[^>]*>(.*?)</', re.IGNORECASE | re.DOTALL
@@ -70,6 +74,10 @@ def _ensure_not_blocked(html_text: str, source: str) -> None:
         "attention required",
         "captcha",
         "access denied",
+        "enable javascript",
+        "please enable",
+        "are you a human",
+        "automated access",
     )
     lower = html_text.lower()
     if any(marker in lower for marker in markers):
@@ -169,19 +177,24 @@ def imdb_trending(kind: str) -> list[dict[str, Any]]:
 
 
 def rt_trending(kind: str) -> list[dict[str, Any]]:
-    if kind == "shows":
-        path = "/napi/browse/tv_series_browse"
-    else:
-        path = "/napi/browse/movies_in_theaters"
-    url = f"{RT_BASE_URL}{path}?page=1"
-    try:
-        text = _fetch(url, accept="application/json")
-        data = json.loads(text)
-        items = _rt_extract_items(data)
-        if items:
-            return items
-    except Exception as exc:
-        _ = exc
+    api_paths = [
+        "/napi/browse/tv_series_browse"
+        if kind == "shows"
+        else "/napi/browse/movies_in_theaters",
+        "/napi/browse/tv_series_browse?page=1"
+        if kind == "shows"
+        else "/napi/browse/movies_in_theaters?page=1",
+    ]
+    for path in api_paths:
+        url = f"{RT_BASE_URL}{path}"
+        try:
+            text = _fetch(url, accept="application/json")
+            data = json.loads(text)
+            items = _rt_extract_items(data)
+            if items:
+                return items
+        except Exception as exc:
+            _ = exc
 
     browse_path = (
         "/browse/tv_series_browse" if kind == "shows" else "/browse/movies_in_theaters"
@@ -373,15 +386,81 @@ def _imdb_trending_from_table(html_text: str) -> list[dict[str, Any]]:
     return results
 
 
+def _extract_json_object(text: str, start_idx: int) -> str | None:
+    brace_idx = text.find("{", start_idx)
+    if brace_idx == -1:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(brace_idx, len(text)):
+        ch = text[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[brace_idx : i + 1]
+    return None
+
+
 def _rt_extract_next_data(html_text: str) -> dict[str, Any]:
     match = _RT_NEXT_DATA_RE.search(html_text)
-    if not match:
-        raise RuntimeError("Rotten Tomatoes page missing next data")
-    payload = match.group(1).strip()
-    try:
-        return json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Rotten Tomatoes next data parse failed") from exc
+    if match:
+        payload = match.group(1).strip()
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Rotten Tomatoes next data parse failed") from exc
+
+    data_match = _RT_DATA_JSON_RE.search(html_text)
+    if data_match:
+        payload = html.unescape(data_match.group(1))
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Rotten Tomatoes data-json parse failed") from exc
+
+    page_match = _RT_DATA_PAGE_RE.search(html_text)
+    if page_match:
+        payload = html.unescape(page_match.group(1))
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Rotten Tomatoes data-page parse failed") from exc
+
+    for marker in _RT_STATE_MARKERS:
+        idx = html_text.find(marker)
+        if idx == -1:
+            continue
+        payload = _extract_json_object(html_text, idx)
+        if not payload:
+            continue
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Rotten Tomatoes state parse failed") from exc
+
+    data_match = _RT_DATA_JSON_RE.search(html_text)
+    if data_match:
+        payload = html.unescape(data_match.group(1))
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Rotten Tomatoes data-json parse failed") from exc
+
+    raise RuntimeError("Rotten Tomatoes page missing next data")
 
 
 def _rt_extract_search_items(data: dict[str, Any]) -> list[dict[str, Any]]:
