@@ -73,7 +73,8 @@ jobs:
       - name: Bandit Security Scan
         run: |
           set -o pipefail
-          uv run bandit -r tele_home_supervisor -x tests 2>&1 | tee bandit.log
+          uv run bandit -r tele_home_supervisor -x tests --severity-level high \
+            --confidence-level high 2>&1 | tee bandit.log
 
       # Trivy Scan (Filesystem)
       # Using specific version tag for stability

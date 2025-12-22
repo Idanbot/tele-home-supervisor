@@ -1,6 +1,9 @@
 import pytest
 
 from tele_home_supervisor.handlers import callbacks, docker
+from tele_home_supervisor.handlers.common import get_state
+from tele_home_supervisor.models.cache import CacheEntry
+import time
 
 
 class DummyMessage:
@@ -60,6 +63,8 @@ async def test_dlogs_default_file(monkeypatch) -> None:
     monkeypatch.setattr(docker, "_get_log_lines", fake_logs)
     update = DummyUpdate()
     context = DummyContext(args=["svc"])
+    state = get_state(context.application)
+    state.caches["containers"] = CacheEntry(updated_at=time.monotonic(), items={"svc"})
 
     await docker.cmd_dlogs(update, context)
 
