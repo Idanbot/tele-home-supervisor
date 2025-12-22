@@ -28,6 +28,15 @@ def chunk(msg: str, size: int = 4000) -> list[str]:
     chunks: list[str] = []
     current = ""
     for line in lines:
+        if len(line) > size:
+            if current:
+                chunks.append(current)
+                current = ""
+            start = 0
+            while start < len(line):
+                chunks.append(line[start : start + size])
+                start += size
+            continue
         added_length = len(line) + (1 if current else 0)
         if len(current) + added_length > size and current:
             chunks.append(current)

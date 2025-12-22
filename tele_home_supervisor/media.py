@@ -8,6 +8,7 @@ import logging
 import os
 import secrets
 import re
+from urllib.parse import urlparse
 from typing import Any
 
 import requests
@@ -69,15 +70,28 @@ _RT_CONSENSUS_RE = re.compile(
 
 
 def _fetch(url: str, accept: str = "text/html") -> str:
+    accept_header = accept
+    if accept == "text/html":
+        accept_header = (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        )
+    elif accept == "application/json":
+        accept_header = "application/json, text/plain, */*"
+    referer = ""
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.netloc:
+        referer = f"{parsed.scheme}://{parsed.netloc}/"
     headers = {
         "User-Agent": MEDIA_USER_AGENT,
-        "Accept": accept,
+        "Accept": accept_header,
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
     if "text/html" in accept:
         headers["Upgrade-Insecure-Requests"] = "1"
+    if referer:
+        headers["Referer"] = referer
     resp = requests.get(url, headers=headers, timeout=12)
     resp.raise_for_status()
     return resp.text

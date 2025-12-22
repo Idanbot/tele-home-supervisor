@@ -9,6 +9,7 @@ import math
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 
 from .. import services, view
 from ..state import BotState
@@ -23,6 +24,15 @@ def normalize_docker_page(total_items: int, page: int) -> tuple[int, int]:
     total_pages = max(1, math.ceil(total_items / DOCKER_PAGE_SIZE))
     page = max(0, min(page, total_pages - 1))
     return page, total_pages
+
+
+async def _safe_edit_message_text(query, text: str, **kwargs) -> None:
+    try:
+        await query.edit_message_text(text, **kwargs)
+    except BadRequest as exc:
+        if "Message is not modified" in str(exc):
+            return
+        raise
 
 
 def build_docker_keyboard(containers: list[str], page: int = 0) -> InlineKeyboardMarkup:
@@ -111,7 +121,7 @@ async def handle_callback_query(update, context) -> None:
     data = query.data
 
     if not allowed(update):
-        await query.edit_message_text("⛔ Not authorized")
+        await _safe_edit_message_text(query, "⛔ Not authorized")
         return
 
     try:
@@ -152,7 +162,7 @@ async def handle_callback_query(update, context) -> None:
             key = data[len("pbmagnet:") :]
             await _handle_piratebay_magnet(query, context, key)
         else:
-            await query.edit_message_text("❓ Unknown action")
+            await _safe_edit_message_text(query, "❓ Unknown action")
     except Exception as e:
         logger.exception("Callback query error")
         try:
@@ -244,8 +254,8 @@ async def _update_docker_message(query, context, page: int, refresh: bool) -> No
     container_names = [c.get("name", "") for c in containers_sorted if c.get("name")]
     keyboard = build_docker_keyboard(container_names, page=page)
 
-    await query.edit_message_text(
-        msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
+    await _safe_edit_message_text(
+        query, msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
     )
 
 
@@ -285,8 +295,8 @@ async def _handle_torrent_refresh(query, context) -> None:
     msg = view.render_torrent_list(torrents)
     keyboard = build_torrent_keyboard(torrents)
 
-    await query.edit_message_text(
-        msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
+    await _safe_edit_message_text(
+        query, msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
     )
 
 
