@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
 from typing import Set, List
+
+from .models.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,28 +46,6 @@ def _split_paths(s: str) -> List[str]:
         ['/home', '/var/log']
     """
     return [p.strip() for p in (s or "/,/srv/media").split(",") if p.strip()]
-
-
-@dataclass
-class Settings:
-    """Configuration settings for tele_home_supervisor.
-
-    All settings are loaded from environment variables with sensible defaults.
-    """
-
-    BOT_TOKEN: str | None
-    ALLOWED_CHAT_IDS: Set[int]
-    RATE_LIMIT_S: float
-    SHOW_WAN: bool
-    WATCH_PATHS: List[str]
-    QBT_HOST: str
-    QBT_PORT: int
-    QBT_USER: str
-    QBT_PASS: str
-    QBT_TIMEOUT_S: float
-    OLLAMA_HOST: str
-    OLLAMA_MODEL: str
-    BOT_AUTH_TOTP_SECRET: str | None
 
 
 def _read_settings() -> Settings:

@@ -6,7 +6,6 @@ import asyncio
 import html
 import logging
 import time
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -15,6 +14,7 @@ from telegram.ext import Application
 
 from .state import BOT_STATE_KEY, BotState
 from .torrent import TorrentManager, fmt_bytes_compact_decimal
+from .models.torrent_snapshot import TorrentSnapshot
 from . import scheduled as scheduled_fetchers
 from .config import settings
 
@@ -25,15 +25,6 @@ _TASK_GAMEOFFERS = "gameoffers_scheduler"
 _TASK_HACKERNEWS = "hackernews_scheduler"
 _POLL_INTERVAL_S = 30.0
 _ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
-
-
-@dataclass(frozen=True)
-class TorrentSnapshot:
-    torrent_hash: str
-    name: str
-    is_complete: bool
-    total_size: int
-    downloaded: int
 
 
 def ensure_started(app: Application) -> None:

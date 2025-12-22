@@ -8,13 +8,14 @@ from __future__ import annotations
 import html
 import logging
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Callable
 from urllib.parse import quote_plus
 
 import requests
+
+from .models.scheduled_cache import ScheduledCacheEntry
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +24,8 @@ _CACHE_BASE_BACKOFF_S = 15 * 60
 _CACHE_MAX_BACKOFF_S = 6 * 60 * 60
 
 
-@dataclass
-class _CacheEntry:
-    value: object | None
-    fetched_at: float
-    error_count: int = 0
-    next_retry_at: float = 0.0
-    last_error: object | None = None
-
-
 _cache_lock = Lock()
-_cache: dict[str, _CacheEntry] = {}
+_cache: dict[str, ScheduledCacheEntry] = {}
 
 
 def _is_error_value(value: object | None) -> bool:
@@ -78,7 +70,7 @@ def _cached_fetch(
                 if entry.value is not None:
                     logger.warning("Using cached %s after fetch error: %s", key, exc)
                     return entry.value
-            _cache[key] = _CacheEntry(
+            _cache[key] = ScheduledCacheEntry(
                 value=None,
                 fetched_at=0.0,
                 error_count=error_count,
@@ -90,7 +82,7 @@ def _cached_fetch(
         raise
 
     with _cache_lock:
-        _cache[key] = _CacheEntry(value=value, fetched_at=now)
+        _cache[key] = ScheduledCacheEntry(value=value, fetched_at=now)
     return value
 
 

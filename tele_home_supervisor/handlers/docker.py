@@ -30,19 +30,19 @@ _SINCE_RE = re.compile(r"^(\d+)([smhd])$")
 
 
 def _parse_since(value: str) -> int | None:
-    token = value.strip()
-    if not token:
+    arg = value.strip()
+    if not arg:
         return None
-    if token.isdigit():
-        return int(time.time() - int(token))
-    match = _SINCE_RE.match(token.lower())
+    if arg.isdigit():
+        return int(time.time() - int(arg))
+    match = _SINCE_RE.match(arg.lower())
     if match:
         amount = int(match.group(1))
         unit = match.group(2)
         multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
         return int(time.time() - amount * multiplier)
     try:
-        parsed = datetime.fromisoformat(token)
+        parsed = datetime.fromisoformat(arg)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return int(parsed.timestamp())
@@ -62,30 +62,30 @@ def _parse_dlogs_args(
     invalid_since = False
     idx = 1
     while idx < len(args):
-        token = args[idx]
-        if token == "--file":
+        arg = args[idx]
+        if arg == "--file":
             as_file = True
             idx += 1
             continue
-        if token.startswith("--since="):
-            since_val = token.split("=", 1)[1]
+        if arg.startswith("--since="):
+            since_val = arg.split("=", 1)[1]
             since = _parse_since(since_val)
             if since is None:
                 invalid_since = True
             idx += 1
             continue
-        if token == "--since" and idx + 1 < len(args):
+        if arg == "--since" and idx + 1 < len(args):
             since = _parse_since(args[idx + 1])
             if since is None:
                 invalid_since = True
             idx += 2
             continue
-        if token == "--since":
+        if arg == "--since":
             invalid_since = True
             idx += 1
             continue
-        if token.isdigit():
-            page = max(int(token) - 1, 0)
+        if arg.isdigit():
+            page = max(int(arg) - 1, 0)
             idx += 1
             continue
         return container, None, None, as_file, invalid_since
