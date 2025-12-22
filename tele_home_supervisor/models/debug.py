@@ -20,7 +20,8 @@ class DebugRecorder:
         self._state.add_debug(command, message, details)
 
     def capture(self, command: str, message: str):
-        def _sink(details: str | None = None) -> None:
+        def _sink(detail: str | None = None, extra: str | None = None) -> None:
+            details = detail if extra is None else f"{detail} {extra}".strip()
             self._state.add_debug(command, message, details)
 
         return _sink
