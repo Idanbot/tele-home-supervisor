@@ -1,8 +1,13 @@
 from __future__ import annotations
+
+import logging
+
 from telegram.constants import ParseMode
 
 from .. import services, view
-from .common import guard_sensitive
+from .common import get_state_and_recorder, guard_sensitive, record_error
+
+logger = logging.getLogger(__name__)
 
 
 async def cmd_dns(update, context) -> None:
@@ -12,7 +17,18 @@ async def cmd_dns(update, context) -> None:
         await update.message.reply_text("Usage: /dns <name>", parse_mode=ParseMode.HTML)
         return
     name = context.args[0]
-    result = await services.dns_lookup(name)
+    _, recorder = get_state_and_recorder(context)
+    try:
+        result = await services.dns_lookup(name)
+    except Exception as e:
+        await record_error(
+            recorder,
+            "dns",
+            f"dns lookup failed for {name}",
+            e,
+            update.message.reply_text,
+        )
+        return
     # Result is already a multi-line string from utils, wrap it
     msg = f"{view.bold('DNS ' + name + ':')}\n{view.pre(result)}"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
@@ -31,7 +47,18 @@ async def cmd_traceroute(update, context) -> None:
     if len(context.args) > 1 and context.args[1].isdigit():
         max_hops = max(1, min(int(context.args[1]), 50))
 
-    result = await services.traceroute_host(host, max_hops)
+    _, recorder = get_state_and_recorder(context)
+    try:
+        result = await services.traceroute_host(host, max_hops)
+    except Exception as e:
+        await record_error(
+            recorder,
+            "traceroute",
+            f"traceroute failed for {host}",
+            e,
+            update.message.reply_text,
+        )
+        return
 
     title = f"Traceroute {host}:"
     msg = f"{view.bold(title)}\n{view.pre(result)}"
@@ -51,6 +78,11 @@ async def cmd_speedtest(update, context) -> None:
         "🏃 Running speedtest...", parse_mode=ParseMode.HTML
     )
 
-    result = await services.speedtest_download(mb)
+    _, recorder = get_state_and_recorder(context)
+    try:
+        result = await services.speedtest_download(mb)
+    except Exception as e:
+        await record_error(recorder, "speedtest", "speedtest failed", e, msg.edit_text)
+        return
     text = f"{view.bold('Speedtest (download):')}\n{result}"
     await msg.edit_text(text, parse_mode=ParseMode.HTML)

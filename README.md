@@ -80,7 +80,7 @@ work inside the container.
 | `/docker [page]` | List containers with interactive buttons (optional page) |
 | `/dockerstats` | CPU/memory per container |
 | `/dstatsrich` | Detailed stats with network/block IO |
-| `/dlogs <container> [lines]` | Container logs (use negative for head) |
+| `/dlogs <container> [page] [--since <time>] [--file]` | Container logs with pagination (50 lines) |
 | `/dhealth <container>` | Health check status |
 | `/ports` | Listening ports inside the bot container |
 
@@ -139,6 +139,7 @@ Categories for `/pbtop`: audio, music, flac, video, hdmovies, hdtv, 4kmovies,
 |---------|-------------|
 | `/auth <code>` | Authorize sensitive commands for 15 minutes |
 | `/help` | Show all commands |
+| `/debug [command]` | Show recent errors/debug info |
 | `/metrics` | Command metrics summary |
 | `/whoami` | Chat and user info |
 | `/version` | Bot version and build info |

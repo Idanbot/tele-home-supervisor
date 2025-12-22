@@ -1,21 +1,101 @@
 from __future__ import annotations
 
+import io
 import logging
+import re
+import time
+from datetime import datetime, timezone
 
 from telegram.constants import ParseMode
 
 from .. import services, view
-from ..state import BotState
-from .common import guard_sensitive, get_state, reply_usage_with_suggestions
-from .callbacks import DOCKER_PAGE_SIZE, build_docker_keyboard, normalize_docker_page
+from .common import (
+    guard_sensitive,
+    get_state_and_recorder,
+    record_error,
+    reply_usage_with_suggestions,
+)
+from .callbacks import (
+    DOCKER_PAGE_SIZE,
+    LOG_PAGE_SIZE,
+    LOG_PAGE_STEP,
+    _get_log_lines,
+    _render_logs_page,
+    build_docker_keyboard,
+    normalize_docker_page,
+)
 
 logger = logging.getLogger(__name__)
+_SINCE_RE = re.compile(r"^(\d+)([smhd])$")
+
+
+def _parse_since(value: str) -> int | None:
+    token = value.strip()
+    if not token:
+        return None
+    if token.isdigit():
+        return int(time.time() - int(token))
+    match = _SINCE_RE.match(token.lower())
+    if match:
+        amount = int(match.group(1))
+        unit = match.group(2)
+        multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+        return int(time.time() - amount * multiplier)
+    try:
+        parsed = datetime.fromisoformat(token)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
+    except ValueError:
+        return None
+
+
+def _parse_dlogs_args(
+    args: list[str],
+) -> tuple[str | None, int | None, int | None, bool, bool]:
+    if not args:
+        return None, None, None, False, False
+    container = args[0]
+    page = None
+    since = None
+    as_file = False
+    invalid_since = False
+    idx = 1
+    while idx < len(args):
+        token = args[idx]
+        if token == "--file":
+            as_file = True
+            idx += 1
+            continue
+        if token.startswith("--since="):
+            since_val = token.split("=", 1)[1]
+            since = _parse_since(since_val)
+            if since is None:
+                invalid_since = True
+            idx += 1
+            continue
+        if token == "--since" and idx + 1 < len(args):
+            since = _parse_since(args[idx + 1])
+            if since is None:
+                invalid_since = True
+            idx += 2
+            continue
+        if token == "--since":
+            invalid_since = True
+            idx += 1
+            continue
+        if token.isdigit():
+            page = max(int(token) - 1, 0)
+            idx += 1
+            continue
+        return container, None, None, as_file, invalid_since
+    return container, page, since, as_file, invalid_since
 
 
 async def cmd_docker(update, context) -> None:
     if not await guard_sensitive(update, context):
         return
-    state = get_state(context.application)
+    state, recorder = get_state_and_recorder(context)
     page = 0
     if context.args and context.args[0].isdigit():
         page = max(int(context.args[0]) - 1, 0)
@@ -23,8 +103,15 @@ async def cmd_docker(update, context) -> None:
         await state.refresh_containers()
     except Exception as e:
         logger.debug("refresh_containers failed: %s", e)
+        recorder.record("docker", "refresh_containers failed", str(e))
 
-    containers = await services.list_containers()
+    try:
+        containers = await services.list_containers()
+    except Exception as e:
+        await record_error(
+            recorder, "docker", "list_containers failed", e, update.message.reply_text
+        )
+        return
     containers_sorted = sorted(containers, key=lambda item: str(item.get("name", "")))
     page, total_pages = normalize_docker_page(len(containers_sorted), page)
     start = page * DOCKER_PAGE_SIZE
@@ -59,7 +146,18 @@ async def cmd_dockerstats(update, context) -> None:
 async def cmd_dstats_rich(update, context) -> None:
     if not await guard_sensitive(update, context):
         return
-    stats = await services.container_stats_rich()
+    _, recorder = get_state_and_recorder(context)
+    try:
+        stats = await services.container_stats_rich()
+    except Exception as e:
+        await record_error(
+            recorder,
+            "dockerstats",
+            "container_stats_rich failed",
+            e,
+            update.message.reply_text,
+        )
+        return
     msg = view.render_container_stats(stats)
     for part in view.chunk(msg):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
@@ -70,51 +168,73 @@ async def cmd_dlogs(update, context) -> None:
     if not await guard_sensitive(update, context):
         return
 
-    state: BotState = get_state(context.application)
+    state, recorder = get_state_and_recorder(context)
     await state.maybe_refresh("containers")
 
     if not context.args:
         await reply_usage_with_suggestions(
             update,
-            "/dlogs &lt;container&gt; [lines]",
+            "/dlogs &lt;container&gt; [page] [--since <time>] [--file]",
             state.suggest("containers", limit=5),
         )
         return
 
-    container_name = context.args[0]
+    container_name, page, since, as_file, invalid_since = _parse_dlogs_args(
+        context.args
+    )
+    if not container_name:
+        await update.message.reply_text("❌ Invalid arguments.")
+        return
+    if invalid_since:
+        await update.message.reply_text("❌ Invalid --since value.")
+        return
     container_names = state.get_cached("containers")
     if container_names and container_name not in container_names:
         await reply_usage_with_suggestions(
             update,
-            "/dlogs &lt;container&gt; [lines]",
+            "/dlogs &lt;container&gt; [page] [--since <time>] [--file]",
             state.suggest("containers", query=container_name, limit=5),
         )
         return
-    lines = 50
 
-    if len(context.args) > 1:
-        try:
-            lines = int(context.args[1])
-            if lines > 0:
-                lines = min(lines, 500)
-            else:
-                lines = max(lines, -500)
-        except ValueError:
-            await update.message.reply_text("❌ Invalid line count.")
-            return
-
-    raw_logs = await services.get_container_logs(container_name, lines)
-    direction = "head" if lines < 0 else "tail"
-    msg = view.render_logs(container_name, raw_logs, direction, str(abs(lines)))
-
-    for part in view.chunk(msg, size=4000):
-        await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+    try:
+        lines = await _get_log_lines(state, container_name, refresh=True, since=since)
+    except Exception as e:
+        await record_error(
+            recorder,
+            "dlogs",
+            f"dlogs failed for {container_name}",
+            e,
+            update.message.reply_text,
+        )
+        return
+    if as_file:
+        content = "\n".join(lines)
+        payload = content.encode(errors="replace")
+        filename = f"{container_name}-logs.txt"
+        if since:
+            filename = f"{container_name}-logs-since-{since}.txt"
+        file_obj = io.BytesIO(payload)
+        file_obj.name = filename
+        await update.message.reply_document(document=file_obj)
+        return
+    max_start = max(0, len(lines) - LOG_PAGE_SIZE)
+    if page is None:
+        start = max_start
+    else:
+        start = max_start - (page * LOG_PAGE_STEP)
+        if start < 0:
+            start = 0
+    msg, keyboard, _ = _render_logs_page(container_name, lines, start, since=since)
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
 
 
 async def cmd_dhealth(update, context) -> None:
     if not await guard_sensitive(update, context):
         return
-    state: BotState = get_state(context.application)
+    state, recorder = get_state_and_recorder(context)
     await state.maybe_refresh("containers")
     if not context.args:
         await reply_usage_with_suggestions(
@@ -130,7 +250,17 @@ async def cmd_dhealth(update, context) -> None:
             state.suggest("containers", query=name, limit=5),
         )
         return
-    msg = await services.healthcheck_container(name)
+    try:
+        msg = await services.healthcheck_container(name)
+    except Exception as e:
+        await record_error(
+            recorder,
+            "dhealth",
+            f"dhealth failed for {name}",
+            e,
+            update.message.reply_text,
+        )
+        return
     # Simple formatting
     await update.message.reply_text(f"<pre>{msg}</pre>", parse_mode=ParseMode.HTML)
 
@@ -138,8 +268,19 @@ async def cmd_dhealth(update, context) -> None:
 async def cmd_ports(update, context) -> None:
     if not await guard_sensitive(update, context):
         return
+    _, recorder = get_state_and_recorder(context)
 
-    msg = await services.get_listening_ports()
+    try:
+        msg = await services.get_listening_ports()
+    except Exception as e:
+        await record_error(
+            recorder,
+            "ports",
+            "get_listening_ports failed",
+            e,
+            update.message.reply_text,
+        )
+        return
 
     # Formatting
 

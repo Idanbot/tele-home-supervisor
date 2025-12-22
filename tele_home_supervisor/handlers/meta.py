@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 import re
 import time
@@ -132,3 +133,30 @@ async def cmd_metrics(update, context) -> None:
     state = get_state(context.application)
     msg = view.render_command_metrics(state.command_metrics)
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_debug(update, context) -> None:
+    if not await guard_sensitive(update, context):
+        return
+    state = get_state(context.application)
+    command = context.args[0].lower() if context.args else None
+    data = state.get_debug(command)
+    if not data:
+        await update.message.reply_text("No debug entries.")
+        return
+    lines: list[str] = []
+    for key in sorted(data.keys()):
+        entries = data[key][-10:]
+        lines.append(view.bold(f"Debug: {html.escape(key)}"))
+        for entry in entries:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry.timestamp))
+            lines.append(f"{html.escape(ts)} - {html.escape(entry.message)}")
+            if entry.details:
+                detail = entry.details
+                if len(detail) > 1200:
+                    detail = f"{detail[:1200]}..."
+                lines.append(view.pre(detail))
+        lines.append("")
+    msg = "\n".join(lines).strip()
+    for part in view.chunk(msg, size=4000):
+        await update.message.reply_text(part, parse_mode=ParseMode.HTML)

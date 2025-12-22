@@ -125,8 +125,14 @@ def _fetch_json(url: str) -> list[dict[str, object]]:
         "Pragma": "no-cache",
     }
     resp = requests.get(url, headers=headers, timeout=12)
-    resp.raise_for_status()
-    data = resp.json()
+    if not resp.ok:
+        snippet = resp.text[:500].replace("\n", " ")
+        raise RuntimeError(f"Pirate Bay API {resp.status_code} for {url}: {snippet}")
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        snippet = resp.text[:500].replace("\n", " ")
+        raise RuntimeError(f"Pirate Bay API invalid JSON for {url}: {snippet}") from exc
     if isinstance(data, list):
         return data
     return []
@@ -217,7 +223,7 @@ def _api_to_results(items: list[dict[str, object]]) -> list[dict[str, object]]:
     return results
 
 
-def _api_top(category: str | None) -> list[dict[str, object]]:
+def _api_top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     cat = resolve_category(category) or 0
     for base in _api_base_candidates():
         url = f"{base}/precompiled/data_top100_{cat}.json"
@@ -225,6 +231,8 @@ def _api_top(category: str | None) -> list[dict[str, object]]:
             items = _fetch_json(url)
         except (requests.RequestException, ValueError) as exc:
             logger.debug("piratebay api top failed for %s: %s", base, exc)
+            if debug_sink:
+                debug_sink(f"piratebay api top failed for {base}", str(exc))
             continue
         results = _top_n(_api_to_results(items), 10)
         if results:
@@ -232,7 +240,9 @@ def _api_top(category: str | None) -> list[dict[str, object]]:
     return []
 
 
-def _api_search(query: str, category: str | None = None) -> list[dict[str, object]]:
+def _api_search(
+    query: str, category: str | None = None, debug_sink=None
+) -> list[dict[str, object]]:
     q = (query or "").strip()
     if not q:
         return []
@@ -243,6 +253,8 @@ def _api_search(query: str, category: str | None = None) -> list[dict[str, objec
             items = _fetch_json(url)
         except (requests.RequestException, ValueError) as exc:
             logger.debug("piratebay api search failed for %s: %s", base, exc)
+            if debug_sink:
+                debug_sink(f"piratebay api search failed for {base}", str(exc))
             continue
         results = _top_n(_api_to_results(items), 10)
         if results:
@@ -250,7 +262,7 @@ def _api_search(query: str, category: str | None = None) -> list[dict[str, objec
     return []
 
 
-def top(category: str | None) -> list[dict[str, object]]:
+def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     top_mode = resolve_top_mode(category)
     if top_mode == "top100":
         url = f"{BASE_URL}/top.php"
@@ -270,18 +282,20 @@ def top(category: str | None) -> list[dict[str, object]]:
             return results
     except (requests.RequestException, RuntimeError, ValueError) as exc:
         logger.debug("piratebay top html failed: %s", exc)
+        if debug_sink:
+            debug_sink("piratebay top html failed", str(exc))
     if top_mode == "top48h":
         raise RuntimeError("Pirate Bay top 48h parse failed")
     if top_mode == "top100":
-        results = _api_top(None)
+        results = _api_top(None, debug_sink)
     else:
-        results = _api_top(category)
+        results = _api_top(category, debug_sink)
     if not results:
         raise RuntimeError("Pirate Bay top parse failed")
     return results
 
 
-def search(query: str) -> list[dict[str, object]]:
+def search(query: str, debug_sink=None) -> list[dict[str, object]]:
     q = (query or "").strip()
     if not q:
         return []
@@ -300,8 +314,10 @@ def search(query: str) -> list[dict[str, object]]:
         logger.debug("piratebay search html parse empty; falling back to api")
     except Exception as exc:
         logger.debug("piratebay search html failed: %s", exc)
+        if debug_sink:
+            debug_sink("piratebay search html failed", str(exc))
 
-    results = _api_search(q)
+    results = _api_search(q, debug_sink=debug_sink)
     if results:
         logger.debug("piratebay search api results: %s", len(results))
         return results

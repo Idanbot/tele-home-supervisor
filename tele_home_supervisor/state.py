@@ -31,6 +31,22 @@ class CacheEntry:
 MAX_LATENCY_SAMPLES = 200
 _MAGNET_CACHE_TTL_S = 30 * 60
 _MAGNET_CACHE_MAX = 200
+_LOG_CACHE_TTL_S = 5 * 60
+_DEBUG_TTL_S = 60 * 60
+_DEBUG_MAX_PER_CMD = 50
+
+
+@dataclass
+class LogCacheEntry:
+    updated_at: float
+    lines: list[str]
+
+
+@dataclass
+class DebugEntry:
+    timestamp: float
+    message: str
+    details: str | None = None
 
 
 @dataclass
@@ -90,6 +106,11 @@ class BotState:
     magnet_cache: OrderedDict[str, tuple[float, str, str]] = field(
         default_factory=OrderedDict
     )
+    log_cache: dict[str, LogCacheEntry] = field(default_factory=dict)
+    debug_cache: dict[str, list[DebugEntry]] = field(default_factory=dict)
+    _debug_recorder: "DebugRecorder | None" = field(
+        default=None, init=False, repr=False
+    )
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
 
@@ -102,6 +123,69 @@ class BotState:
         names = _normalize(await services.container_names())
         self.caches["containers"] = CacheEntry(updated_at=time.monotonic(), items=names)
         return set(names)
+
+    def get_log_cache(self, container: str) -> list[str] | None:
+        entry = self.log_cache.get(container)
+        if not entry:
+            return None
+        if (time.monotonic() - entry.updated_at) > _LOG_CACHE_TTL_S:
+            self.log_cache.pop(container, None)
+            return None
+        return entry.lines
+
+    def set_log_cache(self, container: str, lines: list[str]) -> None:
+        self.log_cache[container] = LogCacheEntry(
+            updated_at=time.monotonic(), lines=lines
+        )
+
+    def _prune_debug(self, command: str) -> None:
+        entries = self.debug_cache.get(command, [])
+        if not entries:
+            return
+        cutoff = time.time() - _DEBUG_TTL_S
+        kept = [entry for entry in entries if entry.timestamp >= cutoff]
+        if kept:
+            self.debug_cache[command] = kept[-_DEBUG_MAX_PER_CMD:]
+        else:
+            self.debug_cache.pop(command, None)
+
+    def add_debug(self, command: str, message: str, details: str | None = None) -> None:
+        if not command:
+            return
+        self._prune_debug(command)
+        entry = DebugEntry(timestamp=time.time(), message=message, details=details)
+        self.debug_cache.setdefault(command, []).append(entry)
+        self.debug_cache[command] = self.debug_cache[command][-_DEBUG_MAX_PER_CMD:]
+
+    def get_debug(self, command: str | None = None) -> dict[str, list[DebugEntry]]:
+        if command:
+            self._prune_debug(command)
+            entries = list(self.debug_cache.get(command, []))
+            return {command: entries} if entries else {}
+        for key in list(self.debug_cache.keys()):
+            self._prune_debug(key)
+        return {
+            key: list(entries) for key, entries in self.debug_cache.items() if entries
+        }
+
+    def debug_recorder(self) -> "DebugRecorder":
+        if self._debug_recorder is None:
+            self._debug_recorder = DebugRecorder(self)
+        return self._debug_recorder
+
+
+class DebugRecorder:
+    def __init__(self, state: BotState) -> None:
+        self._state = state
+
+    def record(self, command: str, message: str, details: str | None = None) -> None:
+        self._state.add_debug(command, message, details)
+
+    def capture(self, command: str, message: str):
+        def _sink(details: str | None = None) -> None:
+            self._state.add_debug(command, message, details)
+
+        return _sink
 
     async def refresh_torrents(self) -> set[str]:
         """Refresh the cache of torrent names.

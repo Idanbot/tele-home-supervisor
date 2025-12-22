@@ -18,6 +18,9 @@ from .common import allowed, get_state
 logger = logging.getLogger(__name__)
 
 DOCKER_PAGE_SIZE = 8
+LOG_PAGE_SIZE = 50
+LOG_PAGE_STEP = 45
+LOG_LINE_MAX = 300
 
 
 def normalize_docker_page(total_items: int, page: int) -> tuple[int, int]:
@@ -33,6 +36,123 @@ async def _safe_edit_message_text(query, text: str, **kwargs) -> None:
         if "Message is not modified" in str(exc):
             return
         raise
+
+
+def _trim_log_line(line: str) -> str:
+    if len(line) <= LOG_LINE_MAX:
+        return line
+    return f"{line[: LOG_LINE_MAX - 3]}..."
+
+
+def _parse_log_page_payload(
+    data: str, prefix: str
+) -> tuple[str, int, int | None] | None:
+    payload = data[len(prefix) :]
+    parts = payload.split(":")
+    if len(parts) < 2:
+        return None
+    if len(parts) == 2:
+        container, start_raw = parts
+        since_raw = None
+    else:
+        container = ":".join(parts[:-2])
+        start_raw = parts[-2]
+        since_raw = parts[-1]
+    if not container:
+        return None
+    try:
+        start = max(int(start_raw), 0)
+    except ValueError:
+        start = 0
+    since = None
+    if since_raw:
+        try:
+            since = int(since_raw)
+        except ValueError:
+            since = None
+    return container, start, since
+
+
+async def _get_log_lines(
+    state: BotState, container: str, refresh: bool, since: int | None = None
+) -> list[str]:
+    if since is None and not refresh:
+        cached = state.get_log_cache(container)
+        if cached is not None:
+            return cached
+    raw = await services.get_container_logs_full(container, since=since)
+    lines = raw.splitlines() if raw else []
+    if since is None:
+        state.set_log_cache(container, lines)
+    return lines
+
+
+def _render_logs_page(
+    container: str, lines: list[str], start: int, since: int | None = None
+) -> tuple[str, InlineKeyboardMarkup | None, int]:
+    total = len(lines)
+    if total == 0:
+        return "<i>No logs found.</i>", None, 0
+    max_start = max(0, total - LOG_PAGE_SIZE)
+    start = max(0, min(start, max_start))
+    end = min(start + LOG_PAGE_SIZE, total)
+    header = (
+        f"{view.bold(f'Logs for {html.escape(container)}')} "
+        f"<i>(lines {start + 1}-{end} of {total})</i>\n"
+    )
+    display_lines = [_trim_log_line(line) for line in lines[start:end]]
+    max_len = 3600
+    if display_lines:
+        allowed = max(
+            20,
+            (max_len - len(header) - 11) // max(1, len(display_lines)),
+        )
+        if allowed < LOG_LINE_MAX:
+            display_lines = [_trim_log_line(line[:allowed]) for line in display_lines]
+    msg = f"{header}{view.pre('\\n'.join(display_lines))}"
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    nav_row: list[InlineKeyboardButton] = []
+    if start > 0:
+        prev_start = max(0, start - LOG_PAGE_STEP)
+        nav_row.append(
+            InlineKeyboardButton(
+                "⬆️ Older",
+                callback_data=_format_log_callback(
+                    container, prev_start, since, "page"
+                ),
+            )
+        )
+    nav_row.append(InlineKeyboardButton("📄", callback_data="dlogs:noop"))
+    if start < max_start:
+        next_start = min(max_start, start + LOG_PAGE_STEP)
+        nav_row.append(
+            InlineKeyboardButton(
+                "⬇️ Newer",
+                callback_data=_format_log_callback(
+                    container, next_start, since, "page"
+                ),
+            )
+        )
+    if nav_row:
+        buttons.append(nav_row)
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                "🔄 Refresh",
+                callback_data=_format_log_callback(container, start, since, "refresh"),
+            )
+        ]
+    )
+    return msg, InlineKeyboardMarkup(buttons), start
+
+
+def _format_log_callback(
+    container: str, start: int, since: int | None, action: str
+) -> str:
+    if since is None:
+        return f"dlogs:{action}:{container}:{start}"
+    return f"dlogs:{action}:{container}:{start}:{since}"
 
 
 def build_docker_keyboard(containers: list[str], page: int = 0) -> InlineKeyboardMarkup:
@@ -125,7 +245,23 @@ async def handle_callback_query(update, context) -> None:
         return
 
     try:
-        if data.startswith("dlogs:"):
+        if data.startswith("dlogs:page:"):
+            payload = _parse_log_page_payload(data, "dlogs:page:")
+            if payload:
+                container, start, since = payload
+                await _handle_dlogs_page(
+                    query, context, container, start, since=since, refresh=False
+                )
+        elif data.startswith("dlogs:refresh:"):
+            payload = _parse_log_page_payload(data, "dlogs:refresh:")
+            if payload:
+                container, start, since = payload
+                await _handle_dlogs_page(
+                    query, context, container, start, since=since, refresh=True
+                )
+        elif data == "dlogs:noop":
+            return
+        elif data.startswith("dlogs:"):
             container = data[6:]
             await _handle_dlogs_callback(query, context, container)
         elif data.startswith("dhealth:"):
@@ -179,12 +315,23 @@ async def _handle_dlogs_callback(query, context, container: str) -> None:
     ):
         await query.message.reply_text(f"❌ Unknown container: {container}")
         return
-    await query.message.reply_text(f"🔄 Fetching logs for {container}...")
-    # Default 20 lines tail
-    raw = await services.get_container_logs(container, 20)
-    msg = view.render_logs(container, raw, "tail", "20")
-    for part in view.chunk(msg):
-        await query.message.reply_text(part, parse_mode=ParseMode.HTML)
+    lines = await _get_log_lines(state, container, refresh=True)
+    start = max(len(lines) - LOG_PAGE_SIZE, 0)
+    msg, keyboard, _ = _render_logs_page(container, lines, start)
+    await query.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def _handle_dlogs_page(
+    query, context, container: str, start: int, since: int | None, refresh: bool
+) -> None:
+    state: BotState = get_state(context.application)
+    lines = await _get_log_lines(state, container, refresh=refresh, since=since)
+    msg, keyboard, _ = _render_logs_page(container, lines, start, since=since)
+    await _safe_edit_message_text(
+        query, msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
 
 
 async def _handle_dhealth_callback(query, context, container: str) -> None:

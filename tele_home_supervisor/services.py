@@ -31,6 +31,10 @@ async def get_container_logs(container_name: str, lines: int = 50) -> str:
     return await utils.get_container_logs(container_name, lines)
 
 
+async def get_container_logs_full(container_name: str, since: int | None = None) -> str:
+    return await utils.get_container_logs_full(container_name, since=since)
+
+
 async def healthcheck_container(container_name: str) -> str:
     return await utils.healthcheck_container(container_name)
 
@@ -63,12 +67,14 @@ async def speedtest_download(mb: int = 100) -> str:
     return await utils.speedtest_download(mb)
 
 
-async def piratebay_top(category: str | None) -> list[dict[str, object]]:
-    return await asyncio.to_thread(piratebay.top, category)
+async def piratebay_top(
+    category: str | None, debug_sink=None
+) -> list[dict[str, object]]:
+    return await asyncio.to_thread(piratebay.top, category, debug_sink)
 
 
-async def piratebay_search(query: str) -> list[dict[str, object]]:
-    return await asyncio.to_thread(piratebay.search, query)
+async def piratebay_search(query: str, debug_sink=None) -> list[dict[str, object]]:
+    return await asyncio.to_thread(piratebay.search, query, debug_sink)
 
 
 async def imdb_details(query: str) -> dict[str, object] | None:

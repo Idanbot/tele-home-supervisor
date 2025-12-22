@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import html
-import logging
 
 from telegram.constants import ParseMode
 
 from .. import services
-from .common import guard
-
-logger = logging.getLogger(__name__)
+from .common import guard, get_state_and_recorder, record_error
 
 
 def _fmt_imdb(details: dict[str, object]) -> str:
@@ -82,8 +79,14 @@ async def cmd_imdb(update, context) -> None:
     try:
         details = await services.imdb_details(query)
     except Exception as e:
-        logger.exception("IMDB lookup failed")
-        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        _, recorder = get_state_and_recorder(context)
+        await record_error(
+            recorder,
+            "imdb",
+            f"imdb failed for query: {query}",
+            e,
+            update.message.reply_text,
+        )
         return
     if not details:
         await update.message.reply_text("No results found.")
@@ -100,8 +103,14 @@ async def cmd_imdbmovies(update, context) -> None:
     try:
         rows = await services.imdb_trending("movies")
     except Exception as e:
-        logger.exception("IMDB trending movies failed")
-        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        _, recorder = get_state_and_recorder(context)
+        await record_error(
+            recorder,
+            "imdbmovies",
+            "imdb trending movies failed",
+            e,
+            update.message.reply_text,
+        )
         return
     if not rows:
         await update.message.reply_text("No results found.")
@@ -116,8 +125,14 @@ async def cmd_imdbshows(update, context) -> None:
     try:
         rows = await services.imdb_trending("shows")
     except Exception as e:
-        logger.exception("IMDB trending shows failed")
-        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        _, recorder = get_state_and_recorder(context)
+        await record_error(
+            recorder,
+            "imdbshows",
+            "imdb trending shows failed",
+            e,
+            update.message.reply_text,
+        )
         return
     if not rows:
         await update.message.reply_text("No results found.")
@@ -132,8 +147,14 @@ async def cmd_rtmovies(update, context) -> None:
     try:
         rows = await services.rt_trending("movies")
     except Exception as e:
-        logger.exception("Rotten Tomatoes trending movies failed")
-        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        _, recorder = get_state_and_recorder(context)
+        await record_error(
+            recorder,
+            "rtmovies",
+            "rt trending movies failed",
+            e,
+            update.message.reply_text,
+        )
         return
     if not rows:
         await update.message.reply_text("No results found.")
@@ -148,8 +169,14 @@ async def cmd_rtshows(update, context) -> None:
     try:
         rows = await services.rt_trending("shows")
     except Exception as e:
-        logger.exception("Rotten Tomatoes trending shows failed")
-        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        _, recorder = get_state_and_recorder(context)
+        await record_error(
+            recorder,
+            "rtshows",
+            "rt trending shows failed",
+            e,
+            update.message.reply_text,
+        )
         return
     if not rows:
         await update.message.reply_text("No results found.")
@@ -172,8 +199,14 @@ async def cmd_rtsearch(update, context) -> None:
     try:
         results = await services.rt_search(query)
     except Exception as e:
-        logger.exception("Rotten Tomatoes search failed")
-        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        _, recorder = get_state_and_recorder(context)
+        await record_error(
+            recorder,
+            "rtsearch",
+            f"rt search failed for query: {query}",
+            e,
+            update.message.reply_text,
+        )
         return
     if not results:
         await update.message.reply_text("No results found.")

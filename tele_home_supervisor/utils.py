@@ -450,6 +450,35 @@ async def get_container_logs(container_name: str, lines: int = 50) -> str:
     return await asyncio.to_thread(_fetch)
 
 
+async def get_container_logs_full(container_name: str, since: int | None = None) -> str:
+    """Return full raw log string from a Docker container.
+
+    Args:
+        container_name: Name or ID of the container.
+        since: Optional Unix timestamp (seconds) to filter logs from.
+    """
+
+    def _decode(raw: object) -> str:
+        if isinstance(raw, bytes):
+            return raw.decode(errors="replace")
+        return str(raw)
+
+    def _fetch():
+        try:
+            container = client.containers.get(container_name)
+        except Exception as e:
+            return f"Error: {e}"
+
+        try:
+            raw = container.logs(stdout=True, stderr=True, since=since)
+            return _decode(raw).strip()
+        except Exception as e:
+            logger.exception("Unexpected error getting container logs")
+            return f"Unexpected error: {e}"
+
+    return await asyncio.to_thread(_fetch)
+
+
 async def healthcheck_container(container_name: str) -> str:
     def _inspect():
         try:

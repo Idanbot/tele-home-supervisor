@@ -9,7 +9,13 @@ from telegram.constants import ParseMode
 from .. import piratebay, services, view
 from ..background import ensure_started
 from ..state import BotState
-from .common import guard_sensitive, get_state, reply_usage_with_suggestions
+from .common import (
+    guard_sensitive,
+    get_state,
+    get_state_and_recorder,
+    record_error,
+    reply_usage_with_suggestions,
+)
 from .callbacks import build_torrent_keyboard
 
 logger = logging.getLogger(__name__)
@@ -239,10 +245,18 @@ async def cmd_pbtop(update, context) -> None:
         return
 
     try:
-        results = await services.piratebay_top(category)
+        state, recorder = get_state_and_recorder(context)
+        debug_sink = recorder.capture("piratebay", "pbtop failure")
+        results = await services.piratebay_top(category, debug_sink=debug_sink)
     except Exception as e:
-        logger.exception("Pirate Bay top failed")
-        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        _, recorder = get_state_and_recorder(context)
+        await record_error(
+            recorder,
+            "piratebay",
+            "pbtop failed",
+            e,
+            update.message.reply_text,
+        )
         return
 
     if not results:
@@ -276,10 +290,18 @@ async def cmd_pbsearch(update, context) -> None:
         return
 
     try:
-        results = await services.piratebay_search(query)
+        state, recorder = get_state_and_recorder(context)
+        debug_sink = recorder.capture("piratebay", "pbsearch failure")
+        results = await services.piratebay_search(query, debug_sink=debug_sink)
     except Exception as e:
-        logger.exception("Pirate Bay search failed")
-        await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
+        _, recorder = get_state_and_recorder(context)
+        await record_error(
+            recorder,
+            "piratebay",
+            "pbsearch failed",
+            e,
+            update.message.reply_text,
+        )
         return
 
     if not results:

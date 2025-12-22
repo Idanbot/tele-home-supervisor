@@ -60,6 +60,14 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "command metrics summary",
         handler="cmd_metrics",
     ),
+    CommandSpec(
+        "debug",
+        (),
+        "Info",
+        "/debug [command]",
+        "recent errors/debug info",
+        handler="cmd_debug",
+    ),
     # System
     CommandSpec("ip", (), "System", "/ip", "private LAN IP", handler="cmd_ip"),
     CommandSpec(
@@ -111,8 +119,8 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "dlogs",
         (),
         "Docker",
-        "/dlogs <container> [±lines]",
-        "container logs (+ for tail, - for head)",
+        "/dlogs <container> [page] [--since <time>] [--file]",
+        "container logs with pagination/filtering",
         handler="cmd_dlogs",
         needs="container",
     ),

@@ -13,6 +13,7 @@ cmd_whoami = rate_limit(meta.cmd_whoami, name="whoami")
 cmd_auth = rate_limit(meta.cmd_auth, name="auth")
 cmd_version = rate_limit(meta.cmd_version, name="version")
 cmd_metrics = rate_limit(meta.cmd_metrics, name="metrics")
+cmd_debug = rate_limit(meta.cmd_debug, name="debug")
 
 # System
 cmd_ip = rate_limit(system.cmd_ip, name="ip")

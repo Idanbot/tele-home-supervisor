@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Callable
 from telegram.constants import ParseMode
 
 from .. import config
-from ..state import BOT_STATE_KEY, BotState
+from ..state import BOT_STATE_KEY, BotState, DebugRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,19 @@ def get_state(app) -> BotState:
         BotState object containing runtime state, caches, and subscriptions.
     """
     return app.bot_data.setdefault(BOT_STATE_KEY, BotState())
+
+
+def get_state_and_recorder(context) -> tuple[BotState, DebugRecorder]:
+    state = get_state(context.application)
+    return state, state.debug_recorder()
+
+
+async def record_error(
+    recorder, log, command: str, message: str, exc: Exception, reply
+):
+    log.exception(message)
+    recorder.record(command, message, str(exc))
+    await reply(f"❌ Error: {html.escape(str(exc))}", parse_mode=ParseMode.HTML)
 
 
 def allowed(update: "Update") -> bool:
