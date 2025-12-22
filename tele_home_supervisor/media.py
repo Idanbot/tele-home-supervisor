@@ -22,6 +22,12 @@ MEDIA_USER_AGENT = os.environ.get(
 )
 IMDB_COOKIE = os.environ.get("IMDB_COOKIE", "")
 IMDB_REFERER = os.environ.get("IMDB_REFERER", "")
+IMDB_USER_AGENT = os.environ.get("IMDB_USER_AGENT", "")
+IMDB_MINIMAL_HEADERS = os.environ.get("IMDB_MINIMAL_HEADERS", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 _IMDB_SUGGEST_URL = "https://v2.sg.media-imdb.com/suggestion"
 
@@ -55,31 +61,42 @@ def _fetch(
     parsed = urlparse(url)
     if parsed.scheme and parsed.netloc:
         referer = f"{parsed.scheme}://{parsed.netloc}/"
-    headers = {
-        "User-Agent": MEDIA_USER_AGENT,
-        "Accept": accept_header,
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "DNT": "1",
-        "Connection": "keep-alive",
-    }
-    if "text/html" in accept:
-        headers["Upgrade-Insecure-Requests"] = "1"
-        headers["Sec-Fetch-Dest"] = "document"
-        headers["Sec-Fetch-Mode"] = "navigate"
-        headers["Sec-Fetch-Site"] = "none"
-        headers["Sec-Fetch-User"] = "?1"
-        headers["Sec-CH-UA"] = '"Chromium";v="120", "Not.A/Brand";v="8"'
-        headers["Sec-CH-UA-Mobile"] = "?0"
-        headers["Sec-CH-UA-Platform"] = '"Linux"'
-    if referer:
-        headers["Referer"] = referer
-    if IMDB_REFERER and "imdb.com" in parsed.netloc:
-        headers["Referer"] = IMDB_REFERER
-    if IMDB_COOKIE and "imdb.com" in parsed.netloc:
-        headers["Cookie"] = IMDB_COOKIE
+    imdb_html = "imdb.com" in parsed.netloc and "text/html" in accept
+    if imdb_html and IMDB_MINIMAL_HEADERS:
+        headers = {
+            "User-Agent": IMDB_USER_AGENT or "Mozilla/5.0",
+            "Accept": "text/html",
+        }
+        if IMDB_REFERER:
+            headers["Referer"] = IMDB_REFERER
+        if IMDB_COOKIE:
+            headers["Cookie"] = IMDB_COOKIE
+    else:
+        headers = {
+            "User-Agent": MEDIA_USER_AGENT,
+            "Accept": accept_header,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "DNT": "1",
+            "Connection": "keep-alive",
+        }
+        if "text/html" in accept:
+            headers["Upgrade-Insecure-Requests"] = "1"
+            headers["Sec-Fetch-Dest"] = "document"
+            headers["Sec-Fetch-Mode"] = "navigate"
+            headers["Sec-Fetch-Site"] = "none"
+            headers["Sec-Fetch-User"] = "?1"
+            headers["Sec-CH-UA"] = '"Chromium";v="120", "Not.A/Brand";v="8"'
+            headers["Sec-CH-UA-Mobile"] = "?0"
+            headers["Sec-CH-UA-Platform"] = '"Linux"'
+        if referer:
+            headers["Referer"] = referer
+        if IMDB_REFERER and "imdb.com" in parsed.netloc:
+            headers["Referer"] = IMDB_REFERER
+        if IMDB_COOKIE and "imdb.com" in parsed.netloc:
+            headers["Cookie"] = IMDB_COOKIE
     try:
         resp = requests.get(url, headers=headers, timeout=12)
     except requests.RequestException as exc:

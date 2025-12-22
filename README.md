@@ -175,8 +175,10 @@ Categories for `/pbtop`: audio, music, flac, video, hdmovies, hdtv, 4kmovies,
 | `TPB_REFERER` | (none) | Pirate Bay Referer header override |
 | `IMDB_BASE_URL` | `https://www.imdb.com` | IMDB base URL (mirror override) |
 | `MEDIA_USER_AGENT` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36` | User-Agent for IMDB requests |
+| `IMDB_USER_AGENT` | (none) | Override IMDB User-Agent when using minimal headers |
 | `IMDB_COOKIE` | (none) | IMDB Cookie header override (e.g. clearance tokens) |
 | `IMDB_REFERER` | (none) | IMDB Referer header override |
+| `IMDB_MINIMAL_HEADERS` | `true` | Use minimal headers for IMDB HTML requests |
 
 ### TOTP Auth Setup
 
