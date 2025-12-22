@@ -35,6 +35,8 @@ services:
       - TPB_REFERER=${TPB_REFERER:-}
       - IMDB_BASE_URL=${IMDB_BASE_URL:-https://www.imdb.com}
       - MEDIA_USER_AGENT=${MEDIA_USER_AGENT:-}
+      - IMDB_COOKIE=${IMDB_COOKIE:-}
+      - IMDB_REFERER=${IMDB_REFERER:-}
       - RT_BASE_URL=${RT_BASE_URL:-https://www.rottentomatoes.com}
       - RT_ALGOLIA_APP_ID=${RT_ALGOLIA_APP_ID:-}
       - RT_ALGOLIA_API_KEY=${RT_ALGOLIA_API_KEY:-}

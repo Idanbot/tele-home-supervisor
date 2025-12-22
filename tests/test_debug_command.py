@@ -38,14 +38,14 @@ async def test_debug_command_filters_by_command(monkeypatch) -> None:
     context = DummyContext(args=["imdb"])
     state = get_state(context.application)
     state.add_debug("imdb", "imdb error")
-    state.add_debug("rtmovies", "rt error")
+    state.add_debug("docker", "docker error")
 
     await meta.cmd_debug(update, context)
 
     assert update.message.replies
     text = update.message.replies[0]
     assert "imdb" in text
-    assert "rtmovies" not in text
+    assert "docker" not in text
 
 
 @pytest.mark.asyncio

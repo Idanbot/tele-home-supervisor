@@ -89,18 +89,6 @@ async def imdb_trending(kind: str, debug_sink=None) -> list[dict[str, object]]:
     return await asyncio.to_thread(media.imdb_trending, kind, debug_sink)
 
 
-async def rt_trending(kind: str, debug_sink=None) -> list[dict[str, object]]:
-    return await asyncio.to_thread(media.rt_trending, kind, debug_sink)
-
-
-async def rt_search(query: str, debug_sink=None) -> list[dict[str, object]]:
-    return await asyncio.to_thread(media.rt_search, query, debug_sink)
-
-
-async def rt_random_critic_quote(url_path: str, debug_sink=None) -> str | None:
-    return await asyncio.to_thread(media.rt_random_critic_quote, url_path, debug_sink)
-
-
 # Torrent helpers (Sync wrappers)
 
 

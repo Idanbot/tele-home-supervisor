@@ -282,27 +282,6 @@ _MEDIA_COMMANDS = (
         "IMDB trending shows",
         "cmd_imdbshows",
     ),
-    CommandSpec(
-        "rtmovies",
-        "Media",
-        "/rtmovies",
-        "Rotten Tomatoes trending movies",
-        "cmd_rtmovies",
-    ),
-    CommandSpec(
-        "rtshows",
-        "Media",
-        "/rtshows",
-        "Rotten Tomatoes trending shows",
-        "cmd_rtshows",
-    ),
-    CommandSpec(
-        "rtsearch",
-        "Media",
-        "/rtsearch <query>",
-        "Rotten Tomatoes search with critic quote",
-        "cmd_rtsearch",
-    ),
 )
 
 _AI_COMMANDS = (

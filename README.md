@@ -125,9 +125,6 @@ Categories for `/pbtop`: audio, music, flac, video, hdmovies, hdtv, 4kmovies,
 | `/imdb <query>` | IMDB lookup (storyline, rating, cast) |
 | `/imdbmovies` | IMDB trending movies |
 | `/imdbshows` | IMDB trending shows |
-| `/rtmovies` | Rotten Tomatoes trending movies |
-| `/rtshows` | Rotten Tomatoes trending shows |
-| `/rtsearch <query>` | Rotten Tomatoes search with critic quote |
 
 ### AI
 | Command | Description |
@@ -177,11 +174,9 @@ Categories for `/pbtop`: audio, music, flac, video, hdmovies, hdtv, 4kmovies,
 | `TPB_COOKIE` | (none) | Pirate Bay Cookie header override (e.g. clearance tokens) |
 | `TPB_REFERER` | (none) | Pirate Bay Referer header override |
 | `IMDB_BASE_URL` | `https://www.imdb.com` | IMDB base URL (mirror override) |
-| `MEDIA_USER_AGENT` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36` | User-Agent for IMDB/Rotten Tomatoes requests |
-| `RT_BASE_URL` | `https://www.rottentomatoes.com` | Rotten Tomatoes base URL |
-| `RT_ALGOLIA_APP_ID` | (none) | Rotten Tomatoes Algolia app ID override |
-| `RT_ALGOLIA_API_KEY` | (none) | Rotten Tomatoes Algolia API key override |
-| `RT_ALGOLIA_INDEX` | (none) | Rotten Tomatoes Algolia index override |
+| `MEDIA_USER_AGENT` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36` | User-Agent for IMDB requests |
+| `IMDB_COOKIE` | (none) | IMDB Cookie header override (e.g. clearance tokens) |
+| `IMDB_REFERER` | (none) | IMDB Referer header override |
 
 ### TOTP Auth Setup
 
