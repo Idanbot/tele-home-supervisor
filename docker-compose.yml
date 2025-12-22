@@ -22,9 +22,22 @@ services:
       - SHOW_WAN=false
       - TZ=Asia/Jerusalem
       - LOG_LEVEL=DEBUG
+      - RATE_LIMIT_S=${RATE_LIMIT_S:-1.0}
+      - QBT_TIMEOUT_S=${QBT_TIMEOUT_S:-8}
       - DOCKER_HOST=unix:///var/run/docker.sock
       - OLLAMA_HOST=${OLLAMA_HOST:-http://localhost:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama2}
+      - TPB_BASE_URL=${TPB_BASE_URL:-https://thepiratebay.org}
+      - TPB_API_BASE_URL=${TPB_API_BASE_URL:-https://apibay.org}
+      - TPB_API_BASE_URLS=${TPB_API_BASE_URLS:-}
+      - TPB_USER_AGENT=${TPB_USER_AGENT:-}
+      - TPB_COOKIE=${TPB_COOKIE:-}
+      - TPB_REFERER=${TPB_REFERER:-}
+      - IMDB_BASE_URL=${IMDB_BASE_URL:-https://www.imdb.com}
+      - RT_BASE_URL=${RT_BASE_URL:-https://www.rottentomatoes.com}
+      - RT_ALGOLIA_APP_ID=${RT_ALGOLIA_APP_ID:-}
+      - RT_ALGOLIA_API_KEY=${RT_ALGOLIA_API_KEY:-}
+      - RT_ALGOLIA_INDEX=${RT_ALGOLIA_INDEX:-}
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

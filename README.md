@@ -101,10 +101,11 @@ work inside the container.
 | `/tstart <name>` | Resume torrent(s) |
 | `/tdelete <name> yes` | Delete torrent(s) and files |
 | `/subscribe [on/off]` | Toggle completion notifications |
-| `/pbtop [category]` | Pirate Bay top 10 (optional category) |
+| `/pbtop [category]` | Pirate Bay top 10 (optional category or top mode) |
 | `/pbsearch <query>` | Pirate Bay search (top 10 by seeds) |
 
-Categories for `/pbtop`: audio, video, apps, games, porn, other.
+Categories for `/pbtop`: audio, music, flac, video, hdmovies, hdtv, 4kmovies,
+4ktv, apps, games, porn, ebook, other, top, top48h.
 
 ### Free Games & News
 | Command | Description |
@@ -156,7 +157,7 @@ Categories for `/pbtop`: audio, video, apps, games, porn, other.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RATE_LIMIT_S` | `1.0` | Command rate limit in seconds |
-| `LOG_LEVEL` | `INFO` | Logging level (e.g. DEBUG, INFO, WARNING) |
+| `LOG_LEVEL` | `DEBUG` | Logging level (e.g. DEBUG, INFO, WARNING) |
 | `SHOW_WAN` | `false` | Include WAN IP in `/health` |
 | `WATCH_PATHS` | `/,/srv/media` | Paths for disk usage reporting |
 | `QBT_HOST` | `qbittorrent` | qBittorrent hostname |
@@ -170,8 +171,14 @@ Categories for `/pbtop`: audio, video, apps, games, porn, other.
 | `TPB_BASE_URL` | `https://thepiratebay.org` | Pirate Bay HTML base URL (mirror override) |
 | `TPB_API_BASE_URL` | `https://apibay.org` | Pirate Bay API base URL (fallback) |
 | `TPB_API_BASE_URLS` | (none) | Comma-separated Pirate Bay API mirrors (tried in order) |
+| `TPB_USER_AGENT` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36` | Pirate Bay User-Agent override |
+| `TPB_COOKIE` | (none) | Pirate Bay Cookie header override (e.g. clearance tokens) |
+| `TPB_REFERER` | (none) | Pirate Bay Referer header override |
 | `IMDB_BASE_URL` | `https://www.imdb.com` | IMDB base URL (mirror override) |
 | `RT_BASE_URL` | `https://www.rottentomatoes.com` | Rotten Tomatoes base URL |
+| `RT_ALGOLIA_APP_ID` | (none) | Rotten Tomatoes Algolia app ID override |
+| `RT_ALGOLIA_API_KEY` | (none) | Rotten Tomatoes Algolia API key override |
+| `RT_ALGOLIA_INDEX` | (none) | Rotten Tomatoes Algolia index override |
 
 ### TOTP Auth Setup
 

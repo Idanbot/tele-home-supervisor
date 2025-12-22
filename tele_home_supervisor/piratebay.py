@@ -23,18 +23,32 @@ TPB_COOKIE = os.environ.get("TPB_COOKIE", "")
 TPB_REFERER = os.environ.get("TPB_REFERER", "")
 
 CATEGORY_ALIASES: dict[str, int] = {
-    "audio": 100,
-    "music": 100,
+    "audio": 101,
+    "music": 101,
+    "flac": 104,
     "video": 200,
     "movies": 200,
     "tv": 200,
+    "hdmovies": 207,
+    "hdtv": 208,
+    "4kmovies": 211,
+    "4ktv": 212,
     "apps": 300,
     "applications": 300,
     "software": 300,
     "games": 400,
     "porn": 500,
     "adult": 500,
+    "ebook": 601,
     "other": 600,
+}
+TOP_MODES: dict[str, str] = {
+    "top": "top100",
+    "top100": "top100",
+    "top48": "top48h",
+    "top48h": "top48h",
+    "48h": "top48h",
+    "top100:48h": "top48h",
 }
 
 _ROW_RE = re.compile(r"<tr[^>]*>.*?</tr>", re.IGNORECASE | re.DOTALL)
@@ -56,7 +70,10 @@ _NO_RESULTS_RE = re.compile(
 
 
 def category_help() -> str:
-    return "audio, video, apps, games, porn, other"
+    return (
+        "audio, music, flac, video, hdmovies, hdtv, 4kmovies, 4ktv, apps, "
+        "games, porn, ebook, other, top, top48h"
+    )
 
 
 def resolve_category(value: str | None) -> int | None:
@@ -68,6 +85,15 @@ def resolve_category(value: str | None) -> int | None:
     if token.isdigit():
         return int(token)
     return CATEGORY_ALIASES.get(token)
+
+
+def resolve_top_mode(value: str | None) -> str | None:
+    if value is None:
+        return "top100"
+    token = value.strip().lower()
+    if not token:
+        return "top100"
+    return TOP_MODES.get(token)
 
 
 def _fetch(url: str) -> str:
@@ -197,7 +223,7 @@ def _api_top(category: str | None) -> list[dict[str, object]]:
         url = f"{base}/precompiled/data_top100_{cat}.json"
         try:
             items = _fetch_json(url)
-        except Exception as exc:
+        except (requests.RequestException, ValueError) as exc:
             logger.debug("piratebay api top failed for %s: %s", base, exc)
             continue
         results = _top_n(_api_to_results(items), 10)
@@ -215,7 +241,7 @@ def _api_search(query: str, category: str | None = None) -> list[dict[str, objec
         url = f"{base}/q.php?q={requests.utils.quote(q)}&cat={cat}"
         try:
             items = _fetch_json(url)
-        except Exception as exc:
+        except (requests.RequestException, ValueError) as exc:
             logger.debug("piratebay api search failed for %s: %s", base, exc)
             continue
         results = _top_n(_api_to_results(items), 10)
@@ -225,20 +251,31 @@ def _api_search(query: str, category: str | None = None) -> list[dict[str, objec
 
 
 def top(category: str | None) -> list[dict[str, object]]:
-    cat = resolve_category(category)
-    if cat is None:
-        url = f"{BASE_URL}/top/0"
+    top_mode = resolve_top_mode(category)
+    if top_mode == "top100":
+        url = f"{BASE_URL}/top.php"
+    elif top_mode == "top48h":
+        url = f"{BASE_URL}/search/top100:48h/0/99/0"
     else:
-        url = f"{BASE_URL}/top/{cat}"
+        cat = resolve_category(category)
+        if cat is None:
+            url = f"{BASE_URL}/top/0"
+        else:
+            url = f"{BASE_URL}/top/{cat}"
     try:
         html_text = _fetch(url)
         _ensure_not_blocked(html_text)
         results = _top_n(_parse_rows(html_text), 10)
         if results:
             return results
-    except Exception as exc:
-        _ = exc
-    results = _api_top(category)
+    except (requests.RequestException, RuntimeError, ValueError) as exc:
+        logger.debug("piratebay top html failed: %s", exc)
+    if top_mode == "top48h":
+        raise RuntimeError("Pirate Bay top 48h parse failed")
+    if top_mode == "top100":
+        results = _api_top(None)
+    else:
+        results = _api_top(category)
     if not results:
         raise RuntimeError("Pirate Bay top parse failed")
     return results

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import os
 import secrets
 import re
@@ -11,10 +12,15 @@ from typing import Any
 
 import requests
 
+logger = logging.getLogger(__name__)
+
 IMDB_BASE_URL = os.environ.get("IMDB_BASE_URL", "https://www.imdb.com").rstrip("/")
 RT_BASE_URL = os.environ.get("RT_BASE_URL", "https://www.rottentomatoes.com").rstrip(
     "/"
 )
+RT_ALGOLIA_APP_ID = os.environ.get("RT_ALGOLIA_APP_ID", "")
+RT_ALGOLIA_API_KEY = os.environ.get("RT_ALGOLIA_API_KEY", "")
+RT_ALGOLIA_INDEX = os.environ.get("RT_ALGOLIA_INDEX", "")
 
 _IMDB_SUGGEST_URL = "https://v2.sg.media-imdb.com/suggestion"
 
@@ -37,7 +43,11 @@ _RT_NEXT_DATA_RE = re.compile(
 _RT_DATA_JSON_RE = re.compile(r'data-json="([^"]+)"', re.IGNORECASE)
 _RT_DATA_PAGE_RE = re.compile(r'data-page="([^"]+)"', re.IGNORECASE)
 _RT_STATE_MARKERS = ("window.__INITIAL_STATE__", "window.__PRELOADED_STATE__")
-_RT_DATA_JSON_RE = re.compile(r'data-json="([^"]+)"', re.IGNORECASE)
+_RT_TILE_RE = re.compile(r"<tile-dynamic[^>]+>", re.IGNORECASE)
+_RT_ATTR_RE = re.compile(r'([a-zA-Z0-9_-]+)="([^"]+)"')
+_RT_ALGOLIA_APP_RE = re.compile(r'algoliaAppId["\']\s*:\s*["\']([^"\']+)')
+_RT_ALGOLIA_KEY_RE = re.compile(r'algoliaApiKey["\']\s*:\s*["\']([^"\']+)')
+_RT_ALGOLIA_INDEX_RE = re.compile(r'indexName["\']\s*:\s*["\']([^"\']+)')
 
 _RT_REVIEW_TEXT_RE = re.compile(
     r'data-qa="review-text"[^>]*>(.*?)</', re.IGNORECASE | re.DOTALL
@@ -201,8 +211,15 @@ def rt_trending(kind: str) -> list[dict[str, Any]]:
     )
     html_text = _fetch(f"{RT_BASE_URL}{browse_path}")
     _ensure_not_blocked(html_text, "Rotten Tomatoes")
-    data = _rt_extract_next_data(html_text)
-    items = _rt_extract_items(data)
+    try:
+        data = _rt_extract_next_data(html_text)
+        items = _rt_extract_items(data)
+        if items:
+            return items
+    except Exception as exc:
+        logger.debug("rt trending next data parse failed: %s", exc)
+
+    items = _rt_extract_tiles(html_text)
     if not items:
         raise RuntimeError("Rotten Tomatoes trending parse failed")
     return items
@@ -293,8 +310,15 @@ def rt_search(query: str) -> list[dict[str, Any]]:
 
     html_text = _fetch(f"{RT_BASE_URL}/search?search={requests.utils.quote(q)}")
     _ensure_not_blocked(html_text, "Rotten Tomatoes")
-    data = _rt_extract_next_data(html_text)
-    results = _rt_extract_search_items(data)
+    try:
+        data = _rt_extract_next_data(html_text)
+        results = _rt_extract_search_items(data)
+        if results:
+            return results[:10]
+    except Exception as exc:
+        logger.debug("rt search next data parse failed: %s", exc)
+
+    results = _rt_search_algolia(q, html_text)
     if not results:
         raise RuntimeError("Rotten Tomatoes search parse failed")
     return results[:10]
@@ -452,14 +476,13 @@ def _rt_extract_next_data(html_text: str) -> dict[str, Any]:
         except json.JSONDecodeError as exc:
             raise RuntimeError("Rotten Tomatoes state parse failed") from exc
 
-    data_match = _RT_DATA_JSON_RE.search(html_text)
-    if data_match:
-        payload = html.unescape(data_match.group(1))
-        try:
-            return json.loads(payload)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("Rotten Tomatoes data-json parse failed") from exc
-
+    logger.debug(
+        "rt next data missing: next=%s data-json=%s data-page=%s state=%s",
+        bool(_RT_NEXT_DATA_RE.search(html_text)),
+        bool(_RT_DATA_JSON_RE.search(html_text)),
+        bool(_RT_DATA_PAGE_RE.search(html_text)),
+        any(marker in html_text for marker in _RT_STATE_MARKERS),
+    )
     raise RuntimeError("Rotten Tomatoes page missing next data")
 
 
@@ -495,3 +518,62 @@ def _rt_extract_search_items(data: dict[str, Any]) -> list[dict[str, Any]]:
         if len(deduped) >= 10:
             break
     return deduped
+
+
+def _rt_extract_tiles(html_text: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for tag in _RT_TILE_RE.findall(html_text):
+        attrs = dict(_RT_ATTR_RE.findall(tag))
+        title = attrs.get("data-title") or attrs.get("title") or ""
+        url = attrs.get("data-url") or attrs.get("data-href") or ""
+        if title:
+            items.append({"title": html.unescape(title), "url": url})
+        if len(items) >= 10:
+            break
+    return items
+
+
+def _rt_search_algolia(query: str, html_text: str) -> list[dict[str, Any]]:
+    app_id = RT_ALGOLIA_APP_ID
+    api_key = RT_ALGOLIA_API_KEY
+    index = RT_ALGOLIA_INDEX
+
+    if not (app_id and api_key and index):
+        app_match = _RT_ALGOLIA_APP_RE.search(html_text)
+        key_match = _RT_ALGOLIA_KEY_RE.search(html_text)
+        idx_match = _RT_ALGOLIA_INDEX_RE.search(html_text)
+        app_id = app_id or (app_match.group(1) if app_match else "")
+        api_key = api_key or (key_match.group(1) if key_match else "")
+        index = index or (idx_match.group(1) if idx_match else "")
+
+    if not (app_id and api_key and index):
+        return []
+
+    url = f"https://{app_id}-dsn.algolia.net/1/indexes/{index}/query"
+    headers = {
+        "X-Algolia-Application-Id": app_id,
+        "X-Algolia-API-Key": api_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "tele-home-supervisor/1.0",
+    }
+    body = {"params": f"query={requests.utils.quote(query)}&hitsPerPage=10"}
+    try:
+        resp = requests.post(url, headers=headers, json=body, timeout=12)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.debug("rt algolia search failed: %s", exc)
+        return []
+
+    hits = data.get("hits") or []
+    results: list[dict[str, Any]] = []
+    for hit in hits:
+        title = hit.get("title") or hit.get("name")
+        url_path = hit.get("url") or hit.get("urlPath") or ""
+        if not title:
+            continue
+        results.append({"title": str(title), "url": str(url_path)})
+        if len(results) >= 10:
+            break
+    return results

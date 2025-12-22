@@ -5,8 +5,8 @@ import os
 
 
 def setup_logging() -> None:
-    level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
+    level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
+    level = getattr(logging, level_name, logging.DEBUG)
 
     root = logging.getLogger()
     if not root.handlers:

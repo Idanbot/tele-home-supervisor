@@ -229,7 +229,11 @@ async def cmd_pbtop(update, context) -> None:
     if not await guard_sensitive(update, context):
         return
     category = context.args[0] if context.args else None
-    if category and piratebay.resolve_category(category) is None:
+    if (
+        category
+        and piratebay.resolve_category(category) is None
+        and piratebay.resolve_top_mode(category) is None
+    ):
         usage = f"Usage: /pbtop [category]\nCategories: {piratebay.category_help()}"
         await update.message.reply_text(usage, parse_mode=ParseMode.HTML)
         return
