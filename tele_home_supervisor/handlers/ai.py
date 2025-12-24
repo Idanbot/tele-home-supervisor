@@ -33,21 +33,22 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     prompt, overrides = _parse_generation_flags(context.args, context.user_data)
+    host, model = _resolve_ollama_target(context.user_data)
 
     if not prompt:
         await update.message.reply_text(
             "Usage: /ask <your question> [--temp 0.4 --top-k 40 --top-p 0.9 --num-predict 640]\n"
-            f"Model: {config.OLLAMA_MODEL}\n"
-            f"Host: {config.OLLAMA_HOST}\n"
-            "Tip: /askreset to clear custom params",
+            f"Model: {model}\n"
+            f"Host: {host}\n"
+            "Tips: /askreset clears params, /ollamareset clears host/model",
         )
         return
 
     msg = await update.message.reply_text("🤔 Thinking...")
 
     client = OllamaClient(
-        base_url=config.OLLAMA_HOST,
-        model=config.OLLAMA_MODEL,
+        base_url=host,
+        model=model,
         system_prompt=STYLE_SYSTEM_PROMPT,
         **overrides,
     )
@@ -115,6 +116,69 @@ async def cmd_askreset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     context.user_data.pop("ollama_params", None)
     await update.message.reply_text("AI generation parameters reset to defaults.")
+
+
+async def cmd_ollamahost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update, context):
+        return
+    if not context.args:
+        host, _ = _resolve_ollama_target(context.user_data)
+        await update.message.reply_text(
+            f"Usage: /ollamahost <http://host:port>\nCurrent host: {host}",
+        )
+        return
+    host = context.args[0].strip()
+    if "://" not in host:
+        await update.message.reply_text(
+            "Usage: /ollamahost <http://host:port>\n"
+            "Example: /ollamahost http://192.168.1.20:11434",
+        )
+        return
+    context.user_data["ollama_host"] = host
+    await update.message.reply_text(f"Ollama host set to: {host}")
+
+
+async def cmd_ollamamodel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update, context):
+        return
+    if not context.args:
+        _, model = _resolve_ollama_target(context.user_data)
+        await update.message.reply_text(
+            f"Usage: /ollamamodel <model>\nCurrent model: {model}"
+        )
+        return
+    model = " ".join(context.args).strip()
+    if not model:
+        await update.message.reply_text("Usage: /ollamamodel <model>")
+        return
+    context.user_data["ollama_model"] = model
+    await update.message.reply_text(f"Ollama model set to: {model}")
+
+
+async def cmd_ollamareset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update, context):
+        return
+    context.user_data.pop("ollama_host", None)
+    context.user_data.pop("ollama_model", None)
+    await update.message.reply_text("Ollama host/model reset to defaults.")
+
+
+async def cmd_ollamashow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update, context):
+        return
+    host, model = _resolve_ollama_target(context.user_data)
+    host_override = context.user_data.get("ollama_host")
+    model_override = context.user_data.get("ollama_model")
+    lines = [
+        "Ollama settings:",
+        f"Host: {host}",
+        f"Model: {model}",
+    ]
+    if host_override or model_override:
+        lines.append("Overrides:")
+        lines.append(f"Host override: {host_override or 'none'}")
+        lines.append(f"Model override: {model_override or 'none'}")
+    await update.message.reply_text("\n".join(lines))
 
 
 def _format_text(text: str, done: bool) -> str:
@@ -188,3 +252,9 @@ def _parse_generation_flags(
 
     user_data["ollama_params"] = overrides
     return " ".join(prompt_parts).strip(), overrides
+
+
+def _resolve_ollama_target(user_data: Dict[str, Any]) -> Tuple[str, str]:
+    host = user_data.get("ollama_host") or config.OLLAMA_HOST
+    model = user_data.get("ollama_model") or config.OLLAMA_MODEL
+    return str(host), str(model)

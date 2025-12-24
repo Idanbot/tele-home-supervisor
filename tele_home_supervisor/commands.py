@@ -320,6 +320,34 @@ _AI_COMMANDS = (
         "reset custom AI generation parameters",
         "cmd_askreset",
     ),
+    CommandSpec(
+        "ollamahost",
+        "AI",
+        "/ollamahost <http://host:port>",
+        "set Ollama host target",
+        "cmd_ollamahost",
+    ),
+    CommandSpec(
+        "ollamamodel",
+        "AI",
+        "/ollamamodel <model>",
+        "set Ollama model",
+        "cmd_ollamamodel",
+    ),
+    CommandSpec(
+        "ollamareset",
+        "AI",
+        "/ollamareset",
+        "reset Ollama host/model overrides",
+        "cmd_ollamareset",
+    ),
+    CommandSpec(
+        "ollamashow",
+        "AI",
+        "/ollamashow",
+        "show current Ollama host/model",
+        "cmd_ollamashow",
+    ),
 )
 
 

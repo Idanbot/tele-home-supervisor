@@ -61,6 +61,10 @@ cmd_humblefree_now = rate_limit(notifications.cmd_humblefree_now, name="humblefr
 # AI
 cmd_ask = rate_limit(ai.cmd_ask, name="ask")
 cmd_askreset = rate_limit(ai.cmd_askreset, name="askreset")
+cmd_ollamahost = rate_limit(ai.cmd_ollamahost, name="ollamahost")
+cmd_ollamamodel = rate_limit(ai.cmd_ollamamodel, name="ollamamodel")
+cmd_ollamareset = rate_limit(ai.cmd_ollamareset, name="ollamareset")
+cmd_ollamashow = rate_limit(ai.cmd_ollamashow, name="ollamashow")
 
 # Media
 cmd_movies = rate_limit(media.cmd_movies, name="movies")

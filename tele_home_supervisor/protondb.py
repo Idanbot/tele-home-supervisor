@@ -65,13 +65,14 @@ class SteamAppDetails(TypedDict, total=False):
 def _request_with_retry(
     url: str,
     headers: dict[str, str],
+    params: dict[str, str] | None = None,
     max_retries: int = _MAX_RETRIES,
 ) -> requests.Response:
     """Make HTTP GET request with retry logic for transient failures."""
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
-            resp = requests.get(url, headers=headers, timeout=_TIMEOUT)
+            resp = requests.get(url, headers=headers, params=params, timeout=_TIMEOUT)
             # Retry on 5xx errors
             if resp.status_code >= 500 and attempt < max_retries:
                 time.sleep(_RETRY_DELAY * (attempt + 1))
@@ -127,15 +128,32 @@ def _search_steam_store(query: str) -> list[SteamGame]:
     url = "https://store.steampowered.com/api/storesearch"
     params = {"term": query, "l": "english", "cc": "us", "category1": "998"}
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    data = None
     try:
-        resp = requests.get(url, params=params, headers=headers, timeout=_TIMEOUT)
-        if not resp.ok:
+        resp = _request_with_retry(url, headers, params=params)
+        if resp.ok:
+            data = resp.json()
+        else:
             logger.debug("Steam store search failed: HTTP %d", resp.status_code)
-            return []
-        data = resp.json()
     except (requests.exceptions.RequestException, ValueError) as exc:
         logger.debug("Steam store search failed: %s", exc)
-        return []
+
+    items = data.get("items") if isinstance(data, dict) else None
+    if not items:
+        try:
+            resp = _request_with_retry(
+                url, headers, params={"term": query, "l": "english", "cc": "us"}
+            )
+            if resp.ok:
+                data = resp.json()
+            else:
+                logger.debug(
+                    "Steam store relaxed search failed: HTTP %d", resp.status_code
+                )
+                return []
+        except (requests.exceptions.RequestException, ValueError) as exc:
+            logger.debug("Steam store relaxed search failed: %s", exc)
+            return []
 
     items = data.get("items") if isinstance(data, dict) else None
     if not isinstance(items, list):
