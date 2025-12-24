@@ -166,12 +166,12 @@ jobs:
           if-no-files-found: ignore
 
   check-image:
-    name: Check Image Exists
+    name: Decide Build
     needs: [changes]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      exists: ${{ steps.check.outputs.exists }}
+      should_build: ${{ steps.check.outputs.should_build }}
     steps:
       - name: Lowercase the repo name
         run: |
@@ -188,16 +188,20 @@ jobs:
       - name: Check image tag exists
         id: check
         run: |
+          if [ "${{ needs.changes.outputs.image }}" = "true" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           TAG="sha-${{ github.sha }}"
           IMAGE_REF="${REGISTRY}/${IMAGE_NAME_LOW}:${TAG}"
           if docker manifest inspect "${IMAGE_REF}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
           fi
 
   build-and-push:
@@ -205,9 +209,7 @@ jobs:
     needs: [changes, quality, test, container-validate, check-image]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: |
-      needs.changes.outputs.image == 'true' ||
-      needs.check-image.outputs.exists != 'true'
+    if: needs.check-image.outputs.should_build == 'true'
     permissions:
       contents: read
       packages: write
@@ -376,6 +378,7 @@ jobs:
           artifact-name: sbom.spdx.json
           output-file: sbom.spdx.json
           format: spdx-json
+          syft-args: "--platform linux/arm64"
         env:
           SYFT_REGISTRY_AUTH_USERNAME: ${{ github.actor }}
           SYFT_REGISTRY_AUTH_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
