@@ -18,27 +18,6 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  changes:
-    name: Detect Image-Relevant Changes
-    runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.filter.outputs.image }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Filter paths for image rebuild
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            image:
-              - Dockerfile
-              - .dockerignore
-              - pyproject.toml
-              - uv.lock
-              - bot.py
-              - tele_home_supervisor/**
-
   quality:
     name: Code Quality & Security
     runs-on: ubuntu-latest
@@ -167,12 +146,26 @@ jobs:
 
   check-image:
     name: Decide Build
-    needs: [changes]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
+      - uses: actions/checkout@v6
+
+      - name: Filter paths for image rebuild
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            image:
+              - Dockerfile
+              - .dockerignore
+              - pyproject.toml
+              - uv.lock
+              - bot.py
+              - tele_home_supervisor/**
+
       - name: Lowercase the repo name
         run: |
           echo "IMAGE_NAME_LOW=${GITHUB_REPOSITORY,,}" >> "${GITHUB_ENV}"
@@ -188,7 +181,7 @@ jobs:
       - name: Check image tag exists
         id: check
         run: |
-          if [ "${{ needs.changes.outputs.image }}" = "true" ]; then
+          if [ "${{ steps.filter.outputs.image }}" = "true" ]; then
             echo "should_build=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -206,7 +199,7 @@ jobs:
 
   build-and-push:
     name: Build & Push Docker Image
-    needs: [changes, quality, test, container-validate, check-image]
+    needs: [quality, test, container-validate, check-image]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: needs.check-image.outputs.should_build == 'true'
@@ -368,6 +361,19 @@ jobs:
           cosign sign --yes --recursive \
             "${REGISTRY}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}"
 
+      - name: Pull image for SBOM (arm64)
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE_NAME_LOW: ${{ env.IMAGE_NAME_LOW }}
+          IMAGE_DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: |
+          if [ -z "$IMAGE_DIGEST" ]; then
+            echo "No image digest available; skipping SBOM pull."
+            exit 0
+          fi
+          docker pull --platform=linux/arm64 \
+            "${REGISTRY}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}"
+
       - name: Generate SBOM (image)
         if: github.event_name != 'pull_request'
         uses: anchore/sbom-action@v0
@@ -378,7 +384,6 @@ jobs:
           artifact-name: sbom.spdx.json
           output-file: sbom.spdx.json
           format: spdx-json
-          syft-args: "--platform linux/arm64"
         env:
           SYFT_REGISTRY_AUTH_USERNAME: ${{ github.actor }}
           SYFT_REGISTRY_AUTH_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
