@@ -223,7 +223,7 @@ async def _game_offers_scheduler(app: Application) -> None:
                 await asyncio.sleep(3600)  # Wait 1 hour before retry
                 continue
 
-            combined_msg = await asyncio.to_thread(
+            combined_msg, image_url = await asyncio.to_thread(
                 scheduled_fetchers.build_combined_game_offers, 5
             )
 
@@ -233,12 +233,32 @@ async def _game_offers_scheduler(app: Application) -> None:
                     continue
 
                 try:
-                    await app.bot.send_message(
-                        chat_id=chat_id,
-                        text=combined_msg,
-                        parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True,
-                    )
+                    if image_url:
+                        try:
+                            await app.bot.send_photo(
+                                chat_id=chat_id,
+                                photo=image_url,
+                                caption=combined_msg,
+                                parse_mode=ParseMode.HTML,
+                            )
+                        except Exception as img_err:
+                            logger.warning(
+                                "Failed to send Game Offers image, sending text: %s",
+                                img_err,
+                            )
+                            await app.bot.send_message(
+                                chat_id=chat_id,
+                                text=combined_msg,
+                                parse_mode=ParseMode.HTML,
+                                disable_web_page_preview=True,
+                            )
+                    else:
+                        await app.bot.send_message(
+                            chat_id=chat_id,
+                            text=combined_msg,
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=True,
+                        )
                     logger.info(
                         "Sent Game Offers notification to chat_id=%s",
                         chat_id,

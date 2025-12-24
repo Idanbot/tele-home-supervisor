@@ -59,9 +59,30 @@ async def cmd_gameoffers_now(update, context) -> None:
     msg = await update.message.reply_text("🔄 Fetching game offers...")
 
     try:
-        combined = await asyncio.to_thread(
+        combined, image_url = await asyncio.to_thread(
             scheduled_fetchers.build_combined_game_offers, 5
         )
+        if image_url:
+            try:
+                await msg.delete()
+                await update.message.reply_photo(
+                    photo=image_url,
+                    caption=combined,
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            except Exception as img_err:
+                logger.warning(
+                    "Failed to send game offers image, falling back to text: %s",
+                    img_err,
+                )
+                await update.message.reply_text(
+                    combined,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                return
+
         await msg.edit_text(
             combined,
             parse_mode=ParseMode.HTML,

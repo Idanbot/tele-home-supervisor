@@ -109,13 +109,53 @@ def search_steam_games(query: str) -> list[SteamGame]:
     """
     url = f"https://steamcommunity.com/actions/SearchApps/{quote(query)}"
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
-    resp = _request_with_retry(url, headers)
-    if not resp.ok:
-        raise RuntimeError(f"Steam search failed: HTTP {resp.status_code}")
-    data = resp.json()
-    if not isinstance(data, list):
+    try:
+        resp = _request_with_retry(url, headers)
+        if resp.ok:
+            data = resp.json()
+            if isinstance(data, list):
+                return data[:10]
+        else:
+            logger.debug("Steam search failed: HTTP %d", resp.status_code)
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        logger.debug("Steam community search failed: %s", exc)
+    return _search_steam_store(query)
+
+
+def _search_steam_store(query: str) -> list[SteamGame]:
+    """Fallback search via Steam Store API."""
+    url = "https://store.steampowered.com/api/storesearch"
+    params = {"term": query, "l": "english", "cc": "us", "category1": "998"}
+    headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=_TIMEOUT)
+        if not resp.ok:
+            logger.debug("Steam store search failed: HTTP %d", resp.status_code)
+            return []
+        data = resp.json()
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        logger.debug("Steam store search failed: %s", exc)
         return []
-    return data[:10]  # Limit to 10 results
+
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    results: list[SteamGame] = []
+    for item in items[:10]:
+        if not isinstance(item, dict):
+            continue
+        appid = item.get("id")
+        name = item.get("name")
+        if not appid or not name:
+            continue
+        results.append(
+            {
+                "appid": str(appid),
+                "name": str(name),
+                "icon": str(item.get("tiny_image") or ""),
+            }
+        )
+    return results
 
 
 def get_protondb_summary(appid: int | str) -> ProtonDBSummary | None:

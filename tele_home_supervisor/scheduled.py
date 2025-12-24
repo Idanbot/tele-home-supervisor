@@ -689,14 +689,17 @@ def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
         return (f"❌ Error processing Humble Bundle: {html.escape(str(e))}", [])
 
 
-def build_combined_game_offers(limit_steam: int = 5) -> str:
+def build_combined_game_offers(limit_steam: int = 5) -> tuple[str, str | None]:
     """Combine Epic, Steam, GOG, and Humble offers into one HTML message."""
     sections: list[str] = []
+    epic_image: str | None = None
 
     try:
-        epic_msg, _ = fetch_epic_free_games()
+        epic_msg, epic_images = fetch_epic_free_games()
         if epic_msg:
             sections.append(epic_msg)
+        if epic_images:
+            epic_image = epic_images[0]
     except Exception:
         logger.exception("Failed to include Epic section")
 
@@ -722,7 +725,7 @@ def build_combined_game_offers(limit_steam: int = 5) -> str:
         logger.exception("Failed to include Humble section")
 
     if not sections:
-        return "🎮 <b>Game Offers</b>\n\nNo current free offers found."
+        return ("🎮 <b>Game Offers</b>\n\nNo current free offers found.", None)
 
     # Join sections with a clear separator
-    return "\n\n".join(sections)
+    return ("\n\n".join(sections), epic_image)
