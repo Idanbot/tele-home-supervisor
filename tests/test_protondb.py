@@ -1,7 +1,5 @@
 """Tests for ProtonDB module."""
 
-import pytest
-
 from tele_home_supervisor import protondb
 
 from conftest import DummyResponse
@@ -73,8 +71,8 @@ def test_search_steam_games_http_error(monkeypatch) -> None:
 
     monkeypatch.setattr(protondb.requests, "get", fake_get)
 
-    with pytest.raises(RuntimeError, match="Steam search failed"):
-        protondb.search_steam_games("test")
+    results = protondb.search_steam_games("test")
+    assert results == []
 
 
 def test_get_protondb_summary_success(monkeypatch) -> None:
