@@ -17,6 +17,13 @@ _INFO_COMMANDS = (
         "cmd_auth",
     ),
     CommandSpec(
+        "check_auth",
+        "Info",
+        "/check_auth",
+        "check auth status and time remaining",
+        "cmd_check_auth",
+    ),
+    CommandSpec(
         "version",
         "Info",
         "/version",
@@ -288,6 +295,13 @@ _MEDIA_COMMANDS = (
         "/tmdb <query>",
         "TMDB search (movies + shows)",
         "cmd_tmdb",
+    ),
+    CommandSpec(
+        "protondb",
+        "Media",
+        "/protondb <game>",
+        "ProtonDB Linux/Steam Deck compatibility",
+        "cmd_protondb",
     ),
 )
 

@@ -12,7 +12,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
-from .. import services, tmdb, view
+from .. import services, tmdb, view, protondb
 from ..state import BotState
 from .common import allowed, get_state
 
@@ -266,6 +266,22 @@ def build_tmdb_keyboard(
     return InlineKeyboardMarkup(buttons)
 
 
+def build_protondb_keyboard(key: str, games: list[dict]) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for idx, game in enumerate(games):
+        name = str(game.get("name") or "Unknown")
+        appid = str(game.get("appid") or "")
+        if not appid:
+            continue
+        label = f"{idx + 1}. {name}"
+        if len(label) > 60:
+            label = f"{label[:57]}..."
+        buttons.append(
+            [InlineKeyboardButton(label, callback_data=f"protondbinfo:{key}:{idx}")]
+        )
+    return InlineKeyboardMarkup(buttons)
+
+
 def build_free_games_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [
@@ -345,6 +361,8 @@ async def handle_callback_query(update, context) -> None:
             await _handle_tmdb_page(query, context, data)
         elif data.startswith("tmdbinfo:"):
             await _handle_tmdb_info(query, context, data)
+        elif data.startswith("protondbinfo:"):
+            await _handle_protondb_info(query, context, data)
         else:
             await _safe_edit_message_text(query, "❓ Unknown action")
     except Exception as e:
@@ -516,6 +534,7 @@ async def _handle_tmdb_info(query, context, data: str) -> None:
     rating = info.get("vote_average")
     date = info.get("release_date") or info.get("first_air_date") or ""
     genres = ", ".join(g.get("name") for g in info.get("genres", []) if g.get("name"))
+    poster_path = info.get("poster_path")
     url = (
         f"https://www.themoviedb.org/movie/{tmdb_id}"
         if media_type == "movie"
@@ -529,11 +548,154 @@ async def _handle_tmdb_info(query, context, data: str) -> None:
     ]
     if overview:
         lines.append("")
+        # Truncate overview for caption (Telegram limit is 1024 chars)
+        max_overview = 600
+        if len(overview) > max_overview:
+            overview = overview[:max_overview].rsplit(" ", 1)[0] + "..."
         lines.append(html.escape(str(overview)))
     lines.append("")
     lines.append(f'<a href="{url}">TMDB</a>')
+    caption = "\n".join(lines)
+
+    # Try to send with poster image, fall back to text on failure
+    if poster_path:
+        image_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+        try:
+            await query.message.reply_photo(
+                photo=image_url,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        except Exception as img_err:
+            logger.debug("Failed to send TMDB poster image: %s", img_err)
+
+    # Fallback: text only
     await query.message.reply_text(
-        "\n".join(lines), parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        caption, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
+
+
+async def _handle_protondb_info(query, context, data: str) -> None:
+    payload = data[len("protondbinfo:") :]
+    parts = payload.split(":")
+    if len(parts) != 2:
+        await query.message.reply_text("❌ Invalid ProtonDB request.")
+        return
+    key, idx_str = parts
+    try:
+        idx = int(idx_str)
+    except ValueError:
+        await query.message.reply_text("❌ Invalid game index.")
+        return
+
+    state: BotState = get_state(context.application)
+    games = state.get_protondb_results(key)
+    if not games or idx >= len(games):
+        await query.message.reply_text("❌ Results expired. Please search again.")
+        return
+
+    game = games[idx]
+    appid = game.get("appid")
+    name = game.get("name") or "Unknown"
+
+    if not appid:
+        await query.message.reply_text("❌ Invalid game data.")
+        return
+
+    # Fetch data in parallel
+    protondb_data, steam_data, player_count = await asyncio.gather(
+        services.protondb_summary(appid),
+        services.steam_app_details(appid),
+        services.steam_player_count(appid),
+        return_exceptions=True,
+    )
+
+    # Handle exceptions
+    if isinstance(protondb_data, Exception):
+        logger.debug("ProtonDB fetch failed: %s", protondb_data)
+        protondb_data = None
+    if isinstance(steam_data, Exception):
+        logger.debug("Steam details fetch failed: %s", steam_data)
+        steam_data = None
+    if isinstance(player_count, Exception):
+        logger.debug("Steam player count fetch failed: %s", player_count)
+        player_count = None
+
+    # Build response
+    lines = [f"<b>{html.escape(str(name))}</b>"]
+
+    # ProtonDB tier
+    if protondb_data:
+        tier = protondb_data.get("tier")
+        trending_tier = protondb_data.get("trendingTier")
+        confidence = protondb_data.get("confidence")
+        total_reports = protondb_data.get("total")
+        score = protondb_data.get("score")
+
+        tier_emoji = protondb.tier_emoji(tier)
+        tier_text = protondb.format_tier(tier)
+        lines.append(f"ProtonDB: {tier_emoji} <b>{tier_text}</b>")
+
+        if trending_tier and trending_tier != tier:
+            trend_emoji = protondb.tier_emoji(trending_tier)
+            trend_text = protondb.format_tier(trending_tier)
+            lines.append(f"Trending: {trend_emoji} {trend_text}")
+
+        if confidence:
+            lines.append(f"Confidence: {html.escape(str(confidence))}")
+        if total_reports:
+            lines.append(f"Reports: {total_reports}")
+        if score is not None:
+            lines.append(f"Score: {score:.2f}")
+    else:
+        lines.append("ProtonDB: <i>No data available</i>")
+
+    # Player count
+    if player_count is not None:
+        lines.append(f"Current Players: {player_count:,}")
+
+    # Steam details
+    metacritic = None
+    header_image = None
+    if steam_data:
+        metacritic = steam_data.get("metacritic", {}).get("score")
+        header_image = steam_data.get("header_image")
+        release_date = steam_data.get("release_date", {}).get("date")
+        genres = steam_data.get("genres", [])
+        genre_names = ", ".join(g.get("name", "") for g in genres[:3] if g.get("name"))
+
+        if release_date:
+            lines.append(f"Released: {html.escape(str(release_date))}")
+        if genre_names:
+            lines.append(f"Genres: {html.escape(genre_names)}")
+        if metacritic:
+            lines.append(f"Metacritic: {metacritic}")
+
+    # Links
+    lines.append("")
+    lines.append(
+        f'<a href="https://www.protondb.com/app/{appid}">ProtonDB</a> | '
+        f'<a href="https://store.steampowered.com/app/{appid}">Steam</a>'
+    )
+
+    caption = "\n".join(lines)
+
+    # Try to send with image
+    if header_image:
+        try:
+            await query.message.reply_photo(
+                photo=header_image,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        except Exception as img_err:
+            logger.debug("Failed to send Steam header image: %s", img_err)
+
+    # Fallback: text only
+    await query.message.reply_text(
+        caption, parse_mode=ParseMode.HTML, disable_web_page_preview=True
     )
 
 

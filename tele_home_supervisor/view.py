@@ -199,3 +199,13 @@ def render_torrent_list(torrents: list[dict]) -> str:
             f"  Speed: {t['dlspeed']:.1f} KiB/s"
         )
     return "\n\n".join(parts)
+
+
+def render_protondb_list(title: str, games: list[dict]) -> str:
+    if not games:
+        return "<i>No games found.</i>"
+    lines = [bold(title)]
+    for idx, game in enumerate(games, start=1):
+        name = html.escape(str(game.get("name") or "Unknown"))
+        lines.append(f"{idx}. {name}")
+    return "\n".join(lines)

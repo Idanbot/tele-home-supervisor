@@ -127,6 +127,34 @@ async def cmd_auth(update, context) -> None:
     await update.message.reply_text("✅ Authorized for 24 hours.")
 
 
+async def cmd_check_auth(update, context) -> None:
+    if not await guard(update, context):
+        return
+    if not config.BOT_AUTH_TOTP_SECRET:
+        await update.message.reply_text("⛔ BOT_AUTH_TOTP_SECRET is not configured.")
+        return
+    user_id = update.effective_user.id
+    state = get_state(context.application)
+    expiry = state.auth_grants.get(user_id)
+    now = time.monotonic()
+    if not expiry or expiry <= now:
+        state.auth_grants.pop(user_id, None)
+        await update.message.reply_text(
+            "🔒 Not authenticated. Use /auth <code> to authenticate."
+        )
+        return
+    remaining = expiry - now
+    hours, remainder = divmod(int(remaining), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        time_str = f"{hours}h {minutes}m"
+    elif minutes > 0:
+        time_str = f"{minutes}m {seconds}s"
+    else:
+        time_str = f"{seconds}s"
+    await update.message.reply_text(f"✅ Authenticated. Expires in {time_str}.")
+
+
 async def cmd_metrics(update, context) -> None:
     if not await guard_sensitive(update, context):
         return

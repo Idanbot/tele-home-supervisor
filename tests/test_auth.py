@@ -6,45 +6,7 @@ from tele_home_supervisor import config
 from tele_home_supervisor.handlers import meta
 from tele_home_supervisor.handlers.common import get_state
 
-
-class DummyChat:
-    def __init__(self, chat_id: int) -> None:
-        self.id = chat_id
-        self.sent: list[str] = []
-
-    async def send_message(self, text: str) -> None:
-        self.sent.append(text)
-
-
-class DummyUser:
-    def __init__(self, user_id: int) -> None:
-        self.id = user_id
-
-
-class DummyMessage:
-    def __init__(self) -> None:
-        self.replies: list[str] = []
-
-    async def reply_text(self, text: str, **_) -> None:
-        self.replies.append(text)
-
-
-class DummyUpdate:
-    def __init__(self, chat_id: int, user_id: int) -> None:
-        self.effective_chat = DummyChat(chat_id)
-        self.effective_user = DummyUser(user_id)
-        self.message = DummyMessage()
-
-
-class DummyApplication:
-    def __init__(self) -> None:
-        self.bot_data: dict[str, object] = {}
-
-
-class DummyContext:
-    def __init__(self, args: list[str]) -> None:
-        self.args = args
-        self.application = DummyApplication()
+from conftest import DummyContext, DummyUpdate
 
 
 @pytest.mark.asyncio

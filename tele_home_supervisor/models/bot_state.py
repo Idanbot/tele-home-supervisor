@@ -26,6 +26,8 @@ _DEBUG_TTL_S = 60 * 60
 _DEBUG_MAX_PER_CMD = 50
 _TMDB_CACHE_TTL_S = 15 * 60
 _TMDB_CACHE_MAX = 200
+_PROTONDB_CACHE_TTL_S = 15 * 60
+_PROTONDB_CACHE_MAX = 100
 
 
 def _normalize(items: set[str]) -> set[str]:
@@ -58,6 +60,9 @@ class BotState:
     log_cache: dict[str, LogCacheEntry] = field(default_factory=dict)
     debug_cache: dict[str, list[DebugEntry]] = field(default_factory=dict)
     tmdb_cache: OrderedDict[str, TmdbCacheEntry] = field(default_factory=OrderedDict)
+    protondb_cache: OrderedDict[str, tuple[float, list[dict]]] = field(
+        default_factory=OrderedDict
+    )
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
     _debug_recorder: DebugRecorder | None = field(default=None, init=False, repr=False)
@@ -196,6 +201,37 @@ class BotState:
             self.tmdb_cache.pop(key, None)
         while len(self.tmdb_cache) > _TMDB_CACHE_MAX:
             self.tmdb_cache.popitem(last=False)
+
+    def new_protondb_key(self) -> str:
+        return secrets.token_urlsafe(8)
+
+    def store_protondb_results(self, key: str, games: list[dict]) -> None:
+        self.protondb_cache[key] = (time.monotonic(), games)
+        self._prune_protondb_cache()
+
+    def get_protondb_results(self, key: str) -> list[dict] | None:
+        entry = self.protondb_cache.get(key)
+        if not entry:
+            return None
+        ts, games = entry
+        if (time.monotonic() - ts) > _PROTONDB_CACHE_TTL_S:
+            self.protondb_cache.pop(key, None)
+            return None
+        return games
+
+    def _prune_protondb_cache(self) -> None:
+        if not self.protondb_cache:
+            return
+        now = time.monotonic()
+        stale_keys = [
+            key
+            for key, (ts, _) in self.protondb_cache.items()
+            if (now - ts) > _PROTONDB_CACHE_TTL_S
+        ]
+        for key in stale_keys:
+            self.protondb_cache.pop(key, None)
+        while len(self.protondb_cache) > _PROTONDB_CACHE_MAX:
+            self.protondb_cache.popitem(last=False)
 
     def metrics_for(self, name: str) -> CommandMetrics:
         return self.command_metrics.setdefault(name, CommandMetrics())

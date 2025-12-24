@@ -1,11 +1,11 @@
-"""Media command handlers (TMDB)."""
+"""Media command handlers (TMDB, ProtonDB)."""
 
 from __future__ import annotations
 
 from telegram.constants import ParseMode
 
 from .. import services, tmdb, view
-from .callbacks import build_tmdb_keyboard
+from .callbacks import build_tmdb_keyboard, build_protondb_keyboard
 from .common import guard, get_state_and_recorder, record_error
 
 
@@ -135,6 +135,41 @@ async def cmd_tmdb(update, context) -> None:
     )
     msg = view.render_tmdb_list(f"TMDB Search: {query}", items)
     keyboard = build_tmdb_keyboard(key, items, 1, total_pages)
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def cmd_protondb(update, context) -> None:
+    if not await guard(update, context):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /protondb <game name>")
+        return
+    query = " ".join(context.args).strip()
+    if not query:
+        await update.message.reply_text("Usage: /protondb <game name>")
+        return
+    state, recorder = get_state_and_recorder(context)
+    try:
+        games = await services.protondb_search(query)
+    except Exception as e:
+        await record_error(
+            recorder,
+            "protondb",
+            f"protondb search failed for query: {query}",
+            e,
+            update.message.reply_text,
+        )
+        return
+    if not games:
+        await update.message.reply_text("No games found.")
+        return
+    # Store results for callback
+    key = state.new_protondb_key()
+    state.store_protondb_results(key, games)
+    msg = view.render_protondb_list(f"ProtonDB Search: {query}", games)
+    keyboard = build_protondb_keyboard(key, games)
     await update.message.reply_text(
         msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
     )

@@ -3,7 +3,7 @@ name = "tele-home-supervisor"
 version = "0.1.0"
 description = "A Telegram bot for home server supervision."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "python-telegram-bot>=22.5",
     "psutil>=7.1.3",

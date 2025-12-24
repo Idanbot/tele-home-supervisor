@@ -55,7 +55,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version: "3.13"
 
       - name: Install dependencies
         run: uv sync --all-extras --dev
@@ -73,8 +73,9 @@ jobs:
       - name: Bandit Security Scan
         run: |
           set -o pipefail
-          uv run bandit -r tele_home_supervisor -x tests --severity-level high \
-            --confidence-level high 2>&1 | tee bandit.log
+          uv run bandit -r tele_home_supervisor -x tests \
+            --severity-level medium \
+            --confidence-level medium 2>&1 | tee bandit.log
 
       # Trivy Scan (Filesystem)
       # Using specific version tag for stability
@@ -117,7 +118,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version: "3.13"
 
       - name: Install dependencies
         run: uv sync --all-extras --dev
@@ -150,7 +151,7 @@ jobs:
       - name: Lint Dockerfile (hadolint)
         run: |
           set -o pipefail
-          docker run --rm -i hadolint/hadolint:v2.12.0 \
+          docker run --rm -i hadolint/hadolint:v2.12.1 \
             hadolint --failure-threshold error - < Dockerfile 2>&1 \
               | tee hadolint.log
 
@@ -257,11 +258,14 @@ jobs:
           fi
 
           rm -f build.log build-metadata.json
+          CACHE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}:buildcache"
           set +e
           docker buildx build \
             --platform linux/arm64 \
             --cache-from type=gha \
+            --cache-from "type=registry,ref=${CACHE_REF}" \
             --cache-to type=gha,mode=max \
+            --cache-to "type=registry,ref=${CACHE_REF},mode=max" \
             --metadata-file build-metadata.json \
             "${ATTEST_ARGS[@]}" \
             "${TAG_ARGS[@]}" \
@@ -325,43 +329,19 @@ jobs:
           cosign sign --yes --recursive \
             "${REGISTRY}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}"
 
-      - name: Install Syft
-        if: github.event_name != 'pull_request'
-        run: |
-          SYFT_VERSION="1.20.0"
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64) SYFT_ARCH="amd64" ;;
-            aarch64|arm64) SYFT_ARCH="arm64" ;;
-            *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
-          esac
-          BASE_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
-          ASSET="syft_${SYFT_VERSION}_linux_${SYFT_ARCH}.tar.gz"
-          curl -sSfL "${BASE_URL}/${ASSET}" -o "${ASSET}"
-          curl -sSfL "${BASE_URL}/syft_${SYFT_VERSION}_checksums.txt" \
-            -o syft.checksums
-          grep " ${ASSET}$" syft.checksums | sha256sum -c -
-          tar -xzf "${ASSET}" -C /usr/local/bin syft
-          rm -f "${ASSET}" syft.checksums
-          syft version
-
       - name: Generate SBOM (image)
         if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0
+        with:
+          image: >-
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}@${{
+            steps.build-and-push.outputs.digest }}
+          artifact-name: sbom.spdx.json
+          output-file: sbom.spdx.json
+          format: spdx-json
         env:
-          SYFT_REGISTRY_USERNAME: ${{ github.actor }}
-          SYFT_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-          IMAGE_NAME_LOW: ${{ env.IMAGE_NAME_LOW }}
-          IMAGE_DIGEST: ${{ steps.build-and-push.outputs.digest }}
-        run: |
-          if [ -z "$IMAGE_DIGEST" ]; then
-            echo "No image digest available; cannot generate SBOM." >&2
-            exit 1
-          fi
-          syft \
-            "${{ env.REGISTRY }}/${IMAGE_NAME_LOW}@${IMAGE_DIGEST}" \
-            --platform linux/arm64 \
-            -o spdx-json \
-            --file sbom.spdx.json
+          SYFT_REGISTRY_AUTH_USERNAME: ${{ github.actor }}
+          SYFT_REGISTRY_AUTH_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Sign SBOM attestation
         if: github.event_name != 'pull_request'
@@ -405,6 +385,7 @@ jobs:
 
   smoke-test:
     name: Smoke Test
+    needs: [quality, test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -419,7 +400,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version: "3.13"
 
       - name: Install dependencies
         run: uv sync --all-extras --dev
@@ -449,6 +430,7 @@ jobs:
     if: always() && github.actor != 'dependabot[bot]'
     needs: [quality, test, smoke-test, container-validate, build-and-push]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Download quality logs
         uses: actions/download-artifact@v7
@@ -487,7 +469,10 @@ jobs:
           STATUS_BUILD: ${{ needs.build-and-push.result }}
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
+          echo "::add-mask::$TELEGRAM_BOT_TOKEN"
+
           status_emoji() {
             case "$1" in
               success) echo "✅" ;;
@@ -551,9 +536,8 @@ jobs:
 
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/"
           RUN_URL+="${{ github.run_id }}"
-          TELEGRAM_API="https://api.telegram.org/bot"
-          TELEGRAM_API+="${{ secrets.TELEGRAM_BOT_TOKEN }}"
-          TELEGRAM_API+="/sendMessage"
+          TELEGRAM_API_BASE="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+          TELEGRAM_API="${TELEGRAM_API_BASE}/sendMessage"
 
           MSG="<b>🧭 Workflow Summary</b>
           ━━━━━━━━━━━━━━━━━━━━

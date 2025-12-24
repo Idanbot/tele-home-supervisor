@@ -12,14 +12,14 @@ repos:
     rev: 1.9.2
     hooks:
       - id: bandit
-        name: bandit (high severity)
+        name: bandit (medium severity)
         args:
           - "-r"
           - "tele_home_supervisor"
           - "--severity-level"
-          - "high"
+          - "medium"
           - "--confidence-level"
-          - "high"
+          - "medium"
         pass_filenames: false
         exclude: '^(\.venv|venv|env)/'
 

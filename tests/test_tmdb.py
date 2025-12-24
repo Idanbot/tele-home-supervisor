@@ -1,14 +1,6 @@
 from tele_home_supervisor import tmdb
 
-
-class DummyResponse:
-    def __init__(self, text: str, status: int = 200) -> None:
-        self.text = text
-        self.status_code = status
-        self.ok = 200 <= status < 300
-
-    def json(self) -> dict:
-        return {"results": []}
+from conftest import DummyResponse
 
 
 def test_tmdb_extract_items_filters_and_limits() -> None:
@@ -43,7 +35,7 @@ def test_tmdb_fetch_raises_on_http_error(monkeypatch) -> None:
     monkeypatch.setattr(tmdb, "TMDB_API_KEY", "test-key")
 
     def fake_get(*_args, **_kwargs):
-        return DummyResponse("nope", status=403)
+        return DummyResponse({}, status=403, text="nope")
 
     monkeypatch.setattr(tmdb.requests, "get", fake_get)
 

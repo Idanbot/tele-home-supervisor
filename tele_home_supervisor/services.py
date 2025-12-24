@@ -7,10 +7,39 @@ synchronous logic (like qBittorrent) in threads.
 from __future__ import annotations
 
 import asyncio
+import time
+from collections import OrderedDict
 from typing import Any
 
-from . import piratebay, utils, tmdb
+from . import piratebay, utils, tmdb, protondb
 from . import torrent as torrent_mod
+
+# Simple in-memory cache for Steam search results
+_STEAM_SEARCH_CACHE: OrderedDict[str, tuple[float, list[dict]]] = OrderedDict()
+_STEAM_SEARCH_CACHE_TTL = 300  # 5 minutes
+_STEAM_SEARCH_CACHE_MAX = 50
+
+
+def _get_cached_steam_search(query: str) -> list[dict] | None:
+    """Get cached Steam search result if still valid."""
+    query_lower = query.lower().strip()
+    entry = _STEAM_SEARCH_CACHE.get(query_lower)
+    if not entry:
+        return None
+    ts, results = entry
+    if time.monotonic() - ts > _STEAM_SEARCH_CACHE_TTL:
+        _STEAM_SEARCH_CACHE.pop(query_lower, None)
+        return None
+    return results
+
+
+def _cache_steam_search(query: str, results: list[dict]) -> None:
+    """Cache Steam search result."""
+    query_lower = query.lower().strip()
+    _STEAM_SEARCH_CACHE[query_lower] = (time.monotonic(), results)
+    # Prune old entries
+    while len(_STEAM_SEARCH_CACHE) > _STEAM_SEARCH_CACHE_MAX:
+        _STEAM_SEARCH_CACHE.popitem(last=False)
 
 
 async def host_health(
@@ -103,6 +132,28 @@ async def tmdb_movie_details(movie_id: int) -> dict[str, object]:
 
 async def tmdb_tv_details(tv_id: int) -> dict[str, object]:
     return await asyncio.to_thread(tmdb.tv_details, tv_id)
+
+
+async def protondb_search(query: str) -> list[dict[str, object]]:
+    """Search Steam games with caching."""
+    cached = _get_cached_steam_search(query)
+    if cached is not None:
+        return cached
+    results = await asyncio.to_thread(protondb.search_steam_games, query)
+    _cache_steam_search(query, results)
+    return results
+
+
+async def protondb_summary(appid: int | str) -> dict[str, object] | None:
+    return await asyncio.to_thread(protondb.get_protondb_summary, appid)
+
+
+async def steam_app_details(appid: int | str) -> dict[str, object] | None:
+    return await asyncio.to_thread(protondb.get_steam_app_details, appid)
+
+
+async def steam_player_count(appid: int | str) -> int | None:
+    return await asyncio.to_thread(protondb.get_steam_player_count, appid)
 
 
 # Torrent helpers (Sync wrappers)

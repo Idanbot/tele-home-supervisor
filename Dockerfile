@@ -1,4 +1,4 @@
-FROM python:3.14.2-slim AS builder
+FROM python:3.13-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -24,7 +24,7 @@ RUN uv sync --frozen --no-dev --compile-bytecode --no-install-project
 
 # --------------------------------------------------------
 
-FROM python:3.14.2-slim
+FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -68,7 +68,7 @@ WORKDIR /app
 RUN mkdir -p /app/data && chown -R app:app /app
 
 # Copy installed packages from builder (Now this actually contains your deps!)
-COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy source code
