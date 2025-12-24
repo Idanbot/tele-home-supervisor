@@ -165,12 +165,49 @@ jobs:
             hadolint.log
           if-no-files-found: ignore
 
+  check-image:
+    name: Check Image Exists
+    needs: [changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Lowercase the repo name
+        run: |
+          echo "IMAGE_NAME_LOW=${GITHUB_REPOSITORY,,}" >> "${GITHUB_ENV}"
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check image tag exists
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="sha-${{ github.sha }}"
+          IMAGE_REF="${REGISTRY}/${IMAGE_NAME_LOW}:${TAG}"
+          if docker manifest inspect "${IMAGE_REF}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-push:
     name: Build & Push Docker Image
-    needs: [changes, quality, test, container-validate]
+    needs: [changes, quality, test, container-validate, check-image]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: needs.changes.outputs.image == 'true'
+    if: |
+      needs.changes.outputs.image == 'true' ||
+      needs.check-image.outputs.exists != 'true'
     permissions:
       contents: read
       packages: write
