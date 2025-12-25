@@ -348,6 +348,34 @@ _AI_COMMANDS = (
         "show current Ollama host/model",
         "cmd_ollamashow",
     ),
+    CommandSpec(
+        "ollamalist",
+        "AI",
+        "/ollamalist",
+        "list available Ollama models",
+        "cmd_ollamalist",
+    ),
+    CommandSpec(
+        "ollamapull",
+        "AI",
+        "/ollamapull <model>",
+        "download an Ollama model",
+        "cmd_ollamapull",
+    ),
+    CommandSpec(
+        "ollamastatus",
+        "AI",
+        "/ollamastatus",
+        "show current Ollama download status",
+        "cmd_ollamastatus",
+    ),
+    CommandSpec(
+        "ollamacancel",
+        "AI",
+        "/ollamacancel",
+        "cancel current Ollama download",
+        "cmd_ollamacancel",
+    ),
 )
 
 

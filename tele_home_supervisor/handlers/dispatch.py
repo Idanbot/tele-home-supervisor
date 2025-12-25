@@ -65,6 +65,10 @@ cmd_ollamahost = rate_limit(ai.cmd_ollamahost, name="ollamahost")
 cmd_ollamamodel = rate_limit(ai.cmd_ollamamodel, name="ollamamodel")
 cmd_ollamareset = rate_limit(ai.cmd_ollamareset, name="ollamareset")
 cmd_ollamashow = rate_limit(ai.cmd_ollamashow, name="ollamashow")
+cmd_ollamalist = rate_limit(ai.cmd_ollamalist, name="ollamalist")
+cmd_ollamapull = rate_limit(ai.cmd_ollamapull, name="ollamapull")
+cmd_ollamastatus = rate_limit(ai.cmd_ollamastatus, name="ollamastatus")
+cmd_ollamacancel = rate_limit(ai.cmd_ollamacancel, name="ollamacancel")
 
 # Media
 cmd_movies = rate_limit(media.cmd_movies, name="movies")
