@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import logging
+import qrcode
 
 from telegram.constants import ParseMode
 
@@ -8,6 +10,55 @@ from .. import services, view
 from .common import get_state_and_recorder, guard_sensitive, record_error
 
 logger = logging.getLogger(__name__)
+
+
+async def cmd_wifiqr(update, context) -> None:
+    if not await guard_sensitive(update, context):
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /wifiqr <ssid> [password]")
+        return
+
+    ssid = args[0]
+    password = args[1] if len(args) > 1 else ""
+    # "T" parameter: WPA, WEP, or nopass
+    auth_type = "WPA" if password else "nopass"
+    # Hidden? (False by default)
+    # WIFI:S:<SSID>;T:<WPA|WEP|nopass>;P:<PASSWORD>;;
+
+    # Escape special chars in SSID/Pass if needed (simple semicolon escape usually)
+    # But qrcode lib might handle strings roughly.
+    # Standard format: special chars like ; , : \ " should be escaped with \
+    def escape(s):
+        return (
+            s.replace("\\", "\\\\")
+            .replace(";", "\\;")
+            .replace(",", "\\,")
+            .replace(":", "\\:")
+            .replace('"', '\\"')
+        )
+
+    wifi_string = f"WIFI:S:{escape(ssid)};T:{auth_type};P:{escape(password)};;"
+
+    try:
+        # Generate generic QR code
+        img = qrcode.make(wifi_string)
+        bio = io.BytesIO()
+        img.save(bio, "PNG")
+        bio.seek(0)
+
+        caption = f"WiFi: <code>{ssid}</code>"
+        if password:
+            caption += f"\nPassword: <code>{password}</code>"
+
+        await update.message.reply_photo(
+            photo=bio, caption=caption, parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        logger.error("Failed to generate WiFi QR: %s", e)
+        await update.message.reply_text("❌ Failed to generate QR code.")
 
 
 async def cmd_dns(update, context) -> None:

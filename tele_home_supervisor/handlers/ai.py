@@ -16,6 +16,7 @@ from telegram.ext import ContextTypes
 
 from .. import config
 from ..ai_service import OllamaClient
+from ..utils import split_telegram_message
 from .common import guard
 
 logger = logging.getLogger(__name__)
@@ -86,30 +87,55 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 len(pending_tokens) >= STREAM_MIN_TOKENS
                 or (now - last_update_time) >= STREAM_UPDATE_INTERVAL
             ):
-                current_text = _format_text("".join(full_response), done=False)
-                if current_text != last_sent_text:
-                    try:
-                        await msg.edit_text(current_text)
-                        last_sent_text = current_text
-                        pending_tokens.clear()
-                        last_update_time = now
-                    except RetryAfter as e:
-                        # Respect Telegram flood control by backing off
-                        await asyncio.sleep(e.retry_after)
-                    except Exception as e:
-                        logger.debug("Stream edit skipped: %s", e)
-                        if "Retry in" in str(e):
-                            await asyncio.sleep(1)
+                # Construct current text
+                current_raw = "".join(full_response)
+                # Only stream edit if it fits in one message with some buffer
+                if len(current_raw) <= 4000:
+                    current_text = _format_text(current_raw, done=False)
+                    if current_text != last_sent_text:
+                        try:
+                            await msg.edit_text(current_text)
+                            last_sent_text = current_text
+                            pending_tokens.clear()
+                            last_update_time = now
+                        except RetryAfter as e:
+                            # Respect Telegram flood control by backing off
+                            await asyncio.sleep(e.retry_after)
+                        except Exception as e:
+                            logger.debug("Stream edit skipped: %s", e)
+                            if "Retry in" in str(e):
+                                await asyncio.sleep(1)
 
-        final_text = _format_text("".join(full_response), done=True)
-        final_text = _close_unbalanced_fences(final_text)
+        # Final delivery
+        final_raw = "".join(full_response)
+
+        # Split into chunks if needed
+        chunks = split_telegram_message(final_raw)
+
+        # Update the original message with the first chunk
+        first_chunk = _format_text(chunks[0], done=True)
+        first_chunk = _close_unbalanced_fences(first_chunk)
+
         try:
-            await msg.edit_text(final_text, parse_mode=ParseMode.MARKDOWN_V2)
+            await msg.edit_text(first_chunk, parse_mode=ParseMode.MARKDOWN_V2)
         except Exception as e:
-            logger.warning(
-                "MarkdownV2 render failed; falling back to plain text: %s", e
-            )
-            await msg.edit_text(final_text)
+            logger.warning("MarkdownV2 render failed for chunk 1; falling back: %s", e)
+            await msg.edit_text(first_chunk)
+
+        # Send subsequent chunks as replies
+        for i, chunk in enumerate(chunks[1:], start=2):
+            # Ensure fences are balanced for each independent message chunk
+            # (split_telegram_message handles this, but _close_unbalanced_fences adds safety)
+            chunk_fmt = _close_unbalanced_fences(chunk)
+            try:
+                await update.message.reply_text(
+                    chunk_fmt, parse_mode=ParseMode.MARKDOWN_V2
+                )
+            except Exception as e:
+                logger.warning(
+                    f"MarkdownV2 render failed for chunk {i}; falling back: {e}"
+                )
+                await update.message.reply_text(chunk_fmt)
 
     except Exception as e:
         logger.exception("Ollama request failed")

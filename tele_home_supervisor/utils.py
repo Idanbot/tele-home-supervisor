@@ -643,6 +643,39 @@ async def dns_lookup(name: str) -> str:
     return await asyncio.to_thread(_resolve)
 
 
+async def get_disk_usage_stats(paths: list[str] | None = None) -> list[dict[str, Any]]:
+    """Get disk usage statistics for specified paths.
+
+    Args:
+        paths: List of paths to check. Defaults to ["/", "/srv/media"].
+
+    Returns:
+        List of dictionaries with keys: path, total, used, free, percent.
+    """
+    if paths is None:
+        paths = ["/", "/srv/media"]
+
+    def _collect():
+        results = []
+        for p in paths:
+            try:
+                du = psutil.disk_usage(p)
+                results.append(
+                    {
+                        "path": p,
+                        "total": du.total,
+                        "used": du.used,
+                        "free": du.free,
+                        "percent": du.percent,
+                    }
+                )
+            except Exception:
+                pass
+        return results
+
+    return await asyncio.to_thread(_collect)
+
+
 async def traceroute_host(host: str, max_hops: int = 20) -> str:
     """Trace route to host."""
     tracepath_bin = shutil.which("tracepath")
@@ -737,3 +770,94 @@ async def speedtest_download(mb: int = 100) -> str:
     except (ValueError, IndexError) as e:
         logger.error(f"Speedtest parse error. Output: '{out[:200]}', Error: {e}")
         return f"Parse error: {e}"
+
+
+def split_telegram_message(text: str, limit: int = 4000) -> list[str]:
+    """Split text into chunks that fit within Telegram's message limit (4096).
+
+    Handles Markdown code blocks to ensure they are properly closed/opened
+    across chunks to preserve formatting.
+
+    Args:
+        text: The text to split.
+        limit: Max characters per chunk (default 4000 for safety).
+
+    Returns:
+        List of strings, each being a valid chunk.
+    """
+    if len(text) <= limit:
+        return [text]
+
+    chunks = []
+    current_chunk = ""
+    in_code_block = False
+    code_block_lang = ""
+
+    lines = text.splitlines(keepends=True)
+
+    for line in lines:
+        # Check if line toggles code block
+        is_toggle_line = "```" in line and line.count("```") % 2 != 0
+
+        # If a single line is too long, we must force-break it
+        if len(line) > limit:
+            # Finish current chunk if not empty
+            if current_chunk:
+                if in_code_block:
+                    current_chunk = current_chunk.rstrip() + "\n```"
+                chunks.append(current_chunk)
+                current_chunk = f"```{code_block_lang}\n" if in_code_block else ""
+
+            # Break the long line into pieces
+            remaining_line = line
+            while len(remaining_line) > limit:
+                take = limit - (
+                    len("```\n") + len(code_block_lang) + 5 if in_code_block else 0
+                )
+                part = remaining_line[:take]
+                if in_code_block:
+                    chunks.append(f"```{code_block_lang}\n{part}\n```")
+                else:
+                    chunks.append(part)
+                remaining_line = remaining_line[take:]
+
+            current_chunk = f"```{code_block_lang}\n" if in_code_block else ""
+            current_chunk += remaining_line
+
+            # If this massive line was a toggle, update state (unlikely for strict markdown but possible)
+            if is_toggle_line:
+                in_code_block = not in_code_block
+                if in_code_block:
+                    content_after = line.split("```", 1)[1].strip()
+                    code_block_lang = content_after.split()[0] if content_after else ""
+            continue
+
+        # Check if adding this line exceeds the limit
+        overhead = 5 if in_code_block else 0
+        if len(current_chunk) + len(line) + overhead > limit:
+            if in_code_block:
+                # Close the current block and move to next chunk
+                chunks.append(current_chunk.rstrip() + "\n```")
+                current_chunk = f"```{code_block_lang}\n" + line
+            else:
+                chunks.append(current_chunk)
+                current_chunk = line
+        else:
+            current_chunk += line
+
+        # Update state after processing the line
+        if is_toggle_line:
+            in_code_block = not in_code_block
+            if in_code_block:
+                # Capture language
+                parts = line.split("```")
+                if len(parts) > 1:
+                    possible_lang = parts[1].strip()
+                    code_block_lang = possible_lang.split()[0] if possible_lang else ""
+
+    if current_chunk and current_chunk.strip():
+        if in_code_block:
+            current_chunk = current_chunk.rstrip() + "\n```"
+        chunks.append(current_chunk)
+
+    return chunks

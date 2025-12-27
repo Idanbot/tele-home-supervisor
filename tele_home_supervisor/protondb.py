@@ -126,7 +126,8 @@ def search_steam_games(query: str) -> list[SteamGame]:
 def _search_steam_store(query: str) -> list[SteamGame]:
     """Fallback search via Steam Store API."""
     url = "https://store.steampowered.com/api/storesearch"
-    params = {"term": query, "l": "english", "cc": "us", "category1": "998"}
+    # Removed category1=998 (Deck Verified) to find all games
+    params = {"term": query, "l": "english", "cc": "us"}
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
     data = None
     try:

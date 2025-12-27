@@ -150,6 +150,9 @@ async def cmd_protondb(update, context) -> None:
     if not query:
         await update.message.reply_text("Usage: /protondb <game name>")
         return
+
+    msg = await update.message.reply_text(f"🔍 Searching ProtonDB for '{query}'...")
+
     state, recorder = get_state_and_recorder(context)
     try:
         games = await services.protondb_search(query)
@@ -159,17 +162,15 @@ async def cmd_protondb(update, context) -> None:
             "protondb",
             f"protondb search failed for query: {query}",
             e,
-            update.message.reply_text,
+            msg.edit_text,
         )
         return
     if not games:
-        await update.message.reply_text("No games found.")
+        await msg.edit_text(f"No games found for '{query}'.")
         return
     # Store results for callback
     key = state.new_protondb_key()
     state.store_protondb_results(key, games)
-    msg = view.render_protondb_list(f"ProtonDB Search: {query}", games)
+    result_text = view.render_protondb_list(f"ProtonDB Search: {query}", games)
     keyboard = build_protondb_keyboard(key, games)
-    await update.message.reply_text(
-        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
-    )
+    await msg.edit_text(result_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)

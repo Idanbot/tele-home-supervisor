@@ -64,6 +64,20 @@ _SYSTEM_COMMANDS = (
         "cmd_temp",
     ),
     CommandSpec("top", "System", "/top", "top CPU processes", "cmd_top"),
+    CommandSpec(
+        "diskusage",
+        "System",
+        "/diskusage",
+        "visual disk usage bars",
+        "cmd_diskusage",
+    ),
+    CommandSpec(
+        "remind",
+        "System",
+        "/remind <minutes> <msg>",
+        "set a reminder timer",
+        "cmd_remind",
+    ),
 )
 
 _DOCKER_COMMANDS = (
@@ -143,6 +157,13 @@ _NETWORK_COMMANDS = (
         "/speedtest [MB]",
         "quick download speed test",
         "cmd_speedtest",
+    ),
+    CommandSpec(
+        "wifiqr",
+        "Network",
+        "/wifiqr <ssid> [password]",
+        "generate WiFi QR code",
+        "cmd_wifiqr",
     ),
 )
 

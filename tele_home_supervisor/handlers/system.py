@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 
 from telegram.constants import ParseMode
@@ -7,6 +8,77 @@ from telegram.constants import ParseMode
 from .. import config, services
 from .. import view
 from .common import guard_sensitive, get_state
+
+
+def _draw_bar(percent: float, length: int = 10) -> str:
+    """Draw a simple ASCII progress bar."""
+    filled = int((percent / 100.0) * length)
+    empty = length - filled
+    # safe clamp
+    filled = max(0, min(length, filled))
+    empty = max(0, min(length, empty))
+    return "█" * filled + "░" * empty
+
+
+async def cmd_diskusage(update, context) -> None:
+    if not await guard_sensitive(update, context):
+        return
+
+    stats = await services.utils.get_disk_usage_stats(config.WATCH_PATHS)
+    if not stats:
+        await update.message.reply_text("No disk stats available.")
+        return
+
+    lines = ["<b>Disk Usage:</b>"]
+    for s in stats:
+        path = s["path"]
+        pct = s["percent"]
+        used = services.utils.fmt_bytes(s["used"])
+        total = services.utils.fmt_bytes(s["total"])
+        bar = _draw_bar(pct)
+        lines.append(f"<code>{path}</code>")
+        lines.append(f"<code>[{bar}] {pct}% ({used}/{total})</code>")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_remind(update, context) -> None:
+    if not await guard_sensitive(update, context):
+        return
+
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text("Usage: /remind <minutes> <message>")
+        return
+
+    try:
+        minutes = float(args[0])
+        text = " ".join(args[1:])
+    except ValueError:
+        await update.message.reply_text("Invalid duration (must be a number).")
+        return
+
+    if minutes <= 0:
+        await update.message.reply_text("Duration must be positive.")
+        return
+
+    await update.message.reply_text(f"⏰ Reminder set for {minutes} minute(s).")
+
+    async def _wait_and_remind(chat_id, delay_s, msg_text):
+        await asyncio.sleep(delay_s)
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⏰ <b>Reminder:</b> {html.escape(msg_text)}",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+
+    # Use create_task on the loop or application to fire and forget
+    context.application.create_task(
+        _wait_and_remind(update.effective_chat.id, minutes * 60, text)
+    )
 
 
 async def cmd_ip(update, context) -> None:

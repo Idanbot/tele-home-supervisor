@@ -13,6 +13,7 @@ dependencies = [
     "qbittorrent-api>=2025.11.1",
     "httpx>=0.27.0",
     "pyotp>=2.9.0",
+    "qrcode[pil]>=8.2",
 ]
 
 [dependency-groups]

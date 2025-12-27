@@ -23,6 +23,8 @@ cmd_uptime = rate_limit(system.cmd_uptime, name="uptime")
 cmd_temp = rate_limit(system.cmd_temp, name="temp")
 cmd_top = rate_limit(system.cmd_top, name="top")
 cmd_ping = rate_limit(system.cmd_ping, name="ping")
+cmd_diskusage = rate_limit(system.cmd_diskusage, name="diskusage")
+cmd_remind = rate_limit(system.cmd_remind, name="remind")
 
 # Docker
 cmd_docker = rate_limit(docker.cmd_docker, name="docker")
@@ -37,6 +39,7 @@ cmd_ports = rate_limit(docker.cmd_ports, name="ports")
 cmd_dns = rate_limit(network.cmd_dns, name="dns")
 cmd_traceroute = rate_limit(network.cmd_traceroute, name="traceroute")
 cmd_speedtest = rate_limit(network.cmd_speedtest, name="speedtest")
+cmd_wifiqr = rate_limit(network.cmd_wifiqr, name="wifiqr")
 
 # Torrents
 cmd_torrent_add = rate_limit(torrents.cmd_torrent_add, name="torrentadd")
