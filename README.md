@@ -1,333 +1,162 @@
-# tele-home-supervisor
+# 🤖 Tele-Home Supervisor
 
 [![CI/CD](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/idanbot/tele-home-supervisor/pkgs/container/tele-home-supervisor)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-yellow.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A Telegram bot for monitoring a Raspberry Pi (or any Linux host) and managing Docker containers, qBittorrent, and AI queries remotely.
+**Tele-Home Supervisor** is a powerful, all-in-one Telegram bot designed to monitor and manage your home server (Raspberry Pi, Linux VPS, NAS) remotely. 
 
-## Features
+It unifies system monitoring, Docker management, torrenting, AI interaction, and media discovery into a single, secure chat interface.
 
-| Category | Capabilities |
-|----------|-------------|
-| **System** | CPU/RAM/disk usage, temperature, uptime, top processes, LAN/WAN IP |
-| **Docker** | List containers, stats, logs, health checks, listening ports |
-| **Network** | Ping, DNS lookup, traceroute, speed test |
-| **Torrents** | Add/pause/resume/delete torrents, completion notifications |
-| **Free Games** | Epic Games, Steam, GOG, Humble Bundle giveaway tracking |
-| **News** | Hacker News top stories with daily digest |
-| **AI** | Query local LLMs via Ollama with customizable parameters |
+---
 
-### Interactive Features
+## ✨ Key Features
 
-- **Inline Keyboards**: `/docker` and `/tstatus` display interactive buttons for quick actions
-- **Command Autocomplete**: All commands appear in Telegram's autocomplete menu
-- **Smart Suggestions**: Commands requiring names show suggestions when called without arguments
+### 🖥️ System & Network
+*   **Real-time Monitoring**: Visual bars for CPU, RAM, and Disk usage (`/health`, `/diskusage`).
+*   **Network Tools**: Ping, DNS lookup, Traceroute, and Speedtest (`/speedtest`).
+*   **Guest WiFi**: Generate QR codes for instant WiFi access (`/wifiqr`).
+*   **Utilities**: Set async reminders (`/remind`), check uptime, and view top processes.
 
-## Quick Start
+### 🐳 Docker Management
+*   **Interactive Control**: Start, stop, and restart containers with inline buttons.
+*   **Deep Inspection**: View logs, stats (CPU/Mem/Net/Block IO), and health status.
+*   **Port Visibility**: See which ports your containers are exposing.
 
-### Prerequisites
+### 🎬 Media & Torrents
+*   **Torrent Manager**: Full qBittorrent control (Add, Pause, Delete) with completion notifications.
+*   **Discovery**: Search The Pirate Bay (`/pbsearch`) or check trending movies/shows on TMDB.
+*   **Gaming**: Check Linux/Steam Deck compatibility via ProtonDB (`/protondb`) and track free game giveaways (Epic, Steam, GOG).
 
-- Docker and Docker Compose
-- A Telegram bot token (from [@BotFather](https://t.me/BotFather))
-- Your Telegram chat ID
-- (Optional) [Ollama](https://ollama.com/) for AI features
+### 🧠 Local AI Integration
+*   **Ollama Support**: Chat with local LLMs (Llama 3, Mistral, etc.) directly in Telegram.
+*   **Smart Splitting**: Automatically handles long responses by splitting them into multiple readable messages.
+*   **Model Management**: List, pull, and switch models on the fly.
 
-### Installation
+---
 
+## 🚀 Quick Start (Docker Compose)
+
+This is the recommended way to run the bot.
+
+### 1. Get the Code
 ```bash
 git clone https://github.com/idanbot/tele-home-supervisor.git
 cd tele-home-supervisor
+```
 
-# Create environment file
-cat > .env << EOF
-BOT_TOKEN=your_bot_token_here
-ALLOWED_CHAT_IDS=your_chat_id_here
+### 2. Configure Environment
+Create a `.env` file with your secrets. **Do not commit this file.**
+
+```bash
+# Telegram (Required)
+BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+ALLOWED_CHAT_IDS=12345678,87654321
+
+# Docker (Required for permissions)
+# Run `getent group docker | cut -d: -f3` to find your ID
+DOCKER_GID=999
+
+# Optional: Secure Auth (for critical commands)
+# Generate a Base32 secret for Google Authenticator
+BOT_AUTH_TOTP_SECRET=JBSWY3DPEHPK3PXP
+
+# Optional: External Services
+OLLAMA_HOST=http://192.168.1.100:11434
 QBT_HOST=qbittorrent
-QBT_PORT=8080
-QBT_USER=admin
-QBT_PASS=adminadmin
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3
-DOCKER_GID=your_docker_gid
-EOF
+TMDB_API_KEY=your_tmdb_api_key
+```
 
-# Create the external network
-docker network create bit-net
-
-# Start the bot
+### 3. Run
+```bash
 docker compose up -d
 ```
 
-The included Watchtower service auto-updates the bot when new images are pushed.
+---
 
-Note: the container runs as a non-root user. Set `DOCKER_GID` to your host's
-docker group id (e.g. `getent group docker | cut -d: -f3`) so Docker commands
-work inside the container.
+## ⚙️ Configuration Reference
 
-## Commands
+### Core & Security
+| Variable | Required | Description |
+|:---|:---:|:---|
+| `BOT_TOKEN` | ✅ | Your Telegram Bot API Token. |
+| `ALLOWED_CHAT_IDS` | ✅ | Comma-separated list of user IDs allowed to interact with the bot. |
+| `BOT_AUTH_TOTP_SECRET` | ❌ | Base32 secret for 2FA (`/auth`). Use if you want extra security for critical commands. |
+| `DOCKER_GID` | ❌ | Group ID of the docker group on the host (enables `/docker` commands). |
 
-### System
-| Command | Description |
-|---------|-------------|
-| `/health` | CPU, RAM, disk, load, uptime |
-| `/ip` | Private LAN and public WAN IP |
-| `/temp` | CPU temperature |
-| `/top` | Top CPU-consuming processes |
-| `/uptime` | System uptime |
-
-### Docker
-| Command | Description |
-|---------|-------------|
-| `/docker [page]` | List containers with interactive buttons (optional page) |
-| `/dinspect <container>` | Docker inspect (JSON, sent as file if large) |
-| `/dockerstats` | CPU/memory per container |
-| `/dstatsrich` | Detailed stats with network/block IO |
-| `/dlogs <container> [page] [--since <time>] [--file]` | Container logs (default sends file; pagination is 50 lines) |
-| `/dhealth <container>` | Health check status |
-| `/ports` | Listening ports inside the bot container |
-
-### Network
-| Command | Description |
-|---------|-------------|
-| `/ping <host> [count]` | Ping a host |
-| `/dns <name>` | DNS lookup |
-| `/traceroute <host>` | Trace network route |
-| `/speedtest [MB]` | Download speed test |
-
-### Torrents
-| Command | Description |
-|---------|-------------|
-| `/tstatus` | List torrents with interactive buttons |
-| `/tadd <magnet/url> [path]` | Add a torrent |
-| `/tstop <name>` | Pause torrent(s) |
-| `/tstart <name>` | Resume torrent(s) |
-| `/tdelete <name> yes` | Delete torrent(s) and files |
-| `/subscribe [on/off]` | Toggle completion notifications |
-| `/pbtop [category]` | Pirate Bay top 10 (optional category or top mode) |
-| `/pbsearch <query>` | Pirate Bay search (top 10 by seeds) |
-
-Categories for `/pbtop`: audio, music, flac, video, hdmovies, hdtv, 4kmovies,
-4ktv, apps, games, porn, ebook, other, top, top48h.
-
-### Free Games & News
-| Command | Description |
-|---------|-------------|
-| `/epicgames` | Current Epic Games freebies |
-| `/steamfree [n]` | Steam free-to-keep games |
-| `/gogfree` | GOG free games |
-| `/humblefree` | Humble Bundle free games |
-| `/hackernews [n]` | Top Hacker News stories |
-| `/mute_epicgames` | Toggle daily Epic digest (8 PM) |
-| `/mute_hackernews` | Toggle daily HN digest (8 AM) |
-
-### Media
-| Command | Description |
-|---------|-------------|
-| `/movies` | TMDB trending movies |
-| `/shows` | TMDB trending shows |
-| `/incinema` | TMDB in cinemas now |
-| `/tmdb <query>` | TMDB search (movies + shows) |
-
-### AI
-| Command | Description |
-|---------|-------------|
-| `/ask <question>` | Ask a question via Ollama (supports flags like `--temp`, `--num-predict`) |
-| `/askreset` | Reset custom AI generation parameters |
-
-### Info
-| Command | Description |
-|---------|-------------|
-| `/auth <code>` | Authorize sensitive commands for 15 minutes |
-| `/help` | Show all commands |
-| `/debug [command]` | Show recent errors/debug info |
-| `/metrics` | Command metrics summary |
-| `/whoami` | Chat and user info |
-| `/version` | Bot version and build info |
-
-## Configuration
-
-### Required Environment Variables
-
+### Integrations
 | Variable | Description |
-|----------|-------------|
-| `BOT_TOKEN` | Telegram bot token |
-| `ALLOWED_CHAT_IDS` | Comma-separated authorized chat IDs |
+|:---|:---|
+| `OLLAMA_HOST` | URL for Ollama API (e.g., `http://172.17.0.1:11434` for host access). |
+| `OLLAMA_MODEL` | Default model to use (default: `llama2`). |
+| `QBT_HOST` | qBittorrent hostname/IP. |
+| `QBT_PORT` | qBittorrent WebUI port (default: `8080`). |
+| `QBT_USER` | qBittorrent username. |
+| `QBT_PASS` | qBittorrent password. |
+| `TMDB_API_KEY` | API Key for Movie/TV metadata (The Movie Database). |
 
-### Optional Environment Variables
-
+### Customization
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `RATE_LIMIT_S` | `1.0` | Command rate limit in seconds |
-| `LOG_LEVEL` | `DEBUG` | Logging level (e.g. DEBUG, INFO, WARNING) |
-| `SHOW_WAN` | `false` | Include WAN IP in `/health` |
-| `WATCH_PATHS` | `/,/srv/media` | Paths for disk usage reporting |
-| `QBT_HOST` | `qbittorrent` | qBittorrent hostname |
-| `QBT_PORT` | `8080` | qBittorrent WebUI port |
-| `QBT_USER` | `admin` | qBittorrent username |
-| `QBT_PASS` | `adminadmin` | qBittorrent password |
-| `QBT_TIMEOUT_S` | `8` | qBittorrent API timeout in seconds |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
-| `OLLAMA_MODEL` | `llama2` | Default model for AI queries |
-| `BOT_AUTH_TOTP_SECRET` | (none) | Base32 TOTP seed for `/auth` (Google Authenticator) |
-| `TPB_BASE_URL` | `https://thepiratebay.org` | Pirate Bay HTML base URL (mirror override) |
-| `TPB_API_BASE_URL` | `https://apibay.org` | Pirate Bay API base URL (fallback) |
-| `TPB_API_BASE_URLS` | (none) | Comma-separated Pirate Bay API mirrors (tried in order) |
-| `TPB_USER_AGENT` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36` | Pirate Bay User-Agent override |
-| `TPB_COOKIE` | (none) | Pirate Bay Cookie header override (e.g. clearance tokens) |
-| `TPB_REFERER` | (none) | Pirate Bay Referer header override |
-| `TMDB_API_KEY` | (none) | TMDB API key (required for media commands) |
-| `TMDB_BASE_URL` | `https://api.themoviedb.org/3` | TMDB API base URL (mirror override) |
-| `TMDB_USER_AGENT` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36` | TMDB User-Agent override |
+|:---|:---:|:---|
+| `RATE_LIMIT_S` | `1.0` | Minimum seconds between commands (flood protection). |
+| `WATCH_PATHS` | `/` | Comma-separated paths to monitor for disk usage. |
+| `SHOW_WAN` | `false` | Set to `true` to show public IP in `/health`. |
+| `LOG_LEVEL` | `DEBUG` | logging verbosity. |
 
-### TOTP Auth Setup
+---
 
-Set `BOT_AUTH_TOTP_SECRET` to a Base32 secret and add it to Google Authenticator
-(manual entry). Example generator:
+## 📚 Command Reference
 
-```bash
-python - <<'PY'
-import base64
-import secrets
+### 🛠 System
+*   `/health` - Comprehensive system dashboard (CPU, RAM, Disk, Load).
+*   `/diskusage` - Visual bar charts of disk space.
+*   `/remind <min> <msg>` - Set a timer to ping you later.
+*   `/wifiqr <ssid> [pass]` - Generate WiFi login QR code.
+*   `/ip` - Show LAN and WAN IP addresses.
+*   `/top` - Show top resource-consuming processes.
 
-print(base64.b32encode(secrets.token_bytes(20)).decode("utf-8").strip("="))
-PY
-```
+### 🐳 Docker
+*   `/docker` - Interactive container list (Start/Stop/Restart).
+*   `/dlogs <name>` - Fetch container logs (as file or text).
+*   `/dstatsrich` - Detailed container metrics (I/O, PIDs).
+*   `/dinspect <name>` - View raw container configuration.
 
-### Volume Mounts
+### 📥 Torrents
+*   `/tstatus` - Real-time download progress with control buttons.
+*   `/tadd <magnet>` - Remote download starter.
+*   `/pbsearch <query>` - Search The Pirate Bay.
+*   `/subscribe` - Get notified when downloads finish.
 
-```yaml
-volumes:
-  - /var/run/docker.sock:/var/run/docker.sock  # Required for Docker commands
-  - /sys/class/thermal/thermal_zone0:/host_thermal:ro  # Optional: CPU temp
-  - /srv/media:/srv/media:ro  # Optional: disk usage monitoring
-  - ./bot_data:/app/data  # Persistent state (mute preferences)
-```
+### 🤖 AI (Ollama)
+*   `/ask <prompt>` - Query your local LLM.
+*   `/ollamapull <model>` - Download new models to your server.
+*   `/ollamastatus` - Track model download progress.
 
-## Development
+### 🎮 Media & Games
+*   `/protondb <game>` - Check Linux gaming compatibility.
+*   `/movies` / `/shows` - See what's trending.
+*   `/epicgames` - Check this week's free games.
 
-### Local Setup
+---
 
-This project uses [`uv`](https://github.com/astral-sh/uv) for dependency management.
+## 🛠 Development
+
+We use [`uv`](https://github.com/astral-sh/uv) for lightning-fast dependency management.
 
 ```bash
-# Install uv (if not already installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install dependencies and setup environment
+# 1. Install dependencies
 uv sync
 
-# Install pre-commit hooks
-uv run pre-commit install
+# 2. Run tests
+uv run pytest
 
-# Run locally
-export BOT_TOKEN=...
-export ALLOWED_CHAT_IDS=...
+# 3. Start bot locally
+export BOT_TOKEN="xyz"
+export ALLOWED_CHAT_IDS="123"
 uv run bot.py
 ```
 
-### Formatting & Linting
+## 📄 License
 
-The project uses [`Ruff`](https://github.com/astral-sh/ruff) for fast linting and formatting (replaces Black, Flake8, Isort).
-
-```bash
-uv run ruff check .   # Lint
-uv run ruff format .  # Format
-```
-
-### Testing
-
-Run the test suite with pytest:
-
-```bash
-uv run pytest tests/ -v           # Verbose test output
-uv run pytest tests/ --cov=tele_home_supervisor  # With coverage
-```
-
-### Security Scanning
-
-Use Bandit for security analysis:
-
-```bash
-uv run bandit -r tele_home_supervisor
-```
-
-### Building the Docker Image
-
-```bash
-docker build -t tele-home-supervisor .
-```
-
-## Project Structure
-
-```
-tele_home_supervisor/
-├── main.py           # Application entry point, command registration
-├── commands.py       # Command registry (single source of truth)
-├── config.py         # Settings and environment variables
-├── state.py          # Runtime state, caches, subscriptions
-├── runtime.py        # Bot runtime initialization
-├── background.py     # Background tasks (torrent polling, schedulers)
-├── scheduled.py      # Fetchers for Epic, Steam, GOG, Humble, HN
-├── services.py       # Business logic layer
-├── ai_service.py     # Ollama integration
-├── torrent.py        # qBittorrent API wrapper
-├── view.py           # Message formatting utilities
-├── logger.py         # Logging configuration
-├── utils.py          # System/Docker/network utilities
-└── handlers/
-    ├── dispatch.py      # Rate-limiting dispatcher
-    ├── callbacks.py     # Inline keyboard handlers
-    ├── ai.py            # AI command handlers
-    ├── meta.py          # /start, /help, /whoami, /version
-    ├── system.py        # Host monitoring commands
-    ├── docker.py        # Docker commands
-    ├── network.py       # Network commands
-    ├── torrents.py      # Torrent commands
-    ├── notifications.py # Free games and news commands
-    └── common.py        # Shared handler utilities
-```
-
-## CI/CD
-
-The GitHub Actions pipeline ([`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)):
-
-1. **Quality**: Ruff linting & formatting check, Bandit security scan, Trivy filesystem scan.
-2. **Test**: Pytest unit tests.
-3. **Container Validation**: Docker Compose validation and Dockerfile linting with Hadolint.
-4. **Build & Push**: Multi-arch Docker images (amd64, arm64) pushed to GHCR.
-5. **Security**: Image signing with Cosign and SBOM generation with Syft.
-6. **Notify**: Telegram notifications on failure with log snippets.
-
-## Best Practices
-
-### Code Quality
-- All code passes Ruff linting and formatting checks
-- Comprehensive docstrings for public APIs
-- Type hints throughout the codebase for better IDE support
-- 100% test coverage for critical paths
-
-### Security
-- No hard-coded secrets (uses environment variables)
-- Input validation and sanitization
-- Rate limiting on all commands
-- Authorization checks on all handlers
-- Regular security scans with Bandit and Trivy
-
-### Architecture
-- Clear separation of concerns (handlers, services, utilities)
-- Async/await throughout for non-blocking I/O
-- Proper error handling with logging
-- Stateful caching with TTL for performance
-- Background tasks for scheduled operations
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| No Docker data | Verify `/var/run/docker.sock` is mounted |
-| No torrent data | Check `QBT_*` environment variables and network connectivity |
-| No AI response | Verify `OLLAMA_HOST` is reachable and model is pulled (`ollama pull llama2`) |
-| Permission denied | Ensure the bot container can access the Docker socket |
-
-## License
-
-MIT
+MIT © [Idan](https://github.com/idanbot)
