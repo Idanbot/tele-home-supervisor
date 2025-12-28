@@ -54,7 +54,7 @@ class BotState:
 
     command_metrics: dict[str, CommandMetrics] = field(default_factory=dict)
 
-    magnet_cache: OrderedDict[str, tuple[float, str, str]] = field(
+    magnet_cache: OrderedDict[str, tuple[float, str, str, int, int]] = field(
         default_factory=OrderedDict
     )
     log_cache: dict[str, LogCacheEntry] = field(default_factory=dict)
@@ -257,22 +257,28 @@ class BotState:
         metrics = self.metrics_for(name)
         metrics.rate_limited += 1
 
-    def store_magnet(self, name: str, magnet: str) -> str:
+    def store_magnet(
+        self, name: str, magnet: str, seeders: int = 0, leechers: int = 0
+    ) -> str:
         key = secrets.token_urlsafe(8)
-        self.magnet_cache[key] = (time.monotonic(), name, magnet)
+        self.magnet_cache[key] = (time.monotonic(), name, magnet, seeders, leechers)
         self._prune_magnets()
         return key
 
-    def get_magnet(self, key: str) -> tuple[str, str] | None:
+    def get_magnet(self, key: str) -> tuple[str, str, int, int] | None:
         self._prune_magnets()
         entry = self.magnet_cache.get(key)
         if not entry:
             return None
-        ts, name, magnet = entry
+        # Handle backward compatibility if tuple size differs in runtime
+        if len(entry) == 3:
+            ts, name, magnet = entry  # type: ignore
+            return name, magnet, 0, 0
+        ts, name, magnet, seeders, leechers = entry
         if (time.monotonic() - ts) > _MAGNET_CACHE_TTL_S:
             self.magnet_cache.pop(key, None)
             return None
-        return name, magnet
+        return name, magnet, seeders, leechers
 
     def _prune_magnets(self) -> None:
         if not self.magnet_cache:
@@ -280,8 +286,8 @@ class BotState:
         now = time.monotonic()
         stale_keys = [
             key
-            for key, (ts, _, _) in self.magnet_cache.items()
-            if (now - ts) > _MAGNET_CACHE_TTL_S
+            for key, val in self.magnet_cache.items()
+            if (now - val[0]) > _MAGNET_CACHE_TTL_S
         ]
         for key in stale_keys:
             self.magnet_cache.pop(key, None)

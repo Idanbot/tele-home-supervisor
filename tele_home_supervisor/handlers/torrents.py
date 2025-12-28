@@ -42,6 +42,12 @@ async def cmd_torrent_add(update, context) -> None:
     torrent = context.args[0]
     save_path = context.args[1] if len(context.args) > 1 else "/downloads"
     res = await services.torrent_add(torrent, save_path)
+
+    state = get_state(context.application)
+    chat_id = update.effective_chat.id
+    if not state.torrent_completion_enabled(chat_id):
+        state.set_torrent_completion_subscription(chat_id, True)
+
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
@@ -208,14 +214,15 @@ def _build_piratebay_keyboard(
     for idx, item in enumerate(results, start=1):
         name = str(item.get("name", "Unknown"))
         seeds = int(item.get("seeders", 0))
+        leech = int(item.get("leechers", 0))
         magnet = str(item.get("magnet", ""))
         if not magnet:
             continue
-        key = state.store_magnet(name, magnet)
+        key = state.store_magnet(name, magnet, seeds, leech)
         label = f"{idx}. {name} ({seeds})"
         if len(label) > 60:
             label = f"{label[:57]}..."
-        buttons.append([InlineKeyboardButton(label, callback_data=f"pbmagnet:{key}")])
+        buttons.append([InlineKeyboardButton(label, callback_data=f"pbselect:{key}")])
     if not buttons:
         return None
     return InlineKeyboardMarkup(buttons)

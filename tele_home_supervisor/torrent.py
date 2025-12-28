@@ -134,7 +134,18 @@ class TorrentManager:
         try:
             # torrents_add accepts urls (magnet) and save_path
             self.qbt_client.torrents_add(urls=magnet_link, save_path=save_path)
-            return "Torrent added successfully."
+
+            # Extract name from magnet for better confirmation
+            from urllib.parse import parse_qs
+
+            name = "Unknown Torrent"
+            if magnet_link.startswith("magnet:?"):
+                query = magnet_link[8:]
+                params = parse_qs(query)
+                if "dn" in params:
+                    name = params["dn"][0]
+
+            return f"✅ Added to download queue:\n<b>{html.escape(name)}</b>"
         except Exception as exc:
             logger.exception("Failed to add torrent: %s", exc)
             return f"Failed to add torrent: {html.escape(str(exc))}"

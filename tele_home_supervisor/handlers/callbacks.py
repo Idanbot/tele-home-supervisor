@@ -421,6 +421,12 @@ async def handle_callback_query(update, context) -> None:
         elif data.startswith("pbmagnet:"):
             key = data[len("pbmagnet:") :]
             await _handle_piratebay_magnet(query, context, key)
+        elif data.startswith("pbselect:"):
+            key = data[len("pbselect:") :]
+            await _handle_piratebay_select(query, context, key)
+        elif data.startswith("pbadd:"):
+            key = data[len("pbadd:") :]
+            await _handle_piratebay_add(query, context, key)
         elif data.startswith("tmdbpage:"):
             await _handle_tmdb_page(query, context, data)
         elif data.startswith("tmdbinfo:"):
@@ -887,13 +893,54 @@ async def _handle_games_callback(query, game_type: str) -> None:
         )
 
 
+async def _handle_piratebay_select(query, context, key: str) -> None:
+    state: BotState = get_state(context.application)
+    entry = state.get_magnet(key)
+    if not entry:
+        await query.message.reply_text("❌ Torrent link expired.")
+        return
+    name, magnet, seeds, leech = entry
+    safe_name = html.escape(name)
+
+    msg = f"<b>{safe_name}</b>\n\n🌱 Seeds: {seeds}\n🐌 Leechers: {leech}"
+
+    buttons = [
+        [InlineKeyboardButton("🧲 Get Magnet", callback_data=f"pbmagnet:{key}")],
+        [InlineKeyboardButton("➕ Add to qBittorrent", callback_data=f"pbadd:{key}")],
+    ]
+    keyboard = InlineKeyboardMarkup(buttons)
+
+    await query.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def _handle_piratebay_add(query, context, key: str) -> None:
+    state: BotState = get_state(context.application)
+    entry = state.get_magnet(key)
+    if not entry:
+        await query.message.reply_text("❌ Torrent link expired.")
+        return
+    name, magnet, _, _ = entry
+
+    # We call services.torrent_add which calls tadd logic
+    # Note: services.torrent_add uses default save path
+    res = await services.torrent_add(magnet)
+
+    chat_id = query.message.chat.id
+    if not state.torrent_completion_enabled(chat_id):
+        state.set_torrent_completion_subscription(chat_id, True)
+
+    await query.message.reply_text(res, parse_mode=ParseMode.HTML)
+
+
 async def _handle_piratebay_magnet(query, context, key: str) -> None:
     state: BotState = get_state(context.application)
     entry = state.get_magnet(key)
     if not entry:
         await query.message.reply_text("❌ Torrent link expired.")
         return
-    name, magnet = entry
+    name, magnet, _, _ = entry
     safe_name = html.escape(name)
     safe_magnet = html.escape(magnet)
     msg = f"<b>{safe_name}</b>\n<code>{safe_magnet}</code>"
