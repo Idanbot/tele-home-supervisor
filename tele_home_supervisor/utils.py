@@ -669,8 +669,8 @@ async def get_disk_usage_stats(paths: list[str] | None = None) -> list[dict[str,
                         "percent": du.percent,
                     }
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to check disk usage for {p}: {e}")
         return results
 
     return await asyncio.to_thread(_collect)

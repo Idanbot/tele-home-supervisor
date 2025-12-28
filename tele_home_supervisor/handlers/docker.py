@@ -173,10 +173,18 @@ async def cmd_dlogs(update, context) -> None:
     await state.maybe_refresh("containers")
 
     if not context.args:
-        await reply_usage_with_suggestions(
-            update,
-            "/dlogs &lt;container&gt; [page] [--since <time>] [--file]",
-            state.suggest("containers", limit=5),
+        # Show container selection menu
+        from .callbacks import build_dlogs_selection_keyboard
+
+        container_names = sorted(state.get_cached("containers"))
+        if not container_names:
+            await update.message.reply_text("No containers found.")
+            return
+
+        msg = "<b>Select a container to view logs:</b>"
+        keyboard = build_dlogs_selection_keyboard(container_names, page=0)
+        await update.message.reply_text(
+            msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
         )
         return
 

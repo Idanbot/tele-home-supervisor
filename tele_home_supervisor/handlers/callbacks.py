@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import io
 import logging
 import math
 import time
@@ -142,14 +143,24 @@ def _render_logs_page(
         )
     if nav_row:
         buttons.append(nav_row)
-    buttons.append(
-        [
-            InlineKeyboardButton(
-                "🔄 Refresh",
-                callback_data=_format_log_callback(container, start, since, "refresh"),
-            )
-        ]
-    )
+
+    # Action row
+    action_row = [
+        InlineKeyboardButton(
+            "🔄 Refresh",
+            callback_data=_format_log_callback(container, start, since, "refresh"),
+        ),
+        InlineKeyboardButton(
+            "💾 File",
+            callback_data=_format_log_callback(container, start, since, "file"),
+        ),
+        InlineKeyboardButton(
+            "🔙 List",
+            callback_data="dlogs:back",
+        ),
+    ]
+    buttons.append(action_row)
+
     return msg, InlineKeyboardMarkup(buttons), start
 
 
@@ -159,6 +170,58 @@ def _format_log_callback(
     if since is None:
         return f"dlogs:{action}:{container}:{start}"
     return f"dlogs:{action}:{container}:{start}:{since}"
+
+
+def build_dlogs_selection_keyboard(
+    containers: list[str], page: int = 0
+) -> InlineKeyboardMarkup:
+    """Build inline keyboard for selecting a container to view logs."""
+    buttons: list[list[InlineKeyboardButton]] = []
+    page, total_pages = normalize_docker_page(len(containers), page)
+    start = page * DOCKER_PAGE_SIZE
+    end = start + DOCKER_PAGE_SIZE
+
+    # 2 columns
+    row: list[InlineKeyboardButton] = []
+    for name in containers[start:end]:
+        # Use existing dlogs: handler which renders the log page
+        row.append(
+            InlineKeyboardButton(f"📜 {name[:20]}", callback_data=f"dlogs:{name[:30]}")
+        )
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    nav_row = _build_pagination_row(page, total_pages, "dlogs:list")
+    if nav_row:
+        buttons.append(nav_row)
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def _build_pagination_row(
+    page: int, total_pages: int, prefix: str
+) -> list[InlineKeyboardButton]:
+    if total_pages <= 1:
+        return []
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"{prefix}:{page - 1}")
+        )
+    nav_row.append(
+        InlineKeyboardButton(
+            f"📄 {page + 1}/{total_pages}", callback_data=f"{prefix.split(':')[0]}:noop"
+        )
+    )
+    if page + 1 < total_pages:
+        nav_row.append(
+            InlineKeyboardButton("Next ➡️", callback_data=f"{prefix}:{page + 1}")
+        )
+    return nav_row
 
 
 def build_docker_keyboard(containers: list[str], page: int = 0) -> InlineKeyboardMarkup:
@@ -177,22 +240,11 @@ def build_docker_keyboard(containers: list[str], page: int = 0) -> InlineKeyboar
                 InlineKeyboardButton("📊", callback_data=f"dstats:{name[:30]}"),
             ]
         )
-    if total_pages > 1:
-        nav_row = []
-        if page > 0:
-            nav_row.append(
-                InlineKeyboardButton("⬅️ Prev", callback_data=f"docker:page:{page - 1}")
-            )
-        nav_row.append(
-            InlineKeyboardButton(
-                f"📄 {page + 1}/{total_pages}", callback_data="docker:noop"
-            )
-        )
-        if page + 1 < total_pages:
-            nav_row.append(
-                InlineKeyboardButton("Next ➡️", callback_data=f"docker:page:{page + 1}")
-            )
+
+    nav_row = _build_pagination_row(page, total_pages, "docker:page")
+    if nav_row:
         buttons.append(nav_row)
+
     buttons.append(
         [InlineKeyboardButton("🔄 Refresh", callback_data=f"docker:refresh:{page}")]
     )
@@ -321,6 +373,18 @@ async def handle_callback_query(update, context) -> None:
                 await _handle_dlogs_page(
                     query, context, container, start, since=since, refresh=True
                 )
+        elif data.startswith("dlogs:file:"):
+            payload = _parse_log_page_payload(data, "dlogs:file:")
+            if payload:
+                container, _, since = payload
+                await _handle_dlogs_file(query, context, container, since)
+        elif data.startswith("dlogs:list:"):
+            page = _parse_page(data, "dlogs:list:")
+            await _handle_dlogs_list(query, context, page)
+        elif data == "dlogs:back":
+            await _handle_dlogs_list(query, context, 0)
+        elif data == "dlogs:noop":
+            return
         elif data.startswith("dlogs:"):
             container = data[6:]
             await _handle_dlogs_callback(query, context, container)
@@ -834,3 +898,49 @@ async def _handle_piratebay_magnet(query, context, key: str) -> None:
     safe_magnet = html.escape(magnet)
     msg = f"<b>{safe_name}</b>\n<code>{safe_magnet}</code>"
     await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def _handle_dlogs_list(query, context, page: int) -> None:
+    state: BotState = get_state(context.application)
+    await state.maybe_refresh("containers")
+
+    container_names = sorted(state.get_cached("containers"))
+    if not container_names:
+        await _safe_edit_message_text(
+            query, "No containers found.", parse_mode=ParseMode.HTML
+        )
+        return
+
+    msg = "<b>Select a container to view logs:</b>"
+    keyboard = build_dlogs_selection_keyboard(container_names, page=page)
+    await _safe_edit_message_text(
+        query, msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def _handle_dlogs_file(query, context, container: str, since: int | None) -> None:
+    await query.answer("Fetching log file...")
+    # Ensure fresh full logs
+    try:
+        raw_logs = await services.get_container_logs_full(container, since=since)
+    except Exception as e:
+        await query.message.reply_text(f"❌ Failed to fetch logs: {e}")
+        return
+
+    if not raw_logs:
+        await query.message.reply_text("❌ Log is empty.")
+        return
+
+    payload = raw_logs.encode(errors="replace")
+    filename = f"{container}-logs.txt"
+    if since:
+        filename = f"{container}-logs-since-{since}.txt"
+
+    file_obj = io.BytesIO(payload)
+    file_obj.name = filename
+
+    try:
+        await query.message.reply_document(document=file_obj)
+    except Exception as e:
+        logger.error(f"Failed to send log file: {e}")
+        await query.message.reply_text(f"❌ Failed to send file: {e}")

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import html
+import logging
 
 from telegram.constants import ParseMode
 
 from .. import config, services
 from .. import view
 from .common import guard_sensitive, get_state
+
+logger = logging.getLogger(__name__)
 
 
 def _draw_bar(percent: float, length: int = 10) -> str:
@@ -72,8 +75,8 @@ async def cmd_remind(update, context) -> None:
                 text=f"⏰ <b>Reminder:</b> {html.escape(msg_text)}",
                 parse_mode=ParseMode.HTML,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to send reminder to {chat_id}: {e}")
 
     # Use create_task on the loop or application to fire and forget
     context.application.create_task(
