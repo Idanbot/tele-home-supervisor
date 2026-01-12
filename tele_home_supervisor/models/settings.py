@@ -23,3 +23,5 @@ class Settings:
     OLLAMA_HOST: str
     OLLAMA_MODEL: str
     BOT_AUTH_TOTP_SECRET: str | None
+    ALERT_PING_LAN_TARGETS: List[str]
+    ALERT_PING_WAN_TARGETS: List[str]

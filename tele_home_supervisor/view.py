@@ -183,7 +183,21 @@ def render_torrent_list(torrents: list[dict]) -> str:
     if not torrents:
         return "No active torrents found."
 
-    parts = []
+    return "\n\n".join(_render_torrent_lines(torrents))
+
+
+def render_torrent_list_page(torrents: list[dict], page: int, total_pages: int) -> str:
+    if not torrents:
+        return "No active torrents found."
+
+    page_label = f"Torrents (page {page + 1}/{max(total_pages, 1)}):"
+    lines = [bold(page_label)]
+    lines.extend(_render_torrent_lines(torrents))
+    return "\n\n".join(lines)
+
+
+def _render_torrent_lines(torrents: list[dict]) -> list[str]:
+    parts: list[str] = []
     for t in torrents:
         name = bold(t["name"])
         state = html.escape(t["state"])
@@ -198,7 +212,7 @@ def render_torrent_list(torrents: list[dict]) -> str:
             f"{progress_line}\n"
             f"  Speed: {t['dlspeed']:.1f} KiB/s"
         )
-    return "\n\n".join(parts)
+    return parts
 
 
 def render_protondb_list(title: str, games: list[dict]) -> str:

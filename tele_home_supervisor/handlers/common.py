@@ -5,12 +5,14 @@ from __future__ import annotations
 import functools
 import html
 import logging
+import secrets
 import time
 from typing import TYPE_CHECKING, Callable
 
 from telegram.constants import ParseMode
 
 from .. import config
+from ..models.audit import AuditEntry
 from ..state import BOT_STATE_KEY, BotState, DebugRecorder
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,8 @@ _last_command_ts = 0.0
 # A simple float comparison is atomic enough for this use case.
 _DAY_S = 24 * 60 * 60  # 24 hours
 _AUTH_TTL_S = _DAY_S
+_AUTH_FLAG_KEY = "_auth_ok"
+_AUDIT_TARGET_KEY = "_audit_target"
 
 
 def auth_ttl_seconds() -> int:
@@ -48,6 +52,93 @@ def get_state(app) -> BotState:
 def get_state_and_recorder(context) -> tuple[BotState, DebugRecorder]:
     state = get_state(context.application)
     return state, state.debug_recorder()
+
+
+def _set_auth_flag(context, ok: bool) -> None:
+    if context is None:
+        return
+    try:
+        context.chat_data[_AUTH_FLAG_KEY] = ok
+    except Exception:
+        return
+
+
+def set_audit_target(context, target: str | None) -> None:
+    if context is None:
+        return
+    try:
+        if target:
+            context.chat_data[_AUDIT_TARGET_KEY] = target
+        else:
+            context.chat_data.pop(_AUDIT_TARGET_KEY, None)
+    except Exception:
+        return
+
+
+def _pop_audit_target(context) -> str | None:
+    if context is None:
+        return None
+    try:
+        return context.chat_data.pop(_AUDIT_TARGET_KEY, None)
+    except Exception:
+        return None
+
+
+def _format_user_name(user) -> str:
+    if not user:
+        return "unknown"
+    username = getattr(user, "username", None)
+    if username:
+        return f"@{username}"
+    first = getattr(user, "first_name", "") or ""
+    last = getattr(user, "last_name", "") or ""
+    name = " ".join(part for part in (first, last) if part).strip()
+    if name:
+        return name
+    user_id = getattr(user, "id", None)
+    return str(user_id) if user_id is not None else "unknown"
+
+
+def _mask_sensitive(value: str | None) -> str | None:
+    if not value:
+        return value
+    lowered = value.lower()
+    if "magnet:?" in lowered:
+        return "magnet:?<redacted>"
+    if "token" in lowered or "secret" in lowered:
+        return "<redacted>"
+    if len(value) > 120:
+        return f"{value[:117]}..."
+    return value
+
+
+def record_audit_event(
+    context,
+    update,
+    action: str,
+    target: str | None,
+    status: str,
+    duration_ms: int,
+) -> None:
+    if not context or not update:
+        return
+    chat = getattr(update, "effective_chat", None)
+    if not chat:
+        return
+    user = getattr(update, "effective_user", None)
+    state = get_state(context.application)
+    entry = AuditEntry(
+        id=secrets.token_hex(4),
+        chat_id=chat.id,
+        user_id=getattr(user, "id", None),
+        user_name=_format_user_name(user),
+        action=action,
+        target=_mask_sensitive(target),
+        status=status,
+        duration_ms=max(0, int(duration_ms)),
+        created_at=time.time(),
+    )
+    state.record_audit_entry(entry)
 
 
 async def record_error(
@@ -102,9 +193,11 @@ async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
         This is the primary authorization mechanism for all guarded commands.
     """
     if allowed(update):
+        _set_auth_flag(context, True)
         return True
     if update and update.effective_chat:
         await update.effective_chat.send_message("⛔ Not authorized")
+    _set_auth_flag(context, False)
     return False
 
 
@@ -127,16 +220,20 @@ async def guard_sensitive(
             await update.effective_chat.send_message(
                 "⛔ Auth secret not configured. Set BOT_AUTH_TOTP_SECRET."
             )
+        _set_auth_flag(context, False)
         return False
     if not update or not update.effective_user:
+        _set_auth_flag(context, False)
         return False
     state = get_state(context.application)
     if _auth_valid(state, update.effective_user.id):
+        _set_auth_flag(context, True)
         return True
     if update and update.effective_chat:
         await update.effective_chat.send_message(
             "🔒 Please authenticate with /auth <secret> (valid for 24 hours)."
         )
+    _set_auth_flag(context, False)
     return False
 
 
@@ -180,10 +277,19 @@ def rate_limit(func: Callable, name: str | None = None) -> Callable:
             return
 
         _last_command_ts = now
+        try:
+            context.chat_data.pop(_AUDIT_TARGET_KEY, None)
+            context.chat_data.pop(_AUTH_FLAG_KEY, None)
+        except Exception:
+            pass
         start = time.perf_counter()
+        ok = False
+        error_msg = None
         try:
             result = await func(update, context, *args, **kwargs)
+            ok = True
         except Exception as e:
+            error_msg = str(e)
             latency_s = time.perf_counter() - start
             try:
                 state = get_state(context.application)
@@ -193,14 +299,37 @@ def rate_limit(func: Callable, name: str | None = None) -> Callable:
             except Exception as metrics_error:
                 logger.debug("metrics record failed: %s", metrics_error)
             raise
-        else:
+        finally:
             latency_s = time.perf_counter() - start
+            auth_flag = None
             try:
-                state = get_state(context.application)
-                state.record_command(command_name, latency_s, ok=True, error_msg=None)
-            except Exception as metrics_error:
-                logger.debug("metrics record failed: %s", metrics_error)
-            return result
+                auth_flag = context.chat_data.pop(_AUTH_FLAG_KEY, None)
+            except Exception:
+                auth_flag = None
+            target = _pop_audit_target(context)
+            status = "ok" if ok else "error"
+            if auth_flag is False:
+                status = "denied"
+            try:
+                record_audit_event(
+                    context,
+                    update,
+                    command_name,
+                    target,
+                    status,
+                    int(latency_s * 1000),
+                )
+            except Exception as audit_error:
+                logger.debug("audit record failed: %s", audit_error)
+            if ok and error_msg is None and auth_flag is not False:
+                try:
+                    state = get_state(context.application)
+                    state.record_command(
+                        command_name, latency_s, ok=True, error_msg=None
+                    )
+                except Exception as metrics_error:
+                    logger.debug("metrics record failed: %s", metrics_error)
+        return result
 
     return wrapper
 

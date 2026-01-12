@@ -15,8 +15,9 @@ from .common import (
     get_state_and_recorder,
     record_error,
     reply_usage_with_suggestions,
+    set_audit_target,
 )
-from .callbacks import build_torrent_keyboard
+from .callbacks import build_torrent_keyboard, paginate_torrents
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ async def cmd_torrent_add(update, context) -> None:
         return
     torrent = context.args[0]
     save_path = context.args[1] if len(context.args) > 1 else "/downloads"
+    set_audit_target(context, "torrent_add")
     res = await services.torrent_add(torrent, save_path)
 
     state = get_state(context.application)
@@ -60,17 +62,13 @@ async def cmd_torrent_status(update, context) -> None:
         logger.debug("refresh_torrents failed: %s", e)
 
     torrents = await services.get_torrent_list()
-    msg = view.render_torrent_list(torrents)
-    keyboard = build_torrent_keyboard(torrents) if torrents else None
+    page_torrents, page, total_pages = paginate_torrents(torrents, 0)
+    msg = view.render_torrent_list_page(page_torrents, page, total_pages)
+    keyboard = build_torrent_keyboard(torrents, page=page) if torrents else None
 
-    parts = view.chunk(msg)
-    for i, part in enumerate(parts):
-        if i == len(parts) - 1 and keyboard:
-            await update.message.reply_text(
-                part, parse_mode=ParseMode.HTML, reply_markup=keyboard
-            )
-        else:
-            await update.message.reply_text(part, parse_mode=ParseMode.HTML)
+    await update.message.reply_text(
+        msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
 
 
 async def cmd_torrent_stop(update, context) -> None:
@@ -84,6 +82,7 @@ async def cmd_torrent_stop(update, context) -> None:
         )
         return
     name = " ".join(context.args)
+    set_audit_target(context, name)
     if not _has_torrent_match(state.get_cached("torrents"), name):
         await reply_usage_with_suggestions(
             update, "/tstop <torrent>", state.suggest("torrents", query=name, limit=5)
@@ -104,6 +103,7 @@ async def cmd_torrent_start(update, context) -> None:
         )
         return
     name = " ".join(context.args)
+    set_audit_target(context, name)
     if not _has_torrent_match(state.get_cached("torrents"), name):
         await reply_usage_with_suggestions(
             update, "/tstart <torrent>", state.suggest("torrents", query=name, limit=5)
@@ -150,6 +150,7 @@ async def cmd_torrent_delete(update, context) -> None:
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         return
 
+    set_audit_target(context, name)
     if not _has_torrent_match(state.get_cached("torrents"), name):
         await reply_usage_with_suggestions(
             update,

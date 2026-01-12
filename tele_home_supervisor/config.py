@@ -48,6 +48,11 @@ def _split_paths(s: str) -> List[str]:
     return [p.strip() for p in (s or "/,/srv/media").split(",") if p.strip()]
 
 
+def _split_csv(s: str) -> List[str]:
+    """Parse comma-separated string into a list of values."""
+    return [p.strip() for p in (s or "").split(",") if p.strip()]
+
+
 def _read_settings() -> Settings:
     """Read all configuration from environment variables.
 
@@ -85,6 +90,8 @@ def _read_settings() -> Settings:
     ollama_host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
     ollama_model = os.environ.get("OLLAMA_MODEL") or "llama2"
     bot_auth_totp_secret = os.environ.get("BOT_AUTH_TOTP_SECRET") or None
+    alert_ping_lan = _split_csv(os.environ.get("ALERT_PING_LAN_TARGETS", ""))
+    alert_ping_wan = _split_csv(os.environ.get("ALERT_PING_WAN_TARGETS", ""))
 
     return Settings(
         BOT_TOKEN=token,
@@ -100,6 +107,8 @@ def _read_settings() -> Settings:
         OLLAMA_HOST=ollama_host,
         OLLAMA_MODEL=ollama_model,
         BOT_AUTH_TOTP_SECRET=bot_auth_totp_secret,
+        ALERT_PING_LAN_TARGETS=alert_ping_lan,
+        ALERT_PING_WAN_TARGETS=alert_ping_wan,
     )
 
 
@@ -132,5 +141,7 @@ OLLAMA_HOST: str = settings.OLLAMA_HOST
 OLLAMA_MODEL: str = settings.OLLAMA_MODEL
 QBT_TIMEOUT_S: float = settings.QBT_TIMEOUT_S
 BOT_AUTH_TOTP_SECRET: str | None = settings.BOT_AUTH_TOTP_SECRET
+ALERT_PING_LAN_TARGETS: list[str] = settings.ALERT_PING_LAN_TARGETS
+ALERT_PING_WAN_TARGETS: list[str] = settings.ALERT_PING_WAN_TARGETS
 
 validate_settings()

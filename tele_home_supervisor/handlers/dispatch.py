@@ -3,7 +3,18 @@
 from __future__ import annotations
 
 from .common import rate_limit
-from . import meta, system, docker, network, torrents, notifications, ai, media
+from . import (
+    meta,
+    system,
+    docker,
+    network,
+    torrents,
+    notifications,
+    ai,
+    media,
+    alerts,
+    audit,
+)
 
 
 # Meta
@@ -15,6 +26,7 @@ cmd_check_auth = rate_limit(meta.cmd_check_auth, name="check_auth")
 cmd_version = rate_limit(meta.cmd_version, name="version")
 cmd_metrics = rate_limit(meta.cmd_metrics, name="metrics")
 cmd_debug = rate_limit(meta.cmd_debug, name="debug")
+cmd_audit = rate_limit(audit.cmd_audit, name="audit")
 
 # System
 cmd_ip = rate_limit(system.cmd_ip, name="ip")
@@ -60,6 +72,7 @@ cmd_hackernews_now = rate_limit(notifications.cmd_hackernews_now, name="hackerne
 cmd_steamfree_now = rate_limit(notifications.cmd_steamfree_now, name="steamfree")
 cmd_gogfree_now = rate_limit(notifications.cmd_gogfree_now, name="gogfree")
 cmd_humblefree_now = rate_limit(notifications.cmd_humblefree_now, name="humblefree")
+cmd_alerts = rate_limit(alerts.cmd_alerts, name="alerts")
 
 # AI
 cmd_ask = rate_limit(ai.cmd_ask, name="ask")

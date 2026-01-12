@@ -6,11 +6,13 @@ import json
 import logging
 import secrets
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import services
+from .alerts import AlertRule, AlertState
+from .audit import AuditEntry
 from .cache import CacheEntry, LogCacheEntry
 from .debug import DebugEntry, DebugRecorder
 from .metrics import CommandMetrics
@@ -28,6 +30,7 @@ _TMDB_CACHE_TTL_S = 15 * 60
 _TMDB_CACHE_MAX = 200
 _PROTONDB_CACHE_TTL_S = 15 * 60
 _PROTONDB_CACHE_MAX = 100
+_AUDIT_MAX_PER_CHAT = 200
 
 
 def _normalize(items: set[str]) -> set[str]:
@@ -49,6 +52,12 @@ class BotState:
     gameoffers_muted: set[int] = field(default_factory=set)
     hackernews_muted: set[int] = field(default_factory=set)
 
+    # Alerts (per-chat)
+    alerts_enabled: set[int] = field(default_factory=set)
+    alert_rules: dict[str, AlertRule] = field(default_factory=dict)
+    alert_states: dict[str, AlertState] = field(default_factory=dict)
+    alert_torrent_seen: dict[str, bool] = field(default_factory=dict)
+
     # Auth grants (user_id -> monotonic expiry timestamp)
     auth_grants: dict[int, float] = field(default_factory=dict)
 
@@ -63,6 +72,7 @@ class BotState:
     protondb_cache: OrderedDict[str, tuple[float, list[dict]]] = field(
         default_factory=OrderedDict
     )
+    audit_log: dict[int, deque[AuditEntry]] = field(default_factory=dict)
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
     _debug_recorder: DebugRecorder | None = field(default=None, init=False, repr=False)
@@ -308,6 +318,127 @@ class BotState:
     def torrent_completion_enabled(self, chat_id: int) -> bool:
         return chat_id in self.torrent_completion_subscribers
 
+    def alerts_enabled_for(self, chat_id: int) -> bool:
+        return chat_id in self.alerts_enabled
+
+    def set_alerts_enabled(self, chat_id: int, enable: bool | None) -> bool:
+        if enable is None:
+            enable = chat_id not in self.alerts_enabled
+        if enable:
+            self.alerts_enabled.add(chat_id)
+            self.reset_alert_states(chat_id)
+            self.alert_torrent_seen = {}
+        else:
+            self.alerts_enabled.discard(chat_id)
+            self.reset_alert_states(chat_id, cleared_at=time.time())
+        self._save_state()
+        return enable
+
+    def alert_rules_for_chat(self, chat_id: int) -> list[AlertRule]:
+        return sorted(
+            [rule for rule in self.alert_rules.values() if rule.chat_id == chat_id],
+            key=lambda r: (r.metric, r.id),
+        )
+
+    def get_alert_rule(self, rule_id: str) -> AlertRule | None:
+        return self.alert_rules.get(rule_id)
+
+    def add_alert_rule(
+        self,
+        chat_id: int,
+        metric: str,
+        operator: str,
+        threshold: object,
+        duration_s: int,
+        enabled: bool = True,
+    ) -> AlertRule:
+        rule_id = secrets.token_hex(3)
+        while rule_id in self.alert_rules:
+            rule_id = secrets.token_hex(3)
+        rule = AlertRule(
+            id=rule_id,
+            chat_id=chat_id,
+            metric=metric,
+            operator=operator,
+            threshold=threshold,
+            duration_s=duration_s,
+            enabled=enabled,
+        )
+        self.alert_rules[rule_id] = rule
+        self.alert_states.setdefault(rule_id, AlertState())
+        self._save_state()
+        return rule
+
+    def update_alert_rule(
+        self,
+        rule_id: str,
+        metric: str,
+        operator: str,
+        threshold: object,
+        duration_s: int,
+        enabled: bool | None = None,
+    ) -> AlertRule | None:
+        rule = self.alert_rules.get(rule_id)
+        if not rule:
+            return None
+        rule.metric = metric
+        rule.operator = operator
+        rule.threshold = threshold
+        rule.duration_s = duration_s
+        if enabled is not None:
+            rule.enabled = enabled
+        state = self.alert_states.setdefault(rule_id, AlertState())
+        state.active_since = None
+        self._save_state()
+        return rule
+
+    def remove_alert_rule(self, chat_id: int, rule_id: str) -> bool:
+        rule = self.alert_rules.get(rule_id)
+        if not rule or rule.chat_id != chat_id:
+            return False
+        self.alert_rules.pop(rule_id, None)
+        self.alert_states.pop(rule_id, None)
+        self._save_state()
+        return True
+
+    def toggle_alert_rule(self, chat_id: int, rule_id: str) -> bool | None:
+        rule = self.alert_rules.get(rule_id)
+        if not rule or rule.chat_id != chat_id:
+            return None
+        rule.enabled = not rule.enabled
+        state = self.alert_states.setdefault(rule_id, AlertState())
+        state.active_since = None
+        if not rule.enabled:
+            state.last_cleared_at = time.time()
+        self._save_state()
+        return rule.enabled
+
+    def alert_state_for(self, rule_id: str) -> AlertState:
+        return self.alert_states.setdefault(rule_id, AlertState())
+
+    def reset_alert_states(self, chat_id: int, cleared_at: float | None = None) -> None:
+        for rule in self.alert_rules_for_chat(chat_id):
+            state = self.alert_states.setdefault(rule.id, AlertState())
+            state.active_since = None
+            if cleared_at is not None:
+                state.last_cleared_at = cleared_at
+
+    def record_audit_entry(self, entry: AuditEntry) -> None:
+        queue = self.audit_log.setdefault(
+            entry.chat_id, deque(maxlen=_AUDIT_MAX_PER_CHAT)
+        )
+        queue.append(entry)
+
+    def get_audit_entries(self, chat_id: int, limit: int) -> list[AuditEntry]:
+        queue = self.audit_log.get(chat_id)
+        if not queue:
+            return []
+        items = list(queue)
+        return items[-limit:]
+
+    def clear_audit_entries(self, chat_id: int) -> None:
+        self.audit_log.pop(chat_id, None)
+
     def toggle_gameoffers_mute(self, chat_id: int) -> bool:
         """Toggle combined Game Offers notifications. Returns True if now muted."""
         if chat_id in self.gameoffers_muted:
@@ -344,6 +475,28 @@ class BotState:
                 "torrent_completion_subscribers": list(
                     self.torrent_completion_subscribers
                 ),
+                "alerts_enabled": list(self.alerts_enabled),
+                "alert_rules": [
+                    {
+                        "id": rule.id,
+                        "chat_id": rule.chat_id,
+                        "metric": rule.metric,
+                        "operator": rule.operator,
+                        "threshold": rule.threshold,
+                        "duration_s": rule.duration_s,
+                        "enabled": rule.enabled,
+                    }
+                    for rule in self.alert_rules.values()
+                ],
+                "alert_states": {
+                    rule_id: {
+                        "last_triggered_at": state.last_triggered_at,
+                        "last_cleared_at": state.last_cleared_at,
+                        "last_value": state.last_value,
+                        "active_since": state.active_since,
+                    }
+                    for rule_id, state in self.alert_states.items()
+                },
             }
             self._state_file.write_text(json.dumps(data, indent=2))
         except Exception:
@@ -361,6 +514,34 @@ class BotState:
             self.torrent_completion_subscribers = set(
                 data.get("torrent_completion_subscribers", [])
             )
+            self.alerts_enabled = set(data.get("alerts_enabled", []))
+            self.alert_rules = {}
+            for item in data.get("alert_rules", []) or []:
+                try:
+                    rule = AlertRule(
+                        id=str(item.get("id", "")),
+                        chat_id=int(item.get("chat_id", 0)),
+                        metric=str(item.get("metric", "")),
+                        operator=str(item.get("operator", "")),
+                        threshold=item.get("threshold"),
+                        duration_s=int(item.get("duration_s", 0)),
+                        enabled=bool(item.get("enabled", True)),
+                    )
+                except Exception:
+                    continue
+                if rule.id and rule.chat_id:
+                    self.alert_rules[rule.id] = rule
+            self.alert_states = {}
+            for rule_id, state in (data.get("alert_states", {}) or {}).items():
+                try:
+                    self.alert_states[str(rule_id)] = AlertState(
+                        last_triggered_at=state.get("last_triggered_at"),
+                        last_cleared_at=state.get("last_cleared_at"),
+                        last_value=state.get("last_value"),
+                        active_since=state.get("active_since"),
+                    )
+                except Exception:
+                    continue
             logger.info("Loaded bot state from %s", self._state_file)
         except Exception:
             logger.exception("Failed to load bot state")

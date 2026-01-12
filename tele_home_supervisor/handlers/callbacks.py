@@ -15,11 +15,13 @@ from telegram.error import BadRequest
 
 from .. import services, tmdb, view, protondb
 from ..state import BotState
-from .common import allowed, get_state
+from .common import allowed, get_state, record_audit_event
+from . import alerts as alerts_handler
 
 logger = logging.getLogger(__name__)
 
 DOCKER_PAGE_SIZE = 8
+TORRENT_PAGE_SIZE = 6
 LOG_PAGE_SIZE = 50
 LOG_PAGE_STEP = 45
 LOG_LINE_MAX = 300
@@ -31,6 +33,19 @@ def normalize_docker_page(total_items: int, page: int) -> tuple[int, int]:
     return page, total_pages
 
 
+def normalize_torrent_page(total_items: int, page: int) -> tuple[int, int]:
+    total_pages = max(1, math.ceil(total_items / TORRENT_PAGE_SIZE))
+    page = max(0, min(page, total_pages - 1))
+    return page, total_pages
+
+
+def paginate_torrents(torrents: list[dict], page: int) -> tuple[list[dict], int, int]:
+    page, total_pages = normalize_torrent_page(len(torrents), page)
+    start = page * TORRENT_PAGE_SIZE
+    end = start + TORRENT_PAGE_SIZE
+    return torrents[start:end], page, total_pages
+
+
 async def _safe_edit_message_text(query, text: str, **kwargs) -> None:
     try:
         await query.edit_message_text(text, **kwargs)
@@ -38,6 +53,24 @@ async def _safe_edit_message_text(query, text: str, **kwargs) -> None:
         if "Message is not modified" in str(exc):
             return
         raise
+
+
+async def _run_audit_action(update, context, action: str, target: str | None, coro):
+    start = time.perf_counter()
+    status = "ok"
+    try:
+        await coro
+    except Exception:
+        status = "error"
+        raise
+    finally:
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        try:
+            record_audit_event(
+                context, update, f"cb:{action}", target, status, duration_ms
+            )
+        except Exception as audit_error:
+            logger.debug("audit record failed: %s", audit_error)
 
 
 def _trim_log_line(line: str) -> str:
@@ -201,6 +234,16 @@ def build_dlogs_selection_keyboard(
     return InlineKeyboardMarkup(buttons)
 
 
+def _parse_alerts_payload(data: str) -> tuple[str, str] | None:
+    parts = data.split(":")
+    if len(parts) != 3:
+        return None
+    _, action, rule_id = parts
+    if not action or not rule_id:
+        return None
+    return action, rule_id
+
+
 def _build_pagination_row(
     page: int, total_pages: int, prefix: str
 ) -> list[InlineKeyboardButton]:
@@ -251,10 +294,11 @@ def build_docker_keyboard(containers: list[str], page: int = 0) -> InlineKeyboar
     return InlineKeyboardMarkup(buttons)
 
 
-def build_torrent_keyboard(torrents: list[dict]) -> InlineKeyboardMarkup:
+def build_torrent_keyboard(torrents: list[dict], page: int = 0) -> InlineKeyboardMarkup:
     """Build inline keyboard with torrent action buttons."""
     buttons = []
-    for t in torrents[:6]:
+    page_torrents, page, total_pages = paginate_torrents(torrents, page)
+    for t in page_torrents:
         name = t.get("name", "Unknown")[:20]
         torrent_hash = t.get("hash", "")[:16]
         state = t.get("state", "")
@@ -272,8 +316,12 @@ def build_torrent_keyboard(torrents: list[dict]) -> InlineKeyboardMarkup:
 
         buttons.append(row)
 
+    nav_row = _build_pagination_row(page, total_pages, "torrent:page")
+    if nav_row:
+        buttons.append(nav_row)
+
     buttons.append(
-        [InlineKeyboardButton("🔄 Refresh", callback_data="torrent:refresh")]
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f"torrent:refresh:{page}")]
     )
     return InlineKeyboardMarkup(buttons)
 
@@ -359,80 +407,247 @@ async def handle_callback_query(update, context) -> None:
         return
 
     try:
-        if data.startswith("dlogs:page:"):
+        if data.startswith("alerts:"):
+            payload = _parse_alerts_payload(data)
+            if payload:
+                action, rule_id = payload
+                await _run_audit_action(
+                    update,
+                    context,
+                    f"alerts_{action}",
+                    rule_id,
+                    alerts_handler.handle_alerts_callback(
+                        query, context, action, rule_id
+                    ),
+                )
+            else:
+                await _safe_edit_message_text(query, "❓ Invalid alert action")
+        elif data.startswith("dlogs:page:"):
             payload = _parse_log_page_payload(data, "dlogs:page:")
             if payload:
                 container, start, since = payload
-                await _handle_dlogs_page(
-                    query, context, container, start, since=since, refresh=False
+                await _run_audit_action(
+                    update,
+                    context,
+                    "dlogs_page",
+                    container,
+                    _handle_dlogs_page(
+                        query, context, container, start, since=since, refresh=False
+                    ),
                 )
         elif data.startswith("dlogs:refresh:"):
             payload = _parse_log_page_payload(data, "dlogs:refresh:")
             if payload:
                 container, start, since = payload
-                await _handle_dlogs_page(
-                    query, context, container, start, since=since, refresh=True
+                await _run_audit_action(
+                    update,
+                    context,
+                    "dlogs_refresh",
+                    container,
+                    _handle_dlogs_page(
+                        query, context, container, start, since=since, refresh=True
+                    ),
                 )
         elif data.startswith("dlogs:file:"):
             payload = _parse_log_page_payload(data, "dlogs:file:")
             if payload:
                 container, _, since = payload
-                await _handle_dlogs_file(query, context, container, since)
+                await _run_audit_action(
+                    update,
+                    context,
+                    "dlogs_file",
+                    container,
+                    _handle_dlogs_file(query, context, container, since),
+                )
         elif data.startswith("dlogs:list:"):
             page = _parse_page(data, "dlogs:list:")
-            await _handle_dlogs_list(query, context, page)
+            await _run_audit_action(
+                update,
+                context,
+                "dlogs_list",
+                str(page),
+                _handle_dlogs_list(query, context, page),
+            )
         elif data == "dlogs:back":
-            await _handle_dlogs_list(query, context, 0)
+            await _run_audit_action(
+                update,
+                context,
+                "dlogs_back",
+                None,
+                _handle_dlogs_list(query, context, 0),
+            )
         elif data == "dlogs:noop":
             return
         elif data.startswith("dlogs:"):
             container = data[6:]
-            await _handle_dlogs_callback(query, context, container)
+            await _run_audit_action(
+                update,
+                context,
+                "dlogs",
+                container,
+                _handle_dlogs_callback(query, context, container),
+            )
         elif data.startswith("dhealth:"):
             container = data[8:]
-            await _handle_dhealth_callback(query, context, container)
+            await _run_audit_action(
+                update,
+                context,
+                "dhealth",
+                container,
+                _handle_dhealth_callback(query, context, container),
+            )
         elif data.startswith("dstats:"):
             container = data[7:]
-            await _handle_dstats_callback(query, context, container)
+            await _run_audit_action(
+                update,
+                context,
+                "dstats",
+                container,
+                _handle_dstats_callback(query, context, container),
+            )
         elif data == "docker:refresh":
-            await _handle_docker_refresh(query, context, 0)
+            await _run_audit_action(
+                update,
+                context,
+                "docker_refresh",
+                "0",
+                _handle_docker_refresh(query, context, 0),
+            )
         elif data.startswith("docker:refresh:"):
             page = _parse_page(data, "docker:refresh:")
-            await _handle_docker_refresh(query, context, page)
+            await _run_audit_action(
+                update,
+                context,
+                "docker_refresh",
+                str(page),
+                _handle_docker_refresh(query, context, page),
+            )
         elif data.startswith("docker:page:"):
             page = _parse_page(data, "docker:page:")
-            await _handle_docker_page(query, context, page)
+            await _run_audit_action(
+                update,
+                context,
+                "docker_page",
+                str(page),
+                _handle_docker_page(query, context, page),
+            )
         elif data == "docker:noop":
             return
         elif data.startswith("tstop:"):
             torrent_hash = data[6:]
-            await _handle_torrent_stop(query, context, torrent_hash)
+            await _run_audit_action(
+                update,
+                context,
+                "tstop",
+                torrent_hash,
+                _handle_torrent_stop(query, context, torrent_hash),
+            )
         elif data.startswith("tstart:"):
             torrent_hash = data[7:]
-            await _handle_torrent_start(query, context, torrent_hash)
+            await _run_audit_action(
+                update,
+                context,
+                "tstart",
+                torrent_hash,
+                _handle_torrent_start(query, context, torrent_hash),
+            )
         elif data.startswith("tinfo:"):
             torrent_hash = data[6:]
-            await _handle_torrent_info(query, context, torrent_hash)
+            await _run_audit_action(
+                update,
+                context,
+                "tinfo",
+                torrent_hash,
+                _handle_torrent_info(query, context, torrent_hash),
+            )
         elif data == "torrent:refresh":
-            await _handle_torrent_refresh(query, context)
+            await _run_audit_action(
+                update,
+                context,
+                "torrent_refresh",
+                "0",
+                _handle_torrent_refresh(query, context, 0),
+            )
+        elif data.startswith("torrent:refresh:"):
+            page = _parse_page(data, "torrent:refresh:")
+            await _run_audit_action(
+                update,
+                context,
+                "torrent_refresh",
+                str(page),
+                _handle_torrent_refresh(query, context, page),
+            )
+        elif data.startswith("torrent:page:"):
+            page = _parse_page(data, "torrent:page:")
+            await _run_audit_action(
+                update,
+                context,
+                "torrent_page",
+                str(page),
+                _handle_torrent_page(query, context, page),
+            )
+        elif data == "torrent:noop":
+            return
         elif data.startswith("games:"):
             game_type = data[6:]
-            await _handle_games_callback(query, game_type)
+            await _run_audit_action(
+                update,
+                context,
+                "games",
+                game_type,
+                _handle_games_callback(query, game_type),
+            )
         elif data.startswith("pbmagnet:"):
             key = data[len("pbmagnet:") :]
-            await _handle_piratebay_magnet(query, context, key)
+            await _run_audit_action(
+                update,
+                context,
+                "pbmagnet",
+                key,
+                _handle_piratebay_magnet(query, context, key),
+            )
         elif data.startswith("pbselect:"):
             key = data[len("pbselect:") :]
-            await _handle_piratebay_select(query, context, key)
+            await _run_audit_action(
+                update,
+                context,
+                "pbselect",
+                key,
+                _handle_piratebay_select(query, context, key),
+            )
         elif data.startswith("pbadd:"):
             key = data[len("pbadd:") :]
-            await _handle_piratebay_add(query, context, key)
+            await _run_audit_action(
+                update,
+                context,
+                "pbadd",
+                key,
+                _handle_piratebay_add(query, context, key),
+            )
         elif data.startswith("tmdbpage:"):
-            await _handle_tmdb_page(query, context, data)
+            await _run_audit_action(
+                update,
+                context,
+                "tmdbpage",
+                None,
+                _handle_tmdb_page(query, context, data),
+            )
         elif data.startswith("tmdbinfo:"):
-            await _handle_tmdb_info(query, context, data)
+            await _run_audit_action(
+                update,
+                context,
+                "tmdbinfo",
+                data,
+                _handle_tmdb_info(query, context, data),
+            )
         elif data.startswith("protondbinfo:"):
-            await _handle_protondb_info(query, context, data)
+            await _run_audit_action(
+                update,
+                context,
+                "protondbinfo",
+                data,
+                _handle_protondb_info(query, context, data),
+            )
         else:
             await _safe_edit_message_text(query, "❓ Unknown action")
     except Exception as e:
@@ -832,17 +1047,29 @@ async def _handle_torrent_info(query, context, torrent_hash: str) -> None:
     await query.message.reply_text(result, parse_mode=ParseMode.HTML)
 
 
-async def _handle_torrent_refresh(query, context) -> None:
+async def _update_torrent_message(query, context, page: int, refresh: bool) -> None:
     state: BotState = get_state(context.application)
-    await state.refresh_torrents()
+    if refresh:
+        await state.refresh_torrents()
+    else:
+        await state.maybe_refresh("torrents")
 
     torrents = await services.get_torrent_list()
-    msg = view.render_torrent_list(torrents)
-    keyboard = build_torrent_keyboard(torrents)
+    page_torrents, page, total_pages = paginate_torrents(torrents, page)
+    msg = view.render_torrent_list_page(page_torrents, page, total_pages)
+    keyboard = build_torrent_keyboard(torrents, page=page) if torrents else None
 
     await _safe_edit_message_text(
         query, msg[:4000], parse_mode=ParseMode.HTML, reply_markup=keyboard
     )
+
+
+async def _handle_torrent_refresh(query, context, page: int) -> None:
+    await _update_torrent_message(query, context, page=page, refresh=True)
+
+
+async def _handle_torrent_page(query, context, page: int) -> None:
+    await _update_torrent_message(query, context, page=page, refresh=False)
 
 
 async def _validate_torrent_hash(context, torrent_hash: str) -> bool:

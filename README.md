@@ -18,6 +18,8 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 *   **Network Tools**: Ping, DNS lookup, Traceroute, and Speedtest (`/speedtest`).
 *   **Guest WiFi**: Generate QR codes for instant WiFi access (`/wifiqr`).
 *   **Utilities**: Set async reminders (`/remind`), check uptime, and view top processes.
+*   **Alerts**: Threshold-based notifications with per-chat rules (`/alerts`).
+*   **Audit Log**: Recent command/callback history (`/audit`).
 
 ### 🐳 Docker Management
 *   **Interactive Control**: Start, stop, and restart containers with inline buttons.
@@ -100,6 +102,8 @@ docker compose up -d
 | Variable | Default | Description |
 |:---|:---:|:---|
 | `RATE_LIMIT_S` | `1.0` | Minimum seconds between commands (flood protection). |
+| `ALERT_PING_LAN_TARGETS` | `` | Comma-separated LAN ping targets for `/alerts` reachability checks. |
+| `ALERT_PING_WAN_TARGETS` | `` | Comma-separated WAN ping targets for `/alerts` reachability checks. |
 | `WATCH_PATHS` | `/` | Comma-separated paths to monitor for disk usage. |
 | `SHOW_WAN` | `false` | Set to `true` to show public IP in `/health`. |
 | `LOG_LEVEL` | `DEBUG` | logging verbosity. |
@@ -115,6 +119,10 @@ docker compose up -d
 *   `/wifiqr <ssid> [pass]` - Generate WiFi login QR code.
 *   `/ip` - Show LAN and WAN IP addresses.
 *   `/top` - Show top resource-consuming processes.
+
+### 🔔 Alerts & Audit
+*   `/alerts` - Manage alert rules and status.
+*   `/audit [n]` - Show recent audit entries (or `/audit clear`).
 
 ### 🐳 Docker
 *   `/docker` - Interactive container list (Start/Stop/Restart).

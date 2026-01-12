@@ -7,7 +7,12 @@ import qrcode
 from telegram.constants import ParseMode
 
 from .. import services, view
-from .common import get_state_and_recorder, guard_sensitive, record_error
+from .common import (
+    get_state_and_recorder,
+    guard_sensitive,
+    record_error,
+    set_audit_target,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +28,7 @@ async def cmd_wifiqr(update, context) -> None:
 
     ssid = args[0]
     password = args[1] if len(args) > 1 else ""
+    set_audit_target(context, ssid)
     # "T" parameter: WPA, WEP, or nopass
     auth_type = "WPA" if password else "nopass"
     # Hidden? (False by default)
@@ -68,6 +74,7 @@ async def cmd_dns(update, context) -> None:
         await update.message.reply_text("Usage: /dns <name>", parse_mode=ParseMode.HTML)
         return
     name = context.args[0]
+    set_audit_target(context, name)
     _, recorder = get_state_and_recorder(context)
     try:
         result = await services.dns_lookup(name)
@@ -94,6 +101,7 @@ async def cmd_traceroute(update, context) -> None:
         )
         return
     host = context.args[0]
+    set_audit_target(context, host)
     max_hops = 20
     if len(context.args) > 1 and context.args[1].isdigit():
         max_hops = max(1, min(int(context.args[1]), 50))
@@ -124,6 +132,7 @@ async def cmd_speedtest(update, context) -> None:
     mb = 100
     if context.args and context.args[0].isdigit():
         mb = max(1, min(int(context.args[0]), 200))
+    set_audit_target(context, f"{mb}MB")
 
     msg = await update.message.reply_text(
         "🏃 Running speedtest...", parse_mode=ParseMode.HTML

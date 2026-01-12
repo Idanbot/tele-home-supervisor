@@ -8,7 +8,7 @@ from telegram.constants import ParseMode
 
 from .. import config, services
 from .. import view
-from .common import guard_sensitive, get_state
+from .common import guard_sensitive, get_state, set_audit_target
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,7 @@ async def cmd_ping(update, context) -> None:
         )
         return
     host = context.args[0]
+    set_audit_target(context, host)
     count = 3
     if len(context.args) > 1 and context.args[1].isdigit():
         count = min(int(context.args[1]), 10)

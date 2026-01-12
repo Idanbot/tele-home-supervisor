@@ -16,6 +16,7 @@ from .state import BOT_STATE_KEY, BotState
 from .torrent import TorrentManager, fmt_bytes_compact_decimal
 from .models.torrent_snapshot import TorrentSnapshot
 from . import scheduled as scheduled_fetchers
+from . import alerting
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,9 @@ logger = logging.getLogger(__name__)
 _TASK_TORRENT_COMPLETION = "torrent_completion"
 _TASK_GAMEOFFERS = "gameoffers_scheduler"
 _TASK_HACKERNEWS = "hackernews_scheduler"
+_TASK_ALERTS = "alerts_scheduler"
 _POLL_INTERVAL_S = 30.0
+_ALERT_POLL_INTERVAL_S = 60.0
 _ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 
 
@@ -49,6 +52,11 @@ def ensure_started(app: Application) -> None:
     task = state.tasks.get(_TASK_HACKERNEWS)
     if not isinstance(task, asyncio.Task) or task.done():
         state.tasks[_TASK_HACKERNEWS] = asyncio.create_task(_hackernews_scheduler(app))
+
+    # Start alerts loop
+    task = state.tasks.get(_TASK_ALERTS)
+    if not isinstance(task, asyncio.Task) or task.done():
+        state.tasks[_TASK_ALERTS] = asyncio.create_task(_alerts_loop(app))
 
 
 def _get_state(app: Application) -> BotState:
@@ -186,6 +194,40 @@ async def _torrent_completion_loop(app: Application) -> None:
         except Exception:
             logger.exception("Torrent completion loop error")
             await asyncio.sleep(_POLL_INTERVAL_S)
+
+
+async def _alerts_loop(app: Application) -> None:
+    logger.info("Starting alerts loop (interval=%ss)", _ALERT_POLL_INTERVAL_S)
+    while True:
+        try:
+            start = time.monotonic()
+            state = _get_state(app)
+            if not state.alerts_enabled:
+                await asyncio.sleep(_ALERT_POLL_INTERVAL_S)
+                continue
+            metrics = await alerting.collect_alert_metrics(state)
+            if metrics:
+                notifications, changed = alerting.evaluate_alert_rules(state, metrics)
+                for chat_id, message in notifications:
+                    try:
+                        await app.bot.send_message(
+                            chat_id=chat_id,
+                            text=message,
+                            parse_mode=ParseMode.HTML,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed sending alert notification to chat_id=%s", chat_id
+                        )
+                if changed:
+                    state._save_state()
+            elapsed = time.monotonic() - start
+            await asyncio.sleep(max(0.0, _ALERT_POLL_INTERVAL_S - elapsed))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Alerts loop error")
+            await asyncio.sleep(_ALERT_POLL_INTERVAL_S)
 
 
 def _seconds_until_time(target_hour: int, target_minute: int = 0) -> float:

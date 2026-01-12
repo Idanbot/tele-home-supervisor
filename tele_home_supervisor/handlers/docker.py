@@ -15,6 +15,7 @@ from .common import (
     get_state_and_recorder,
     record_error,
     reply_usage_with_suggestions,
+    set_audit_target,
 )
 from .callbacks import (
     DOCKER_PAGE_SIZE,
@@ -199,6 +200,7 @@ async def cmd_dlogs(update, context) -> None:
         return
     if page is None and not as_file:
         as_file = True
+    set_audit_target(context, container_name)
     container_names = state.get_cached("containers")
     if container_names and container_name not in container_names:
         await reply_usage_with_suggestions(
@@ -253,6 +255,7 @@ async def cmd_dhealth(update, context) -> None:
         )
         return
     name = context.args[0]
+    set_audit_target(context, name)
     container_names = state.get_cached("containers")
     if container_names and name not in container_names:
         await reply_usage_with_suggestions(
@@ -314,6 +317,7 @@ async def cmd_dinspect(update, context) -> None:
         )
         return
     name = context.args[0]
+    set_audit_target(context, name)
     container_names = state.get_cached("containers")
     if container_names and name not in container_names:
         await reply_usage_with_suggestions(

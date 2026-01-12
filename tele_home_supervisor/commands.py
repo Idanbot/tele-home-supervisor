@@ -38,6 +38,13 @@ _INFO_COMMANDS = (
         "cmd_metrics",
     ),
     CommandSpec(
+        "audit",
+        "Info",
+        "/audit [n]",
+        "show recent audit entries (or /audit clear)",
+        "cmd_audit",
+    ),
+    CommandSpec(
         "debug",
         "Info",
         "/debug [command]",
@@ -230,6 +237,13 @@ _TORRENTS_COMMANDS = (
 )
 
 _NOTIFICATIONS_COMMANDS = (
+    CommandSpec(
+        "alerts",
+        "Notifications",
+        "/alerts",
+        "alert rules and status",
+        "cmd_alerts",
+    ),
     CommandSpec(
         "mute_gameoffers",
         "Notifications",
