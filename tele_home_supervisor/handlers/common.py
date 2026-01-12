@@ -277,11 +277,10 @@ def rate_limit(func: Callable, name: str | None = None) -> Callable:
             return
 
         _last_command_ts = now
-        try:
-            context.chat_data.pop(_AUDIT_TARGET_KEY, None)
-            context.chat_data.pop(_AUTH_FLAG_KEY, None)
-        except Exception:
-            pass
+        chat_data = getattr(context, "chat_data", None)
+        if chat_data is not None:
+            chat_data.pop(_AUDIT_TARGET_KEY, None)
+            chat_data.pop(_AUTH_FLAG_KEY, None)
         start = time.perf_counter()
         ok = False
         error_msg = None

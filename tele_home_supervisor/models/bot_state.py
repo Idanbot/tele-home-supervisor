@@ -515,33 +515,44 @@ class BotState:
                 data.get("torrent_completion_subscribers", [])
             )
             self.alerts_enabled = set(data.get("alerts_enabled", []))
+
+            def _coerce_int(value: object) -> int | None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return None
+
             self.alert_rules = {}
             for item in data.get("alert_rules", []) or []:
-                try:
-                    rule = AlertRule(
-                        id=str(item.get("id", "")),
-                        chat_id=int(item.get("chat_id", 0)),
-                        metric=str(item.get("metric", "")),
-                        operator=str(item.get("operator", "")),
-                        threshold=item.get("threshold"),
-                        duration_s=int(item.get("duration_s", 0)),
-                        enabled=bool(item.get("enabled", True)),
-                    )
-                except Exception:
+                if not isinstance(item, dict):
                     continue
-                if rule.id and rule.chat_id:
-                    self.alert_rules[rule.id] = rule
+                rule_id = str(item.get("id", ""))
+                chat_id = _coerce_int(item.get("chat_id"))
+                duration_s = _coerce_int(item.get("duration_s", 0))
+                if not rule_id or not chat_id:
+                    continue
+                if duration_s is None:
+                    duration_s = 0
+                rule = AlertRule(
+                    id=rule_id,
+                    chat_id=chat_id,
+                    metric=str(item.get("metric", "")),
+                    operator=str(item.get("operator", "")),
+                    threshold=item.get("threshold"),
+                    duration_s=duration_s,
+                    enabled=bool(item.get("enabled", True)),
+                )
+                self.alert_rules[rule.id] = rule
             self.alert_states = {}
             for rule_id, state in (data.get("alert_states", {}) or {}).items():
-                try:
-                    self.alert_states[str(rule_id)] = AlertState(
-                        last_triggered_at=state.get("last_triggered_at"),
-                        last_cleared_at=state.get("last_cleared_at"),
-                        last_value=state.get("last_value"),
-                        active_since=state.get("active_since"),
-                    )
-                except Exception:
+                if not isinstance(state, dict):
                     continue
+                self.alert_states[str(rule_id)] = AlertState(
+                    last_triggered_at=state.get("last_triggered_at"),
+                    last_cleared_at=state.get("last_cleared_at"),
+                    last_value=state.get("last_value"),
+                    active_since=state.get("active_since"),
+                )
             logger.info("Loaded bot state from %s", self._state_file)
         except Exception:
             logger.exception("Failed to load bot state")

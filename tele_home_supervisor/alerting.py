@@ -251,11 +251,8 @@ async def _ping_any(targets: list[str]) -> bool | None:
     if not targets:
         return None
     for target in targets:
-        try:
-            if await _ping_once(target):
-                return True
-        except Exception:
-            continue
+        if await _ping_once(target):
+            return True
     return False
 
 
