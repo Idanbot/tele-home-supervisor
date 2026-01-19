@@ -465,6 +465,56 @@ class BotState:
     def is_hackernews_muted(self, chat_id: int) -> bool:
         return chat_id in self.hackernews_muted
 
+    def grant_auth(self, user_id: int, expiry: float) -> None:
+        """Grant auth to a user until expiry time (monotonic)."""
+        self.auth_grants[user_id] = expiry
+        self._save_state()
+
+    def revoke_auth(self, user_id: int) -> None:
+        """Revoke auth for a user."""
+        self.auth_grants.pop(user_id, None)
+        self._save_state()
+
+    def _serialize_auth_grants(self) -> list[dict]:
+        """Serialize auth grants for persistence.
+
+        Since monotonic time doesn't persist across restarts, we convert to
+        remaining seconds and store as wall-clock expiry.
+        """
+        now_mono = time.monotonic()
+        now_wall = time.time()
+        grants = []
+        for user_id, expiry_mono in self.auth_grants.items():
+            remaining = expiry_mono - now_mono
+            if remaining > 0:
+                expiry_wall = now_wall + remaining
+                grants.append({"user_id": user_id, "expiry": expiry_wall})
+        return grants
+
+    def _deserialize_auth_grants(self, grants: list[dict]) -> None:
+        """Restore auth grants from persistence.
+
+        Converts wall-clock expiry back to monotonic time.
+        """
+        now_mono = time.monotonic()
+        now_wall = time.time()
+        self.auth_grants = {}
+        for item in grants:
+            if not isinstance(item, dict):
+                continue
+            user_id = item.get("user_id")
+            expiry_wall = item.get("expiry")
+            if user_id is None or expiry_wall is None:
+                continue
+            try:
+                user_id = int(user_id)
+                expiry_wall = float(expiry_wall)
+            except (TypeError, ValueError):
+                continue
+            remaining = expiry_wall - now_wall
+            if remaining > 0:
+                self.auth_grants[user_id] = now_mono + remaining
+
     def _save_state(self) -> None:
         """Persist mute preferences to disk."""
         try:
@@ -497,6 +547,7 @@ class BotState:
                     }
                     for rule_id, state in self.alert_states.items()
                 },
+                "auth_grants": self._serialize_auth_grants(),
             }
             self._state_file.write_text(json.dumps(data, indent=2))
         except Exception:
@@ -553,6 +604,10 @@ class BotState:
                     last_value=state.get("last_value"),
                     active_since=state.get("active_since"),
                 )
+
+            # Load auth grants
+            self._deserialize_auth_grants(data.get("auth_grants", []) or [])
+
             logger.info("Loaded bot state from %s", self._state_file)
         except Exception:
             logger.exception("Failed to load bot state")

@@ -123,7 +123,7 @@ async def cmd_auth(update, context) -> None:
     state = get_state(context.application)
     user_id = update.effective_user.id
     expiry = time.monotonic() + auth_ttl_seconds()
-    state.auth_grants[user_id] = expiry
+    state.grant_auth(user_id, expiry)
     await update.message.reply_text("✅ Authorized for 24 hours.")
 
 

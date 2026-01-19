@@ -12,7 +12,9 @@ import logging
 import os
 import random
 import re
+import time
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from typing import Callable
 from urllib.parse import quote, unquote
 
@@ -27,6 +29,48 @@ except ImportError:
     CLOUDSCRAPER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# Cache configuration
+_SEARCH_CACHE_TTL_S = 300  # 5 minutes
+_SEARCH_CACHE_MAX = 50
+
+# Cache: query -> (timestamp, results)
+_search_cache: OrderedDict[str, tuple[float, list["TorrentResult"]]] = OrderedDict()
+_top_cache: OrderedDict[str, tuple[float, list["TorrentResult"]]] = OrderedDict()
+
+
+def _cache_get(
+    cache: OrderedDict[str, tuple[float, list["TorrentResult"]]], key: str
+) -> list["TorrentResult"] | None:
+    """Get item from cache if not expired."""
+    entry = cache.get(key)
+    if not entry:
+        return None
+    timestamp, results = entry
+    if (time.monotonic() - timestamp) > _SEARCH_CACHE_TTL_S:
+        cache.pop(key, None)
+        return None
+    # Move to end (LRU)
+    cache.move_to_end(key)
+    return results
+
+
+def _cache_set(
+    cache: OrderedDict[str, tuple[float, list["TorrentResult"]]],
+    key: str,
+    results: list["TorrentResult"],
+) -> None:
+    """Store results in cache with current timestamp."""
+    now = time.monotonic()
+    cache[key] = (now, results)
+    cache.move_to_end(key)
+    # Prune expired and over-limit entries
+    stale_keys = [k for k, (ts, _) in cache.items() if (now - ts) > _SEARCH_CACHE_TTL_S]
+    for k in stale_keys:
+        cache.pop(k, None)
+    while len(cache) > _SEARCH_CACHE_MAX:
+        cache.popitem(last=False)
+
 
 # Rotating user agents to mimic real browsers
 USER_AGENTS = [
@@ -829,7 +873,22 @@ def get_enabled_sources() -> list[TorrentSource]:
 def fallback_search(
     query: str, debug_sink: Callable | None = None
 ) -> list[TorrentResult]:
-    """Search across all fallback sources until results are found."""
+    """Search across all fallback sources until results are found.
+
+    Results are cached for 5 minutes to reduce external requests.
+    """
+    cache_key = query.strip().lower()
+
+    # Check cache first
+    cached = _cache_get(_search_cache, cache_key)
+    if cached is not None:
+        logger.debug(
+            "fallback search cache hit for %r (%d results)", query, len(cached)
+        )
+        if debug_sink:
+            debug_sink("cache hit", f"found {len(cached)} cached results")
+        return cached
+
     for source in get_enabled_sources():
         try:
             results = source.search(query, debug_sink)
@@ -839,6 +898,8 @@ def fallback_search(
                     len(results),
                     source.name,
                 )
+                # Cache the results
+                _cache_set(_search_cache, cache_key, results)
                 return results
         except Exception as exc:
             logger.debug("fallback source %s failed: %s", source.name, exc)
@@ -852,7 +913,22 @@ def fallback_search(
 def fallback_top(
     category: str | None = None, debug_sink: Callable | None = None
 ) -> list[TorrentResult]:
-    """Get top torrents from fallback sources."""
+    """Get top torrents from fallback sources.
+
+    Results are cached for 5 minutes to reduce external requests.
+    """
+    cache_key = f"top:{category or 'all'}"
+
+    # Check cache first
+    cached = _cache_get(_top_cache, cache_key)
+    if cached is not None:
+        logger.debug(
+            "fallback top cache hit for %r (%d results)", category, len(cached)
+        )
+        if debug_sink:
+            debug_sink("cache hit", f"found {len(cached)} cached results")
+        return cached
+
     for source in get_enabled_sources():
         try:
             results = source.top(category, debug_sink)
@@ -862,6 +938,8 @@ def fallback_top(
                     len(results),
                     source.name,
                 )
+                # Cache the results
+                _cache_set(_top_cache, cache_key, results)
                 return results
         except Exception as exc:
             logger.debug("fallback source %s failed: %s", source.name, exc)

@@ -314,6 +314,8 @@ def build_torrent_keyboard(torrents: list[dict], page: int = 0) -> InlineKeyboar
                 InlineKeyboardButton("▶️", callback_data=f"tstart:{torrent_hash}")
             )
 
+        row.append(InlineKeyboardButton("🗑️", callback_data=f"tdelete:{torrent_hash}"))
+
         buttons.append(row)
 
     nav_row = _build_pagination_row(page, total_pages, "torrent:page")
@@ -559,6 +561,15 @@ async def handle_callback_query(update, context) -> None:
                 "tinfo",
                 torrent_hash,
                 _handle_torrent_info(query, context, torrent_hash),
+            )
+        elif data.startswith("tdelete:"):
+            torrent_hash = data[8:]
+            await _run_audit_action(
+                update,
+                context,
+                "tdelete",
+                torrent_hash,
+                _handle_torrent_delete(query, context, torrent_hash),
             )
         elif data == "torrent:refresh":
             await _run_audit_action(
@@ -1044,6 +1055,14 @@ async def _handle_torrent_info(query, context, torrent_hash: str) -> None:
         await query.message.reply_text("❌ Unknown torrent.")
         return
     result = await services.torrent_info_by_hash(torrent_hash)
+    await query.message.reply_text(result, parse_mode=ParseMode.HTML)
+
+
+async def _handle_torrent_delete(query, context, torrent_hash: str) -> None:
+    if not await _validate_torrent_hash(context, torrent_hash):
+        await query.message.reply_text("❌ Unknown torrent.")
+        return
+    result = await services.torrent_delete_by_hash(torrent_hash, delete_files=True)
     await query.message.reply_text(result, parse_mode=ParseMode.HTML)
 
 

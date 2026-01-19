@@ -526,6 +526,20 @@ class TorrentManager:
             return f"▶️ Resumed: {html.escape(torrent['name'])}"
         return "Failed to resume torrent."
 
+    def delete_by_hash(self, torrent_hash: str, delete_files: bool = True) -> str:
+        """Delete a torrent by its hash."""
+        torrent = self._find_by_hash(torrent_hash)
+        if not torrent:
+            return "Torrent not found."
+        try:
+            self.qbt_client.torrents_delete(
+                torrent_hashes=torrent["hash"], delete_files=delete_files
+            )
+            return f"🗑️ Deleted: {html.escape(torrent['name'])}"
+        except Exception as e:
+            logger.exception("delete_by_hash failed")
+            return f"Failed to delete torrent: {e}"
+
     def info_by_hash(self, torrent_hash: str) -> str:
         """Get info about a torrent by its hash."""
         torrent = self._find_by_hash(torrent_hash)

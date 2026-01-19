@@ -215,6 +215,12 @@ async def torrent_info_by_hash(torrent_hash: str) -> str:
     return await asyncio.to_thread(_call_with_mgr, "info_by_hash", torrent_hash)
 
 
+async def torrent_delete_by_hash(torrent_hash: str, delete_files: bool = True) -> str:
+    return await asyncio.to_thread(
+        _call_with_mgr, "delete_by_hash", torrent_hash, delete_files=delete_files
+    )
+
+
 async def get_torrent_list() -> list[dict]:
     """Get list of torrents for inline keyboard."""
 
