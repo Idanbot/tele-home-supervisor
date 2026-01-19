@@ -59,6 +59,7 @@ cmd_torrent_status = rate_limit(torrents.cmd_torrent_status, name="torrentstatus
 cmd_torrent_stop = rate_limit(torrents.cmd_torrent_stop, name="torrentstop")
 cmd_torrent_start = rate_limit(torrents.cmd_torrent_start, name="torrentstart")
 cmd_torrent_delete = rate_limit(torrents.cmd_torrent_delete, name="torrentdelete")
+cmd_torrent_clean = rate_limit(torrents.cmd_torrent_clean, name="torrentclean")
 cmd_subscribe = rate_limit(torrents.cmd_subscribe, name="subscribe")
 cmd_pbtop = rate_limit(torrents.cmd_pbtop, name="pbtop")
 cmd_pbsearch = rate_limit(torrents.cmd_pbsearch, name="pbsearch")
