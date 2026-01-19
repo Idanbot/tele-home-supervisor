@@ -3,8 +3,10 @@
 from unittest.mock import MagicMock, patch
 
 from tele_home_supervisor.torrentsources import (
+    CLOUDSCRAPER_AVAILABLE,
     BitSearchSource,
     EZTVSource,
+    LimeTorrentsSource,
     TorrentResult,
     X1337Source,
     _build_browser_headers,
@@ -224,17 +226,39 @@ class TestEZTVSource:
 class TestX1337Source:
     """Tests for 1337x.to source."""
 
-    def test_disabled_by_default(self):
+    def test_enabled_when_cloudscraper_available(self):
         source = X1337Source()
-        assert source.enabled is False
+        assert source.enabled == CLOUDSCRAPER_AVAILABLE
 
     def test_search_when_disabled(self):
         source = X1337Source()
+        source.enabled = False
         results = source.search("test")
         assert results == []
 
     def test_top_when_disabled(self):
         source = X1337Source()
+        source.enabled = False
+        results = source.top()
+        assert results == []
+
+
+class TestLimeTorrentsSource:
+    """Tests for LimeTorrents source."""
+
+    def test_enabled_when_cloudscraper_available(self):
+        source = LimeTorrentsSource()
+        assert source.enabled == CLOUDSCRAPER_AVAILABLE
+
+    def test_search_when_disabled(self):
+        source = LimeTorrentsSource()
+        source.enabled = False
+        results = source.search("test")
+        assert results == []
+
+    def test_top_when_disabled(self):
+        source = LimeTorrentsSource()
+        source.enabled = False
         results = source.top()
         assert results == []
 
@@ -244,11 +268,17 @@ class TestFallbackFunctions:
 
     def test_get_enabled_sources(self):
         sources = get_enabled_sources()
-        # Should include BitSearch and EZTV, but not 1337x (disabled)
         source_names = [s.name for s in sources]
+        # Should always include BitSearch and EZTV
         assert "BitSearch" in source_names
         assert "EZTV" in source_names
-        assert "1337x" not in source_names
+        # 1337x and LimeTorrents only enabled if cloudscraper is available
+        if CLOUDSCRAPER_AVAILABLE:
+            assert "1337x" in source_names
+            assert "LimeTorrents" in source_names
+        else:
+            assert "1337x" not in source_names
+            assert "LimeTorrents" not in source_names
 
     @patch.object(BitSearchSource, "search")
     def test_fallback_search_first_source_succeeds(self, mock_search):

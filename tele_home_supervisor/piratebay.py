@@ -229,7 +229,7 @@ def _api_top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
         url = f"{base}/precompiled/data_top100_{cat}.json"
         try:
             items = _fetch_json(url)
-        except (requests.RequestException, ValueError) as exc:
+        except (requests.RequestException, RuntimeError, ValueError) as exc:
             logger.debug("piratebay api top failed for %s: %s", base, exc)
             if debug_sink:
                 debug_sink(f"piratebay api top failed for {base}", str(exc))
@@ -251,7 +251,7 @@ def _api_search(
         url = f"{base}/q.php?q={requests.utils.quote(q)}&cat={cat}"
         try:
             items = _fetch_json(url)
-        except (requests.RequestException, ValueError) as exc:
+        except (requests.RequestException, RuntimeError, ValueError) as exc:
             logger.debug("piratebay api search failed for %s: %s", base, exc)
             if debug_sink:
                 debug_sink(f"piratebay api search failed for {base}", str(exc))
@@ -284,14 +284,15 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
         logger.debug("piratebay top html failed: %s", exc)
         if debug_sink:
             debug_sink("piratebay top html failed", str(exc))
-    if top_mode == "top48h":
-        raise RuntimeError("Pirate Bay top 48h parse failed")
-    if top_mode == "top100":
-        results = _api_top(None, debug_sink)
-    else:
-        results = _api_top(category, debug_sink)
-    if results:
-        return results
+
+    # Try API for non-48h modes
+    if top_mode != "top48h":
+        if top_mode == "top100":
+            results = _api_top(None, debug_sink)
+        else:
+            results = _api_top(category, debug_sink)
+        if results:
+            return results
 
     # Try fallback sources when PirateBay fails
     logger.debug("piratebay top api empty; trying fallback sources")
@@ -302,7 +303,8 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
         logger.debug("fallback top results: %s", len(fallback_results))
         return [r.to_dict() for r in fallback_results]
 
-    raise RuntimeError("Pirate Bay top parse failed")
+    logger.warning("All torrent sources failed for top: %s", category)
+    return []  # All sources failed - return empty, don't raise
 
 
 def search(query: str, debug_sink=None) -> list[dict[str, object]]:
@@ -341,7 +343,8 @@ def search(query: str, debug_sink=None) -> list[dict[str, object]]:
         logger.debug("fallback search results: %s", len(fallback_results))
         return [r.to_dict() for r in fallback_results]
 
-    raise RuntimeError("Pirate Bay search parse failed")
+    logger.warning("All torrent sources failed for search: %s", q)
+    return []  # All sources failed - return empty, don't raise
 
 
 def _api_base_candidates() -> list[str]:

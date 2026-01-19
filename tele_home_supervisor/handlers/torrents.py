@@ -293,7 +293,9 @@ async def cmd_pbtop(update, context) -> None:
         return
 
     if not results:
-        await update.message.reply_text("No results found.")
+        await update.message.reply_text(
+            "⚠️ No results found. All torrent sources may be temporarily unavailable."
+        )
         return
 
     state = get_state(context.application)
@@ -338,7 +340,9 @@ async def cmd_pbsearch(update, context) -> None:
         return
 
     if not results:
-        await update.message.reply_text("No results found.")
+        await update.message.reply_text(
+            "⚠️ No results found. All torrent sources may be temporarily unavailable."
+        )
         return
 
     state = get_state(context.application)

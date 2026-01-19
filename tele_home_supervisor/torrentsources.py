@@ -2,6 +2,7 @@
 
 This module provides fallback alternatives when PirateBay is unavailable.
 Each source has its own parsing logic, user-agent spoofing, and magnet extraction.
+Uses cloudscraper for Cloudflare-protected sites.
 """
 
 from __future__ import annotations
@@ -16,6 +17,14 @@ from typing import Callable
 from urllib.parse import quote, unquote
 
 import requests
+
+try:
+    import cloudscraper
+
+    CLOUDSCRAPER_AVAILABLE = True
+except ImportError:
+    cloudscraper = None  # type: ignore
+    CLOUDSCRAPER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +87,56 @@ def _build_magnet(info_hash: str, name: str) -> str:
     dn = quote(name, safe="")
     trackers = "".join(f"&tr={quote(t, safe='')}" for t in TRACKERS)
     return f"magnet:?xt=urn:btih:{info_hash}&dn={dn}{trackers}"
+
+
+def _get_cloudscraper_session() -> "cloudscraper.CloudScraper | None":
+    """Create a cloudscraper session for bypassing Cloudflare."""
+    if not CLOUDSCRAPER_AVAILABLE:
+        logger.debug("cloudscraper not available")
+        return None
+    try:
+        scraper = cloudscraper.create_scraper(
+            browser={
+                "browser": "chrome",
+                "platform": "windows",
+                "desktop": True,
+            },
+            delay=5,
+        )
+        return scraper
+    except Exception as exc:
+        logger.debug("Failed to create cloudscraper session: %s", exc)
+        return None
+
+
+def _fetch_with_cloudscraper(
+    url: str,
+    referer: str | None = None,
+    timeout: int = 20,
+) -> str | None:
+    """Fetch a URL using cloudscraper to bypass Cloudflare.
+
+    Returns HTML content or None if failed.
+    """
+    scraper = _get_cloudscraper_session()
+    if not scraper:
+        return None
+
+    headers = _build_browser_headers(referer)
+    try:
+        resp = scraper.get(url, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+
+        # Check if still blocked
+        text = resp.text
+        if "just a moment" in text.lower() or "cf-chl" in text.lower():
+            logger.debug("cloudscraper: still blocked by Cloudflare for %s", url)
+            return None
+
+        return text
+    except Exception as exc:
+        logger.debug("cloudscraper fetch failed for %s: %s", url, exc)
+        return None
 
 
 class TorrentResult:
@@ -413,13 +472,11 @@ class EZTVSource(TorrentSource):
 class X1337Source(TorrentSource):
     """1337x.to torrent source.
 
-    Note: 1337x.to is currently protected by Cloudflare, so this source
-    may not work without additional measures (browser automation, etc.).
-    Keeping this as a placeholder for future implementation.
+    Uses cloudscraper to bypass Cloudflare protection.
     """
 
     name = "1337x"
-    enabled = False  # Disabled by default due to Cloudflare protection
+    enabled = CLOUDSCRAPER_AVAILABLE  # Enable if cloudscraper is installed
     base_url = os.environ.get("X1337_BASE_URL", "https://1337x.to")
 
     # Regex patterns for parsing
@@ -430,7 +487,15 @@ class X1337Source(TorrentSource):
     _DETAIL_LINK_RE = re.compile(r'<a href="(/torrent/[^"]+)"', re.IGNORECASE)
 
     def _fetch(self, url: str) -> str:
-        """Fetch HTML with browser-like headers."""
+        """Fetch HTML using cloudscraper to bypass Cloudflare."""
+        # Try cloudscraper first
+        html_text = _fetch_with_cloudscraper(
+            url, referer=self.base_url, timeout=self.timeout
+        )
+        if html_text:
+            return html_text
+
+        # Fallback to regular requests (may fail on Cloudflare)
         headers = _build_browser_headers(self.base_url)
         resp = requests.get(url, headers=headers, timeout=self.timeout)
         resp.raise_for_status()
@@ -586,11 +651,173 @@ class X1337Source(TorrentSource):
         return []
 
 
+class LimeTorrentsSource(TorrentSource):
+    """LimeTorrents torrent source.
+
+    Uses cloudscraper to bypass Cloudflare protection.
+    """
+
+    name = "LimeTorrents"
+    enabled = CLOUDSCRAPER_AVAILABLE
+    base_url = os.environ.get("LIMETORRENTS_BASE_URL", "https://www.limetorrents.lol")
+
+    # Regex patterns for parsing
+    _ROW_RE = re.compile(
+        r'<tr[^>]*class="[^"]*"[^>]*>(.*?)</tr>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    _NAME_LINK_RE = re.compile(
+        r'<a href="([^"]+)"[^>]*class="[^"]*coll-1[^"]*"[^>]*>([^<]+)</a>',
+        re.IGNORECASE,
+    )
+    _SEEDS_RE = re.compile(
+        r'<td class="[^"]*tdseed[^"]*">(\d+)</td>',
+        re.IGNORECASE,
+    )
+    _LEECHES_RE = re.compile(
+        r'<td class="[^"]*tdleech[^"]*">(\d+)</td>',
+        re.IGNORECASE,
+    )
+    _HASH_RE = re.compile(r"/([a-fA-F0-9]{40})\.torrent", re.IGNORECASE)
+
+    def _fetch(self, url: str) -> str:
+        """Fetch HTML using cloudscraper to bypass Cloudflare."""
+        html_text = _fetch_with_cloudscraper(
+            url, referer=self.base_url, timeout=self.timeout
+        )
+        if html_text:
+            return html_text
+
+        headers = _build_browser_headers(self.base_url)
+        resp = requests.get(url, headers=headers, timeout=self.timeout)
+        resp.raise_for_status()
+        return resp.text
+
+    def _parse_results(self, html_text: str) -> list[TorrentResult]:
+        """Parse search/top results from HTML."""
+        results: list[TorrentResult] = []
+
+        # Find table rows with torrent info
+        for row in self._ROW_RE.findall(html_text):
+            name_match = self._NAME_LINK_RE.search(row)
+            seeds_match = self._SEEDS_RE.search(row)
+            leeches_match = self._LEECHES_RE.search(row)
+
+            if not name_match:
+                continue
+
+            name = html.unescape(name_match.group(2).strip())
+
+            # Extract info hash from torrent link
+            hash_match = self._HASH_RE.search(row)
+            if not hash_match:
+                continue
+
+            info_hash = hash_match.group(1).upper()
+
+            try:
+                seeders = int(seeds_match.group(1)) if seeds_match else 0
+                leechers = int(leeches_match.group(1)) if leeches_match else 0
+            except ValueError:
+                seeders = 0
+                leechers = 0
+
+            magnet = _build_magnet(info_hash, name)
+            results.append(
+                TorrentResult(
+                    name=name,
+                    magnet=magnet,
+                    seeders=seeders,
+                    leechers=leechers,
+                    source=self.name,
+                )
+            )
+
+        return results
+
+    def search(
+        self, query: str, debug_sink: Callable | None = None
+    ) -> list[TorrentResult]:
+        """Search LimeTorrents."""
+        if not self.enabled:
+            return []
+
+        q = (query or "").strip()
+        if not q:
+            return []
+
+        url = f"{self.base_url}/search/all/{quote(q)}/"
+
+        try:
+            html_text = self._fetch(url)
+
+            if "just a moment" in html_text.lower() or "cf-chl" in html_text.lower():
+                raise RuntimeError("LimeTorrents blocked by Cloudflare")
+
+            results = self._parse_results(html_text)
+            results = sorted(results, key=lambda r: r.seeders, reverse=True)[:10]
+
+            if results:
+                logger.debug("limetorrents search results: %s", len(results))
+                return results
+
+        except Exception as exc:
+            logger.debug("limetorrents search failed: %s", exc)
+            if debug_sink:
+                debug_sink("limetorrents search failed", str(exc))
+
+        return []
+
+    def top(
+        self, category: str | None = None, debug_sink: Callable | None = None
+    ) -> list[TorrentResult]:
+        """Get top torrents from LimeTorrents."""
+        if not self.enabled:
+            return []
+
+        # LimeTorrents category paths
+        category_paths = {
+            "movies": "/browse-torrents/Movies/",
+            "video": "/browse-torrents/Movies/",
+            "tv": "/browse-torrents/TV-shows/",
+            "hdtv": "/browse-torrents/TV-shows/",
+            "music": "/browse-torrents/Music/",
+            "audio": "/browse-torrents/Music/",
+            "games": "/browse-torrents/Games/",
+            "apps": "/browse-torrents/Applications/",
+            "anime": "/browse-torrents/Anime/",
+            None: "/top100",
+        }
+        path = category_paths.get(category, category_paths[None])
+        url = f"{self.base_url}{path}"
+
+        try:
+            html_text = self._fetch(url)
+
+            if "just a moment" in html_text.lower() or "cf-chl" in html_text.lower():
+                raise RuntimeError("LimeTorrents blocked by Cloudflare")
+
+            results = self._parse_results(html_text)
+            results = sorted(results, key=lambda r: r.seeders, reverse=True)[:10]
+
+            if results:
+                logger.debug("limetorrents top results: %s", len(results))
+                return results
+
+        except Exception as exc:
+            logger.debug("limetorrents top failed: %s", exc)
+            if debug_sink:
+                debug_sink("limetorrents top failed", str(exc))
+
+        return []
+
+
 # Registry of all available sources in priority order
 SOURCES: list[TorrentSource] = [
     BitSearchSource(),
     EZTVSource(),
     X1337Source(),
+    LimeTorrentsSource(),
 ]
 
 
