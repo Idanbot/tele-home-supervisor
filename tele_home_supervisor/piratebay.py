@@ -290,9 +290,19 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
         results = _api_top(None, debug_sink)
     else:
         results = _api_top(category, debug_sink)
-    if not results:
-        raise RuntimeError("Pirate Bay top parse failed")
-    return results
+    if results:
+        return results
+
+    # Try fallback sources when PirateBay fails
+    logger.debug("piratebay top api empty; trying fallback sources")
+    from tele_home_supervisor import torrentsources
+
+    fallback_results = torrentsources.fallback_top(category, debug_sink)
+    if fallback_results:
+        logger.debug("fallback top results: %s", len(fallback_results))
+        return [r.to_dict() for r in fallback_results]
+
+    raise RuntimeError("Pirate Bay top parse failed")
 
 
 def search(query: str, debug_sink=None) -> list[dict[str, object]]:
@@ -321,7 +331,16 @@ def search(query: str, debug_sink=None) -> list[dict[str, object]]:
     if results:
         logger.debug("piratebay search api results: %s", len(results))
         return results
-    logger.debug("piratebay search api empty")
+    logger.debug("piratebay search api empty; trying fallback sources")
+
+    # Try fallback sources when PirateBay fails
+    from tele_home_supervisor import torrentsources
+
+    fallback_results = torrentsources.fallback_search(q, debug_sink)
+    if fallback_results:
+        logger.debug("fallback search results: %s", len(fallback_results))
+        return [r.to_dict() for r in fallback_results]
+
     raise RuntimeError("Pirate Bay search parse failed")
 
 

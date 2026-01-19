@@ -544,3 +544,67 @@ class TorrentManager:
             f"Size: {size}\n"
             f"↓ {dlspeed:.1f} KiB/s | ↑ {upspeed:.1f} KiB/s"
         )
+
+    def find_missing_files_torrents(self) -> list[dict]:
+        """Find torrents with missingFiles state.
+
+        Returns a list of dicts with 'name', 'hash', 'state' keys.
+        """
+        if self.qbt_client is None:
+            if not self.connect():
+                return []
+        try:
+            torrents = self.qbt_client.torrents_info() or []
+            matches: list[dict] = []
+            for t in torrents:
+                state = str(getattr(t, "state", "")).lower()
+                # qBittorrent uses 'missingFiles' or 'missing_files' depending on version
+                if "missingfiles" in state or "missing" in state:
+                    tname = getattr(t, "name", "") or ""
+                    thash = (
+                        getattr(t, "hash", None)
+                        or getattr(t, "info_hash", None)
+                        or getattr(t, "hashString", None)
+                    )
+                    matches.append({"name": tname, "hash": thash, "state": state})
+            return matches
+        except Exception:
+            logger.exception("Error finding missing files torrents")
+            return []
+
+    def preview_missing_files(self) -> str:
+        """Preview torrents with missingFiles state."""
+        matches = self.find_missing_files_torrents()
+        if not matches:
+            return "No torrents with missing files found."
+        lines = ["<b>Torrents with missing files:</b>"]
+        for m in matches[:25]:
+            name = html.escape(m.get("name", "unknown"))
+            lines.append(f"• <code>{name}</code>")
+        if len(matches) > 25:
+            lines.append(f"<i>...and {len(matches) - 25} more</i>")
+        lines.append(f"\n<b>Total: {len(matches)} torrents</b>")
+        return "\n".join(lines)
+
+    def clean_missing_files(self, delete_files: bool = True) -> str:
+        """Delete all torrents with missingFiles state.
+
+        Returns a human-readable result string.
+        """
+        matches = self.find_missing_files_torrents()
+        if not matches:
+            return "✅ No torrents with missing files found."
+        hashes = [m["hash"] for m in matches if m.get("hash")]
+        if not hashes:
+            return "Found matching torrents but could not determine their hashes."
+        ok = self._call_delete(hashes, delete_files=delete_files)
+        if ok:
+            count = len(matches)
+            names = ", ".join(m["name"] for m in matches[:5])
+            if len(matches) > 5:
+                names += f", ... (+{len(matches) - 5} more)"
+            return (
+                f"🗑️ Cleaned {count} torrent(s) with missing files:\n"
+                f"{html.escape(names)}"
+            )
+        return "Failed to delete torrents."

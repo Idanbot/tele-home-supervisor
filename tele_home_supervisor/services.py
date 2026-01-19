@@ -227,6 +227,18 @@ async def get_torrent_list() -> list[dict]:
     return await asyncio.to_thread(_get)
 
 
+async def torrent_preview_missing() -> str:
+    """Preview torrents with missingFiles state."""
+    return await asyncio.to_thread(_call_with_mgr, "preview_missing_files")
+
+
+async def torrent_clean_missing(delete_files: bool = True) -> str:
+    """Delete all torrents with missingFiles state."""
+    return await asyncio.to_thread(
+        _call_with_mgr, "clean_missing_files", delete_files=delete_files
+    )
+
+
 def _call_with_mgr(method_name: str, *args, **kwargs) -> str:
     """Create a TorrentManager, connect, and call a method on it."""
     mgr = torrent_mod.TorrentManager()

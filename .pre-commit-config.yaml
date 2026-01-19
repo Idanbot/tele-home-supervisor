@@ -16,12 +16,14 @@ repos:
         args:
           - "-r"
           - "tele_home_supervisor"
+          - "-x"
+          - "tests"
           - "--severity-level"
           - "medium"
           - "--confidence-level"
           - "medium"
         pass_filenames: false
-        exclude: '^(\.venv|venv|env)/'
+        exclude: '^(\.venv|venv|env|tests)/'
 
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.37.1

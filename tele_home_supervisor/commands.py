@@ -214,6 +214,13 @@ _TORRENTS_COMMANDS = (
         needs="torrent",
     ),
     CommandSpec(
+        "tclean",
+        "Torrents",
+        "/tclean yes",
+        "remove torrents with missing files",
+        "cmd_torrent_clean",
+    ),
+    CommandSpec(
         "subscribe",
         "Torrents",
         "/subscribe [on|off|status]",

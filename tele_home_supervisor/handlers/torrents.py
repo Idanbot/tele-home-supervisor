@@ -113,6 +113,31 @@ async def cmd_torrent_start(update, context) -> None:
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
+async def cmd_torrent_clean(update, context) -> None:
+    """Clean (remove) torrents with missingFiles status."""
+    if not await guard_sensitive(update, context):
+        return
+
+    confirm_tokens = {"yes", "--yes", "confirm", "--confirm"}
+    confirm = bool(context.args and context.args[0].strip().lower() in confirm_tokens)
+
+    if not confirm:
+        # Show preview and ask for confirmation
+        preview = await services.torrent_preview_missing()
+        msg = (
+            f"{preview}\n\n"
+            f"⚠️ This will <b>remove these torrents and their files</b>.\n"
+            f"To confirm, run:\n"
+            f"<code>/tclean yes</code>"
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        return
+
+    set_audit_target(context, "clean_missing_files")
+    res = await services.torrent_clean_missing(delete_files=True)
+    await update.message.reply_text(res, parse_mode=ParseMode.HTML)
+
+
 async def cmd_torrent_delete(update, context) -> None:
     if not await guard_sensitive(update, context):
         return
