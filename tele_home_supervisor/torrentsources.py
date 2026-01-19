@@ -38,6 +38,12 @@ _SEARCH_CACHE_MAX = 50
 _search_cache: OrderedDict[str, tuple[float, list["TorrentResult"]]] = OrderedDict()
 _top_cache: OrderedDict[str, tuple[float, list["TorrentResult"]]] = OrderedDict()
 
+# Provider state management
+_forced_provider: str | None = None  # Force a specific provider (by name)
+_disabled_providers: set[str] = set()  # Disabled provider names
+_last_used_provider: str | None = None  # Track which provider was used last
+_provider_failures: dict[str, str] = {}  # Track last failure message per provider
+
 
 def _cache_get(
     cache: OrderedDict[str, tuple[float, list["TorrentResult"]]], key: str
@@ -70,6 +76,77 @@ def _cache_set(
         cache.pop(k, None)
     while len(cache) > _SEARCH_CACHE_MAX:
         cache.popitem(last=False)
+
+
+# Provider management functions
+def get_last_used_provider() -> str | None:
+    """Get the name of the last provider that returned results."""
+    return _last_used_provider
+
+
+def get_forced_provider() -> str | None:
+    """Get the currently forced provider name, or None if auto."""
+    return _forced_provider
+
+
+def set_forced_provider(name: str | None) -> bool:
+    """Set forced provider by name. Returns True if valid provider found."""
+    global _forced_provider
+    if name is None:
+        _forced_provider = None
+        return True
+    name_lower = name.lower()
+    for source in SOURCES:
+        if source.name.lower() == name_lower:
+            _forced_provider = source.name
+            return True
+    return False
+
+
+def get_disabled_providers() -> set[str]:
+    """Get set of disabled provider names."""
+    return _disabled_providers.copy()
+
+
+def toggle_provider(name: str) -> tuple[bool, bool]:
+    """Toggle a provider on/off. Returns (found, now_enabled)."""
+    global _disabled_providers
+    name_lower = name.lower()
+    for source in SOURCES:
+        if source.name.lower() == name_lower:
+            if source.name in _disabled_providers:
+                _disabled_providers.discard(source.name)
+                return True, True
+            else:
+                _disabled_providers.add(source.name)
+                return True, False
+    return False, False
+
+
+def get_provider_status() -> list[dict]:
+    """Get status of all providers."""
+    result = []
+    for source in SOURCES:
+        # Check if the source is actually available (e.g., cloudscraper)
+        is_available = source.enabled
+        is_disabled = source.name in _disabled_providers
+        is_forced = _forced_provider == source.name
+        last_failure = _provider_failures.get(source.name)
+        result.append(
+            {
+                "name": source.name,
+                "available": is_available,
+                "disabled": is_disabled,
+                "forced": is_forced,
+                "last_failure": last_failure,
+            }
+        )
+    return result
+
+
+def get_available_provider_names() -> list[str]:
+    """Get list of all provider names."""
+    return [s.name for s in SOURCES]
 
 
 # Rotating user agents to mimic real browsers
@@ -866,8 +943,20 @@ SOURCES: list[TorrentSource] = [
 
 
 def get_enabled_sources() -> list[TorrentSource]:
-    """Get list of enabled torrent sources."""
-    return [s for s in SOURCES if s.enabled]
+    """Get list of enabled torrent sources, respecting forced/disabled settings."""
+    global _forced_provider
+
+    # If a provider is forced, return only that provider if available
+    if _forced_provider:
+        for source in SOURCES:
+            if source.name == _forced_provider:
+                if source.enabled and source.name not in _disabled_providers:
+                    return [source]
+                # If forced provider is not available, fall through to all
+                break
+
+    # Return all enabled sources that aren't disabled
+    return [s for s in SOURCES if s.enabled and s.name not in _disabled_providers]
 
 
 def fallback_search(
@@ -877,6 +966,7 @@ def fallback_search(
 
     Results are cached for 5 minutes to reduce external requests.
     """
+    global _last_used_provider, _provider_failures
     cache_key = query.strip().lower()
 
     # Check cache first
@@ -898,15 +988,20 @@ def fallback_search(
                     len(results),
                     source.name,
                 )
+                # Track which provider was used
+                _last_used_provider = source.name
+                _provider_failures.pop(source.name, None)
                 # Cache the results
                 _cache_set(_search_cache, cache_key, results)
                 return results
         except Exception as exc:
             logger.debug("fallback source %s failed: %s", source.name, exc)
+            _provider_failures[source.name] = str(exc)
             if debug_sink:
                 debug_sink(f"fallback {source.name} failed", str(exc))
             continue
 
+    _last_used_provider = None
     return []
 
 
@@ -917,6 +1012,7 @@ def fallback_top(
 
     Results are cached for 5 minutes to reduce external requests.
     """
+    global _last_used_provider, _provider_failures
     cache_key = f"top:{category or 'all'}"
 
     # Check cache first
@@ -938,13 +1034,18 @@ def fallback_top(
                     len(results),
                     source.name,
                 )
+                # Track which provider was used
+                _last_used_provider = source.name
+                _provider_failures.pop(source.name, None)
                 # Cache the results
                 _cache_set(_top_cache, cache_key, results)
                 return results
         except Exception as exc:
             logger.debug("fallback source %s failed: %s", source.name, exc)
+            _provider_failures[source.name] = str(exc)
             if debug_sink:
                 debug_sink(f"fallback {source.name} failed", str(exc))
             continue
 
+    _last_used_provider = None
     return []

@@ -6,7 +6,7 @@ import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-from .. import piratebay, services, view
+from .. import piratebay, services, torrentsources, view
 from ..background import ensure_started
 from ..state import BotState
 from .common import (
@@ -299,9 +299,10 @@ async def cmd_pbtop(update, context) -> None:
         return
 
     state = get_state(context.application)
-    title = "Pirate Bay Top 10"
+    provider = torrentsources.get_last_used_provider() or "Unknown"
+    title = f"Pirate Bay Top 10 [via {provider}]"
     if category:
-        title = f"Pirate Bay Top 10 ({category})"
+        title = f"Pirate Bay Top 10 ({category}) [via {provider}]"
     msg = _format_piratebay_list(title, results)
     keyboard = _build_piratebay_keyboard(state, results)
     await update.message.reply_text(
@@ -346,9 +347,121 @@ async def cmd_pbsearch(update, context) -> None:
         return
 
     state = get_state(context.application)
-    title = f"Pirate Bay Search: {query}"
+    provider = torrentsources.get_last_used_provider() or "Unknown"
+    title = f"Pirate Bay Search: {query} [via {provider}]"
     msg = _format_piratebay_list(title, results)
     keyboard = _build_piratebay_keyboard(state, results)
     await update.message.reply_text(
         msg, parse_mode=ParseMode.HTML, reply_markup=keyboard
+    )
+
+
+async def cmd_pbprovider(update, context) -> None:
+    """Show or set the forced torrent provider."""
+    if not await guard_sensitive(update, context):
+        return
+
+    if not context.args:
+        # Show current provider status
+        forced = torrentsources.get_forced_provider()
+        last_used = torrentsources.get_last_used_provider()
+        status_list = torrentsources.get_provider_status()
+
+        lines = ["<b>🔌 Torrent Provider Status</b>"]
+        lines.append("")
+        if forced:
+            lines.append(f"<b>Forced Provider:</b> {html.escape(forced)}")
+        else:
+            lines.append("<b>Forced Provider:</b> None (auto-fallback)")
+        if last_used:
+            lines.append(f"<b>Last Used:</b> {html.escape(last_used)}")
+        lines.append("")
+        lines.append("<b>Available Providers:</b>")
+        for p in status_list:
+            status_icon = "✅" if p["enabled"] else "❌"
+            forced_icon = " 📌" if p["forced"] else ""
+            lines.append(f"  {status_icon} {html.escape(p['name'])}{forced_icon}")
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
+
+    provider_name = " ".join(context.args).strip()
+
+    # Allow clearing the forced provider
+    if provider_name.lower() in {"none", "auto", "clear", "reset"}:
+        torrentsources.set_forced_provider(None)
+        await update.message.reply_text(
+            "✅ Forced provider cleared. Will use auto-fallback.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Try to set the forced provider
+    if torrentsources.set_forced_provider(provider_name):
+        await update.message.reply_text(
+            f"✅ Forced provider set to: <b>{html.escape(provider_name)}</b>",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        available = torrentsources.get_available_provider_names()
+        available_list = ", ".join(available) if available else "None"
+        await update.message.reply_text(
+            f"❌ Unknown provider: <b>{html.escape(provider_name)}</b>\n"
+            f"Available: {html.escape(available_list)}",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def cmd_pbtoggle(update, context) -> None:
+    """Toggle a torrent provider on/off."""
+    if not await guard_sensitive(update, context):
+        return
+
+    status_list = torrentsources.get_provider_status()
+    available = torrentsources.get_available_provider_names()
+
+    if not context.args:
+        # Show current toggle status with indices
+        lines = ["<b>🔌 Torrent Provider Toggle Status</b>"]
+        lines.append("")
+        lines.append("Usage: <code>/pbtoggle &lt;number|name&gt;</code>")
+        lines.append("")
+        lines.append("<b>Providers:</b>")
+        for idx, p in enumerate(status_list, start=1):
+            status_icon = "✅" if p["enabled"] else "❌"
+            lines.append(f"  {idx}. {status_icon} {html.escape(p['name'])}")
+
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
+
+    provider_input = " ".join(context.args).strip()
+
+    # Check if input is a number (index)
+    provider_name = provider_input
+    if provider_input.isdigit():
+        idx = int(provider_input)
+        if 1 <= idx <= len(available):
+            provider_name = available[idx - 1]
+        else:
+            await update.message.reply_text(
+                f"❌ Invalid index: <b>{idx}</b>\nValid range: 1-{len(available)}",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+    found, now_enabled = torrentsources.toggle_provider(provider_name)
+
+    if not found:
+        available_list = ", ".join(f"{i + 1}={n}" for i, n in enumerate(available))
+        await update.message.reply_text(
+            f"❌ Unknown provider: <b>{html.escape(provider_input)}</b>\n"
+            f"Available: {html.escape(available_list)}",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    status_icon = "✅ enabled" if now_enabled else "❌ disabled"
+    await update.message.reply_text(
+        f"Provider <b>{html.escape(provider_name)}</b> is now {status_icon}",
+        parse_mode=ParseMode.HTML,
     )

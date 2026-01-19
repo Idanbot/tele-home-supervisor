@@ -263,6 +263,8 @@ def _api_search(
 
 
 def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
+    from tele_home_supervisor import torrentsources
+
     top_mode = resolve_top_mode(category)
     if top_mode == "top100":
         url = f"{BASE_URL}/top.php"
@@ -279,6 +281,7 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
         _ensure_not_blocked(html_text)
         results = _top_n(_parse_rows(html_text), 10)
         if results:
+            torrentsources._last_used_provider = "PirateBay"
             return results
     except (requests.RequestException, RuntimeError, ValueError) as exc:
         logger.debug("piratebay top html failed: %s", exc)
@@ -292,11 +295,11 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
         else:
             results = _api_top(category, debug_sink)
         if results:
+            torrentsources._last_used_provider = "PirateBay API"
             return results
 
     # Try fallback sources when PirateBay fails
     logger.debug("piratebay top api empty; trying fallback sources")
-    from tele_home_supervisor import torrentsources
 
     fallback_results = torrentsources.fallback_top(category, debug_sink)
     if fallback_results:
@@ -308,6 +311,8 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
 
 
 def search(query: str, debug_sink=None) -> list[dict[str, object]]:
+    from tele_home_supervisor import torrentsources
+
     q = (query or "").strip()
     if not q:
         return []
@@ -319,9 +324,11 @@ def search(query: str, debug_sink=None) -> list[dict[str, object]]:
         results = _top_n(_parse_rows(html_text), 10)
         if results:
             logger.debug("piratebay search html results: %s", len(results))
+            torrentsources._last_used_provider = "PirateBay"
             return results
         if _is_no_results(html_text):
             logger.debug("piratebay search html no results")
+            torrentsources._last_used_provider = "PirateBay"
             return []
         logger.debug("piratebay search html parse empty; falling back to api")
     except Exception as exc:
@@ -332,12 +339,11 @@ def search(query: str, debug_sink=None) -> list[dict[str, object]]:
     results = _api_search(q, debug_sink=debug_sink)
     if results:
         logger.debug("piratebay search api results: %s", len(results))
+        torrentsources._last_used_provider = "PirateBay API"
         return results
     logger.debug("piratebay search api empty; trying fallback sources")
 
     # Try fallback sources when PirateBay fails
-    from tele_home_supervisor import torrentsources
-
     fallback_results = torrentsources.fallback_search(q, debug_sink)
     if fallback_results:
         logger.debug("fallback search results: %s", len(fallback_results))

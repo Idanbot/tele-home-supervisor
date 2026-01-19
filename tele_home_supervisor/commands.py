@@ -241,6 +241,20 @@ _TORRENTS_COMMANDS = (
         "search Pirate Bay torrents",
         "cmd_pbsearch",
     ),
+    CommandSpec(
+        "pbprovider",
+        "Torrents",
+        "/pbprovider [provider]",
+        "show or set forced torrent provider",
+        "cmd_pbprovider",
+    ),
+    CommandSpec(
+        "pbtoggle",
+        "Torrents",
+        "/pbtoggle <provider>",
+        "toggle torrent provider on/off",
+        "cmd_pbtoggle",
+    ),
 )
 
 _NOTIFICATIONS_COMMANDS = (

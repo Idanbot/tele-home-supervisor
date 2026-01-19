@@ -63,6 +63,8 @@ cmd_torrent_clean = rate_limit(torrents.cmd_torrent_clean, name="torrentclean")
 cmd_subscribe = rate_limit(torrents.cmd_subscribe, name="subscribe")
 cmd_pbtop = rate_limit(torrents.cmd_pbtop, name="pbtop")
 cmd_pbsearch = rate_limit(torrents.cmd_pbsearch, name="pbsearch")
+cmd_pbprovider = rate_limit(torrents.cmd_pbprovider, name="pbprovider")
+cmd_pbtoggle = rate_limit(torrents.cmd_pbtoggle, name="pbtoggle")
 
 # Notifications
 cmd_mute_gameoffers = rate_limit(notifications.cmd_mute_gameoffers, name="muteoffers")
