@@ -304,11 +304,11 @@ def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
         return (f"❌ Error processing Epic Games data: {html.escape(str(e))}", [])
 
 
-def fetch_hackernews_top(limit: int = 3) -> str:
+def fetch_hackernews_top(limit: int = 10) -> str:
     """Fetch top stories from Hacker News.
 
     Args:
-        limit: Number of top stories to fetch (default: 3)
+        limit: Number of top stories to fetch (default: 10)
 
     Returns formatted HTML message or error string.
     """

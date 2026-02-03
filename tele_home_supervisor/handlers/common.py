@@ -45,8 +45,14 @@ def get_state(app) -> BotState:
 
     Returns:
         BotState object containing runtime state, caches, and subscriptions.
+
+    Note:
+        Automatically loads persisted state on first access to ensure auth
+        grants and other settings survive restarts.
     """
-    return app.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    state = app.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    state.load_state()  # Safe to call multiple times (has _state_loaded guard)
+    return state
 
 
 def get_state_and_recorder(context) -> tuple[BotState, DebugRecorder]:
@@ -202,7 +208,7 @@ async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
 
 
 def _auth_valid(state: BotState, user_id: int) -> bool:
-    now = time.monotonic()
+    now = time.time()
     expiry = state.auth_grants.get(user_id)
     if not expiry or expiry <= now:
         state.auth_grants.pop(user_id, None)

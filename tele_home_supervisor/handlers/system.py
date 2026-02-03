@@ -4,7 +4,9 @@ import asyncio
 import html
 import logging
 
+from telegram import Update
 from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
 
 from .. import config, services
 from .. import view
@@ -23,7 +25,7 @@ def _draw_bar(percent: float, length: int = 10) -> str:
     return "█" * filled + "░" * empty
 
 
-async def cmd_diskusage(update, context) -> None:
+async def cmd_diskusage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
 
@@ -45,7 +47,7 @@ async def cmd_diskusage(update, context) -> None:
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
-async def cmd_remind(update, context) -> None:
+async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
 
@@ -84,7 +86,7 @@ async def cmd_remind(update, context) -> None:
     )
 
 
-async def cmd_ip(update, context) -> None:
+async def cmd_ip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     lan = await services.utils.get_primary_ip()
@@ -97,7 +99,7 @@ async def cmd_ip(update, context) -> None:
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_health(update, context) -> None:
+async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
 
@@ -105,10 +107,16 @@ async def cmd_health(update, context) -> None:
     msg = view.render_host_health(data, show_wan=config.SHOW_WAN)
     metrics = get_state(context.application).command_metrics
     msg = f"{msg}\n\n{view.render_command_metrics(metrics)}"
+
+    # Send chart image if available
+    chart = view.render_health_chart(data)
+    if chart:
+        await update.message.reply_photo(photo=chart, caption="Health Dashboard")
+
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_uptime(update, context) -> None:
+async def cmd_uptime(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     uptime = await services.get_uptime_info()
@@ -116,7 +124,7 @@ async def cmd_uptime(update, context) -> None:
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_ping(update, context) -> None:
+async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     if not context.args or len(context.args) == 0:
@@ -136,14 +144,14 @@ async def cmd_ping(update, context) -> None:
     await update.message.reply_text(formatted, parse_mode=ParseMode.HTML)
 
 
-async def cmd_temp(update, context) -> None:
+async def cmd_temp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     msg = await services.utils.get_cpu_temp()
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_top(update, context) -> None:
+async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     raw = await services.utils.get_top_processes()

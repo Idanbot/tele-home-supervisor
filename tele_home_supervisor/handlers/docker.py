@@ -7,7 +7,9 @@ import re
 import time
 from datetime import datetime, timezone
 
+from telegram import Update
 from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
 
 from .. import services, view
 from .common import (
@@ -94,7 +96,7 @@ def _parse_dlogs_args(
     return container, page, since, as_file, invalid_since
 
 
-async def cmd_docker(update, context) -> None:
+async def cmd_docker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     state, recorder = get_state_and_recorder(context)
@@ -139,13 +141,13 @@ async def cmd_docker(update, context) -> None:
             await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
-async def cmd_dockerstats(update, context) -> None:
+async def cmd_dockerstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Legacy command, mapped to rich stats for now or we can implement summary?
     # services.container_stats_rich returns list of dicts.
     await cmd_dstats_rich(update, context)
 
 
-async def cmd_dstats_rich(update, context) -> None:
+async def cmd_dstats_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     _, recorder = get_state_and_recorder(context)
@@ -160,12 +162,18 @@ async def cmd_dstats_rich(update, context) -> None:
             update.message.reply_text,
         )
         return
+
+    # Send chart image if available
+    chart = view.render_docker_stats_chart(stats)
+    if chart:
+        await update.message.reply_photo(photo=chart, caption="Docker Stats")
+
     msg = view.render_container_stats(stats)
     for part in view.chunk(msg):
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
-async def cmd_dlogs(update, context) -> None:
+async def cmd_dlogs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch container logs."""
     if not await guard_sensitive(update, context):
         return
@@ -244,7 +252,7 @@ async def cmd_dlogs(update, context) -> None:
     )
 
 
-async def cmd_dhealth(update, context) -> None:
+async def cmd_dhealth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     state, recorder = get_state_and_recorder(context)
@@ -279,7 +287,7 @@ async def cmd_dhealth(update, context) -> None:
     await update.message.reply_text(f"<pre>{msg}</pre>", parse_mode=ParseMode.HTML)
 
 
-async def cmd_ports(update, context) -> None:
+async def cmd_ports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     _, recorder = get_state_and_recorder(context)
@@ -304,7 +312,7 @@ async def cmd_ports(update, context) -> None:
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
-async def cmd_dinspect(update, context) -> None:
+async def cmd_dinspect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     state, recorder = get_state_and_recorder(context)

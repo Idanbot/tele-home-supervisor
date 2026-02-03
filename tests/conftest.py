@@ -8,8 +8,9 @@ from typing import Any
 class DummyChat:
     """Dummy Telegram chat for testing."""
 
-    def __init__(self, chat_id: int) -> None:
+    def __init__(self, chat_id: int, chat_type: str = "private") -> None:
         self.id = chat_id
+        self.type = chat_type
         self.sent: list[str] = []
 
     async def send_message(self, text: str) -> None:
@@ -30,12 +31,21 @@ class DummyMessage:
     def __init__(self) -> None:
         self.replies: list[str] = []
         self.photos: list[tuple[str, str]] = []  # (photo_url, caption)
+        self._edit_text_calls: list[str] = []
 
-    async def reply_text(self, text: str, **_: Any) -> None:
+    async def reply_text(self, text: str, **_: Any) -> "DummyMessage":
         self.replies.append(text)
+        return self
 
     async def reply_photo(self, photo: str, caption: str = "", **_: Any) -> None:
         self.photos.append((photo, caption))
+
+    async def edit_text(self, text: str, **_: Any) -> None:
+        self._edit_text_calls.append(text)
+        if self.replies:
+            self.replies[-1] = text
+        else:
+            self.replies.append(text)
 
 
 class DummyUpdate:

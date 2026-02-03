@@ -4,7 +4,9 @@ import io
 import logging
 import qrcode
 
+from telegram import Update
 from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
 
 from .. import services, view
 from .common import (
@@ -17,7 +19,7 @@ from .common import (
 logger = logging.getLogger(__name__)
 
 
-async def cmd_wifiqr(update, context) -> None:
+async def cmd_wifiqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
 
@@ -67,7 +69,7 @@ async def cmd_wifiqr(update, context) -> None:
         await update.message.reply_text("❌ Failed to generate QR code.")
 
 
-async def cmd_dns(update, context) -> None:
+async def cmd_dns(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     if not context.args:
@@ -92,7 +94,7 @@ async def cmd_dns(update, context) -> None:
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_traceroute(update, context) -> None:
+async def cmd_traceroute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     if not context.args:
@@ -119,6 +121,29 @@ async def cmd_traceroute(update, context) -> None:
         )
         return
 
+    # Parse traceroute output for chart
+    import re
+
+    hops = []
+    for line in result.split("\n"):
+        # Match typical traceroute/tracepath output: "1:  192.168.1.1  0.5ms"
+        m = re.match(r"\s*(\d+)[:\s]+([0-9.*]+)\s+(.+)?", line.strip())
+        if m:
+            hop_num = int(m.group(1))
+            ip = m.group(2).strip()
+            rest = m.group(3) or ""
+            # Try to extract RTT
+            rtt_match = re.search(r"([0-9.]+)\s*ms", rest)
+            rtt = float(rtt_match.group(1)) if rtt_match else 0
+            hops.append({"hop": hop_num, "ip": ip, "hostname": "", "rtt": rtt})
+
+    if hops:
+        chart = view.render_traceroute_chart(hops)
+        if chart:
+            await update.message.reply_photo(
+                photo=chart, caption=f"Traceroute to {host}"
+            )
+
     title = f"Traceroute {host}:"
     msg = f"{view.bold(title)}\n{view.pre(result)}"
 
@@ -126,7 +151,7 @@ async def cmd_traceroute(update, context) -> None:
         await update.message.reply_text(part, parse_mode=ParseMode.HTML)
 
 
-async def cmd_speedtest(update, context) -> None:
+async def cmd_speedtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     mb = 100
@@ -144,5 +169,16 @@ async def cmd_speedtest(update, context) -> None:
     except Exception as e:
         await record_error(recorder, "speedtest", "speedtest failed", e, msg.edit_text)
         return
+
+    # Try to parse Mbps for chart rendering
+    import re
+
+    mbps_match = re.search(r"Rate:\s*([0-9.]+)\s*Mb/s", result)
+    if mbps_match:
+        download_mbps = float(mbps_match.group(1))
+        chart = view.render_speedtest_chart(download_mbps)
+        if chart:
+            await update.message.reply_photo(photo=chart, caption="Speedtest Results")
+
     text = f"{view.bold('Speedtest (download):')}\n{result}"
     await msg.edit_text(text, parse_mode=ParseMode.HTML)

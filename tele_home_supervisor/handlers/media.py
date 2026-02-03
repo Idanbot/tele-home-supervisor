@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from telegram import Update
 from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
 
 from .. import services, tmdb, view
 from .callbacks import build_tmdb_keyboard, build_protondb_keyboard
 from .common import guard, get_state_and_recorder, record_error
 
 
-async def cmd_movies(update, context) -> None:
+async def cmd_movies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     state, recorder = get_state_and_recorder(context)
@@ -40,7 +42,7 @@ async def cmd_movies(update, context) -> None:
     )
 
 
-async def cmd_shows(update, context) -> None:
+async def cmd_shows(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     state, recorder = get_state_and_recorder(context)
@@ -71,7 +73,7 @@ async def cmd_shows(update, context) -> None:
     )
 
 
-async def cmd_incinema(update, context) -> None:
+async def cmd_incinema(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     state, recorder = get_state_and_recorder(context)
@@ -102,7 +104,7 @@ async def cmd_incinema(update, context) -> None:
     )
 
 
-async def cmd_tmdb(update, context) -> None:
+async def cmd_tmdb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     if not context.args:
@@ -140,7 +142,7 @@ async def cmd_tmdb(update, context) -> None:
     )
 
 
-async def cmd_protondb(update, context) -> None:
+async def cmd_protondb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     if not context.args:

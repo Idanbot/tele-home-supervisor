@@ -341,7 +341,7 @@ async def _hackernews_scheduler(app: Application) -> None:
                 continue
 
             message = await asyncio.to_thread(
-                scheduled_fetchers.fetch_hackernews_top, 3
+                scheduled_fetchers.fetch_hackernews_top, 10
             )
 
             for chat_id in settings.ALLOWED_CHAT_IDS:

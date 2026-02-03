@@ -58,7 +58,7 @@ class BotState:
     alert_states: dict[str, AlertState] = field(default_factory=dict)
     alert_torrent_seen: dict[str, bool] = field(default_factory=dict)
 
-    # Auth grants (user_id -> monotonic expiry timestamp)
+    # Auth grants (user_id -> wall-clock expiry timestamp via time.time())
     auth_grants: dict[int, float] = field(default_factory=dict)
 
     command_metrics: dict[str, CommandMetrics] = field(default_factory=dict)
@@ -76,6 +76,7 @@ class BotState:
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
     _debug_recorder: DebugRecorder | None = field(default=None, init=False, repr=False)
+    _state_loaded: bool = field(default=False, init=False, repr=False)
 
     async def refresh_containers(self) -> set[str]:
         """Refresh the cache of Docker container names."""
@@ -466,7 +467,7 @@ class BotState:
         return chat_id in self.hackernews_muted
 
     def grant_auth(self, user_id: int, expiry: float) -> None:
-        """Grant auth to a user until expiry time (monotonic)."""
+        """Grant auth to a user until expiry time (wall-clock via time.time())."""
         self.auth_grants[user_id] = expiry
         self._save_state()
 
@@ -478,42 +479,36 @@ class BotState:
     def _serialize_auth_grants(self) -> list[dict]:
         """Serialize auth grants for persistence.
 
-        Since monotonic time doesn't persist across restarts, we convert to
-        remaining seconds and store as wall-clock expiry.
+        Auth grants use wall-clock time (time.time()) so they persist across restarts.
         """
-        now_mono = time.monotonic()
-        now_wall = time.time()
+        now = time.time()
         grants = []
-        for user_id, expiry_mono in self.auth_grants.items():
-            remaining = expiry_mono - now_mono
-            if remaining > 0:
-                expiry_wall = now_wall + remaining
-                grants.append({"user_id": user_id, "expiry": expiry_wall})
+        for user_id, expiry in self.auth_grants.items():
+            if expiry > now:
+                grants.append({"user_id": user_id, "expiry": expiry})
         return grants
 
     def _deserialize_auth_grants(self, grants: list[dict]) -> None:
         """Restore auth grants from persistence.
 
-        Converts wall-clock expiry back to monotonic time.
+        Auth grants use wall-clock time, so we just load them directly.
         """
-        now_mono = time.monotonic()
-        now_wall = time.time()
+        now = time.time()
         self.auth_grants = {}
         for item in grants:
             if not isinstance(item, dict):
                 continue
             user_id = item.get("user_id")
-            expiry_wall = item.get("expiry")
-            if user_id is None or expiry_wall is None:
+            expiry = item.get("expiry")
+            if user_id is None or expiry is None:
                 continue
             try:
                 user_id = int(user_id)
-                expiry_wall = float(expiry_wall)
+                expiry = float(expiry)
             except (TypeError, ValueError):
                 continue
-            remaining = expiry_wall - now_wall
-            if remaining > 0:
-                self.auth_grants[user_id] = now_mono + remaining
+            if expiry > now:
+                self.auth_grants[user_id] = expiry
 
     def _save_state(self) -> None:
         """Persist mute preferences to disk."""
@@ -554,7 +549,10 @@ class BotState:
             logger.exception("Failed to save bot state")
 
     def load_state(self) -> None:
-        """Load persisted state from disk."""
+        """Load persisted state from disk. Only loads once per instance."""
+        if self._state_loaded:
+            return
+        self._state_loaded = True
         try:
             if not self._state_file.exists():
                 return

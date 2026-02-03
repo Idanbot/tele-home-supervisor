@@ -6,7 +6,9 @@ import re
 import time
 
 import pyotp
+from telegram import Update
 from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
 
 from .. import config, services, view
 from ..background import ensure_started
@@ -41,7 +43,7 @@ def _code(text: str) -> str:
     return f"`{escaped}`"
 
 
-async def cmd_start(update, context) -> None:
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     try:
@@ -51,11 +53,11 @@ async def cmd_start(update, context) -> None:
     await update.message.reply_text(_render_help())
 
 
-async def cmd_help(update, context) -> None:
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await cmd_start(update, context)
 
 
-async def cmd_whoami(update, context) -> None:
+async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     c = update.effective_chat
     u = update.effective_user
     username = f"@{u.username}" if u and u.username else "(no username)"
@@ -63,7 +65,7 @@ async def cmd_whoami(update, context) -> None:
     await update.message.reply_text(msg)
 
 
-async def cmd_version(update, context) -> None:
+async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     try:
@@ -97,7 +99,7 @@ async def cmd_version(update, context) -> None:
         await update.message.reply_text(f"❌ Error getting version info: {e}")
 
 
-async def cmd_auth(update, context) -> None:
+async def cmd_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     if not config.BOT_AUTH_TOTP_SECRET:
@@ -122,12 +124,12 @@ async def cmd_auth(update, context) -> None:
         return
     state = get_state(context.application)
     user_id = update.effective_user.id
-    expiry = time.monotonic() + auth_ttl_seconds()
+    expiry = time.time() + auth_ttl_seconds()
     state.grant_auth(user_id, expiry)
     await update.message.reply_text("✅ Authorized for 24 hours.")
 
 
-async def cmd_check_auth(update, context) -> None:
+async def cmd_check_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     if not config.BOT_AUTH_TOTP_SECRET:
@@ -136,7 +138,7 @@ async def cmd_check_auth(update, context) -> None:
     user_id = update.effective_user.id
     state = get_state(context.application)
     expiry = state.auth_grants.get(user_id)
-    now = time.monotonic()
+    now = time.time()
     if not expiry or expiry <= now:
         state.auth_grants.pop(user_id, None)
         await update.message.reply_text(
@@ -155,15 +157,36 @@ async def cmd_check_auth(update, context) -> None:
     await update.message.reply_text(f"✅ Authenticated. Expires in {time_str}.")
 
 
-async def cmd_metrics(update, context) -> None:
+async def cmd_metrics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     state = get_state(context.application)
-    msg = view.render_command_metrics(state.command_metrics)
+    metrics = state.command_metrics
+
+    # Generate chart image
+    chart = view.render_metrics_chart(metrics)
+    if chart:
+        caption = view.render_command_metrics(metrics)
+        # Truncate caption if too long for photo caption (1024 chars)
+        if len(caption) > 1000:
+            caption = caption[:997] + "..."
+        try:
+            await update.message.reply_photo(
+                photo=chart,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        except Exception as e:
+            logger.warning("Failed to send metrics chart: %s", e)
+            # Fall through to text-only response
+
+    # Fallback to text-only
+    msg = view.render_command_metrics(metrics)
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_debug(update, context) -> None:
+async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     state = get_state(context.application)

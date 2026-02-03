@@ -3,8 +3,9 @@ from __future__ import annotations
 import html
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
 
 from .. import piratebay, services, torrentsources, view
 from ..background import ensure_started
@@ -31,7 +32,7 @@ def _has_torrent_match(names: set[str], query: str) -> bool:
     return any(target in n.lower() for n in names)
 
 
-async def cmd_torrent_add(update, context) -> None:
+async def cmd_torrent_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Add a torrent to qBittorrent (magnet/URL)."""
     if not await guard_sensitive(update, context):
         return
@@ -53,7 +54,9 @@ async def cmd_torrent_add(update, context) -> None:
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
-async def cmd_torrent_status(update, context) -> None:
+async def cmd_torrent_status(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     if not await guard_sensitive(update, context):
         return
     try:
@@ -62,6 +65,12 @@ async def cmd_torrent_status(update, context) -> None:
         logger.debug("refresh_torrents failed: %s", e)
 
     torrents = await services.get_torrent_list()
+
+    # Send chart image if available
+    chart = view.render_torrent_chart(torrents)
+    if chart:
+        await update.message.reply_photo(photo=chart, caption="Torrent Status")
+
     page_torrents, page, total_pages = paginate_torrents(torrents, 0)
     msg = view.render_torrent_list_page(page_torrents, page, total_pages)
     keyboard = build_torrent_keyboard(torrents, page=page) if torrents else None
@@ -71,7 +80,7 @@ async def cmd_torrent_status(update, context) -> None:
     )
 
 
-async def cmd_torrent_stop(update, context) -> None:
+async def cmd_torrent_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     state: BotState = get_state(context.application)
@@ -92,7 +101,7 @@ async def cmd_torrent_stop(update, context) -> None:
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
-async def cmd_torrent_start(update, context) -> None:
+async def cmd_torrent_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     state: BotState = get_state(context.application)
@@ -113,7 +122,7 @@ async def cmd_torrent_start(update, context) -> None:
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
-async def cmd_torrent_clean(update, context) -> None:
+async def cmd_torrent_clean(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Clean (remove) torrents with missingFiles status."""
     if not await guard_sensitive(update, context):
         return
@@ -138,7 +147,9 @@ async def cmd_torrent_clean(update, context) -> None:
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
-async def cmd_torrent_delete(update, context) -> None:
+async def cmd_torrent_delete(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     if not await guard_sensitive(update, context):
         return
     state: BotState = get_state(context.application)
@@ -187,7 +198,7 @@ async def cmd_torrent_delete(update, context) -> None:
     await update.message.reply_text(res, parse_mode=ParseMode.HTML)
 
 
-async def cmd_subscribe(update, context) -> None:
+async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     chat_id = update.effective_chat.id if update and update.effective_chat else None
@@ -264,7 +275,7 @@ def _format_piratebay_list(title: str, results: list[dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
-async def cmd_pbtop(update, context) -> None:
+async def cmd_pbtop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     category = context.args[0] if context.args else None
@@ -310,7 +321,7 @@ async def cmd_pbtop(update, context) -> None:
     )
 
 
-async def cmd_pbsearch(update, context) -> None:
+async def cmd_pbsearch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     if not context.args:
@@ -412,7 +423,7 @@ async def cmd_pbprovider(update, context) -> None:
         )
 
 
-async def cmd_pbtoggle(update, context) -> None:
+async def cmd_pbtoggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Toggle a torrent provider on/off."""
     if not await guard_sensitive(update, context):
         return

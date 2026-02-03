@@ -3,10 +3,12 @@ from __future__ import annotations
 import html
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
+from telegram.ext import ContextTypes
 
+from .. import view
 from ..alerting import (
     DEFAULT_RULE_SPECS,
     METRIC_DEFS,
@@ -89,7 +91,7 @@ def _add_default_rules(state: BotState, chat_id: int) -> list[str]:
     return added
 
 
-async def cmd_alerts(update, context) -> None:
+async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     chat_id = update.effective_chat.id if update.effective_chat else None
@@ -101,6 +103,17 @@ async def cmd_alerts(update, context) -> None:
     action = args[0].lower() if args else "status"
 
     if action in {"status", "list"}:
+        # Send chart image with rules and recent alerts
+        rules = state.alert_rules_for_chat(chat_id)
+        alert_history = (
+            state.get_alert_history(chat_id)
+            if hasattr(state, "get_alert_history")
+            else []
+        )
+        chart = view.render_alerts_chart(alert_history, rules)
+        if chart:
+            await update.message.reply_photo(photo=chart, caption="Alert Dashboard")
+
         msg, keyboard = render_alerts_overview(state, chat_id)
         await update.message.reply_text(
             msg, parse_mode=ParseMode.HTML, reply_markup=keyboard

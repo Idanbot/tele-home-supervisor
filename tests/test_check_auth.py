@@ -33,7 +33,7 @@ async def test_check_auth_authenticated(monkeypatch) -> None:
 
     # Set up auth grant
     state = get_state(context.application)
-    state.auth_grants[123] = time.monotonic() + 3600  # 1 hour from now
+    state.auth_grants[123] = time.time() + 3600  # 1 hour from now
 
     await meta.cmd_check_auth(update, context)
 
@@ -51,7 +51,7 @@ async def test_check_auth_expired(monkeypatch) -> None:
 
     # Set up expired auth grant
     state = get_state(context.application)
-    state.auth_grants[123] = time.monotonic() - 10  # Expired
+    state.auth_grants[123] = time.time() - 10  # Expired
 
     await meta.cmd_check_auth(update, context)
 

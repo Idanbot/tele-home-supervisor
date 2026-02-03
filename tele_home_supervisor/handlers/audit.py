@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import time
 
+from telegram import Update
 from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
 
 from .. import view
 from ..state import BotState
@@ -17,7 +19,7 @@ def _format_entry(entry) -> str:
     return f"{timestamp} {user} {entry.action} {target} ({entry.status}, {duration})"
 
 
-async def cmd_audit(update, context) -> None:
+async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     chat_id = update.effective_chat.id if update.effective_chat else None
@@ -39,6 +41,11 @@ async def cmd_audit(update, context) -> None:
     if not entries:
         await update.message.reply_text("No audit entries.", parse_mode=ParseMode.HTML)
         return
+
+    # Send chart image if available
+    chart = view.render_audit_chart(entries)
+    if chart:
+        await update.message.reply_photo(photo=chart, caption="Audit Log")
 
     lines = [_format_entry(entry) for entry in entries]
     msg = f"{view.bold('Audit log:')}\n{view.pre('\\n'.join(lines))}"

@@ -6,7 +6,9 @@ import asyncio
 import html
 import logging
 
+from telegram import Update
 from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
 
 from .. import scheduled as scheduled_fetchers
 from ..state import BOT_STATE_KEY, BotState
@@ -15,7 +17,9 @@ from .common import guard
 logger = logging.getLogger(__name__)
 
 
-async def cmd_mute_gameoffers(update, context) -> None:
+async def cmd_mute_gameoffers(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Toggle combined Game Offers daily notifications (Epic/Steam/GOG/Humble)."""
     if not await guard(update, context):
         return
@@ -33,7 +37,9 @@ async def cmd_mute_gameoffers(update, context) -> None:
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_mute_hackernews(update, context) -> None:
+async def cmd_mute_hackernews(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Toggle Hacker News daily digest."""
     if not await guard(update, context):
         return
@@ -51,7 +57,9 @@ async def cmd_mute_hackernews(update, context) -> None:
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
-async def cmd_gameoffers_now(update, context) -> None:
+async def cmd_gameoffers_now(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Fetch and display combined game offers on demand (Epic/Steam/GOG/Humble)."""
     if not await guard(update, context):
         return
@@ -97,7 +105,9 @@ async def cmd_gameoffers_now(update, context) -> None:
             await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
 
 
-async def cmd_hackernews_now(update, context) -> None:
+async def cmd_hackernews_now(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Fetch and display top Hacker News stories on demand."""
     if not await guard(update, context):
         return
@@ -127,7 +137,7 @@ async def cmd_hackernews_now(update, context) -> None:
         await msg.edit_text(f"❌ Error: {e}")
 
 
-async def cmd_steamfree_now(update, context) -> None:
+async def cmd_steamfree_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch and display current Steam free-to-keep games on demand."""
     if not await guard(update, context):
         return
@@ -164,7 +174,7 @@ async def cmd_steamfree_now(update, context) -> None:
         await msg.edit_text(f"❌ Error: {e}")
 
 
-async def cmd_epicgames_now(update, context) -> None:
+async def cmd_epicgames_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch and display current Epic Games free games on demand."""
     if not await guard(update, context):
         return
@@ -213,7 +223,7 @@ async def cmd_epicgames_now(update, context) -> None:
             await update.message.reply_text(f"❌ Error: {html.escape(str(e))}")
 
 
-async def cmd_gogfree_now(update, context) -> None:
+async def cmd_gogfree_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch and display current GOG free games on demand."""
     if not await guard(update, context):
         return
@@ -245,7 +255,9 @@ async def cmd_gogfree_now(update, context) -> None:
         await msg.edit_text(f"❌ Error: {e}")
 
 
-async def cmd_humblefree_now(update, context) -> None:
+async def cmd_humblefree_now(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Fetch and display current Humble Bundle free games on demand."""
     if not await guard(update, context):
         return
