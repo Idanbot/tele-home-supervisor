@@ -276,7 +276,7 @@ async def collect_alert_metrics(state: BotState) -> dict[str, AlertMetricValue]:
     for item in disk_stats or []:
         try:
             pct = float(item.get("percent", 0))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         if max_disk is None or pct > max_disk:
             max_disk = pct
@@ -289,7 +289,7 @@ async def collect_alert_metrics(state: BotState) -> dict[str, AlertMetricValue]:
 
     try:
         load1, _, _ = os.getloadavg()
-    except OSError, AttributeError:
+    except (OSError, AttributeError):
         load1 = None
     load_display = "n/a" if load1 is None else f"{load1:.2f}"
 
@@ -392,7 +392,7 @@ def _compare(operator: str, left: object, right: object) -> bool:
     try:
         left_val = float(left)
         right_val = float(right)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return False
     if operator == ">":
         return left_val > right_val

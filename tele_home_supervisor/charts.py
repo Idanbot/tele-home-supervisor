@@ -27,7 +27,7 @@ def _get_fonts() -> tuple:
         small_font = ImageFont.truetype(
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10
         )
-    except OSError, IOError:
+    except (OSError, IOError):
         font = ImageFont.load_default()
         font_bold = font
         title_font = font
@@ -325,7 +325,7 @@ def render_docker_stats_chart(stats: list[dict]) -> io.BytesIO | None:
     def parse_pct(val: str) -> float:
         try:
             return float(val.replace("%", ""))
-        except ValueError, AttributeError:
+        except (ValueError, AttributeError):
             return 0.0
 
     padding = 20

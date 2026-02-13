@@ -223,7 +223,7 @@ async def host_health(watch_paths: list[str] | None = None) -> dict[str, Any]:
         v = psutil.virtual_memory()
         try:
             load1, load5, load15 = os.getloadavg()
-        except OSError, AttributeError:
+        except (OSError, AttributeError):
             load1 = load5 = load15 = 0.0
 
         disk_info = []

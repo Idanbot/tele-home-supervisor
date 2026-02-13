@@ -179,7 +179,7 @@ TRACKERS = [
 
 def _get_random_user_agent() -> str:
     """Return a random user agent for request spoofing."""
-    return random.choice(USER_AGENTS)
+    return random.choice(USER_AGENTS)  # nosec B311 — not used for security/crypto
 
 
 def _build_browser_headers(referer: str | None = None) -> dict[str, str]:
@@ -516,8 +516,8 @@ class EZTVSource(TorrentSource):
                         size = f"{size_mb / 1024:.1f} GB"
                     else:
                         size = f"{size_mb:.1f} MB"
-                except ValueError, TypeError:
-                    pass
+                except (ValueError, TypeError):
+                    logger.error("invalid size_bytes: %s", size_bytes)
 
             results.append(
                 TorrentResult(

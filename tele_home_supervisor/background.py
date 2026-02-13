@@ -75,8 +75,12 @@ async def cancel_tasks(state: BotState) -> None:
             task.cancel()
             try:
                 await task
-            except asyncio.CancelledError, Exception:
-                pass
+            except asyncio.CancelledError:
+                logger.warning("Background task %s cancelled", name)
+            except Exception:
+                logger.warning(
+                    "Background task %s raised during cancel", name, exc_info=True
+                )
             logger.info("Background task %s stopped", name)
     state.tasks.clear()
 

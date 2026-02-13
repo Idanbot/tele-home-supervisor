@@ -112,7 +112,7 @@ def _deserialize_auth_grants(state: BotState, grants: list) -> None:
             continue
         try:
             uid, exp = int(uid), float(exp)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         if exp > now:
             state.auth_grants[uid] = exp
@@ -124,7 +124,7 @@ def _deserialize_auth_grants(state: BotState, grants: list) -> None:
 def _coerce_int(value: object) -> int | None:
     try:
         return int(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 
@@ -176,6 +176,6 @@ def _load_media_messages(raw: list) -> list[list]:
             continue
         try:
             result.append([int(entry[0]), int(entry[1]), float(entry[2])])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
     return result
