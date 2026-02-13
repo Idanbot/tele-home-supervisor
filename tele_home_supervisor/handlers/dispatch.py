@@ -37,6 +37,7 @@ cmd_top = rate_limit(system.cmd_top, name="top")
 cmd_ping = rate_limit(system.cmd_ping, name="ping")
 cmd_diskusage = rate_limit(system.cmd_diskusage, name="diskusage")
 cmd_remind = rate_limit(system.cmd_remind, name="remind")
+cmd_cleanup = rate_limit(system.cmd_cleanup, name="cleanup")
 
 # Docker
 cmd_docker = rate_limit(docker.cmd_docker, name="docker")

@@ -86,7 +86,7 @@ async def test_cmd_auth_accepts_valid_code(monkeypatch) -> None:
 
     await meta.cmd_auth(update, context)
 
-    assert update.message.replies == ["✅ Authorized for 24 hours."]
+    assert update.message.replies == ["✅ Authorized for 7 days."]
     state = get_state(context.application)
     expiry = state.auth_grants.get(update.effective_user.id)
     assert expiry is not None

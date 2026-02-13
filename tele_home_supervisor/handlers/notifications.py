@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes
 
 from .. import scheduled as scheduled_fetchers
 from ..state import BOT_STATE_KEY, BotState
-from .common import guard
+from .common import guard, tracked_reply_photo
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,12 @@ async def cmd_gameoffers_now(
         if image_url:
             try:
                 await msg.delete()
-                await update.message.reply_photo(
+                state: BotState = context.application.bot_data.setdefault(
+                    BOT_STATE_KEY, BotState()
+                )
+                await tracked_reply_photo(
+                    update.message,
+                    state,
                     photo=image_url,
                     caption=combined,
                     parse_mode=ParseMode.HTML,
@@ -161,7 +166,12 @@ async def cmd_steamfree_now(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         if image_urls:
             await msg.delete()
-            await update.message.reply_photo(
+            state: BotState = context.application.bot_data.setdefault(
+                BOT_STATE_KEY, BotState()
+            )
+            await tracked_reply_photo(
+                update.message,
+                state,
                 photo=image_urls[0],
                 caption=message,
                 parse_mode=ParseMode.HTML,
@@ -190,7 +200,12 @@ async def cmd_epicgames_now(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if image_urls:
             try:
                 await msg.delete()
-                await update.message.reply_photo(
+                state: BotState = context.application.bot_data.setdefault(
+                    BOT_STATE_KEY, BotState()
+                )
+                await tracked_reply_photo(
+                    update.message,
+                    state,
                     photo=image_urls[0],
                     caption=message,
                     parse_mode=ParseMode.HTML,
@@ -240,7 +255,12 @@ async def cmd_gogfree_now(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         # Send as photo with caption if image available, otherwise text
         if image_urls:
-            await update.message.reply_photo(
+            state: BotState = context.application.bot_data.setdefault(
+                BOT_STATE_KEY, BotState()
+            )
+            await tracked_reply_photo(
+                update.message,
+                state,
                 photo=image_urls[0],
                 caption=message,
                 parse_mode=ParseMode.HTML,
@@ -274,7 +294,12 @@ async def cmd_humblefree_now(
 
         # Send as photo with caption if image available, otherwise text
         if image_urls:
-            await update.message.reply_photo(
+            state: BotState = context.application.bot_data.setdefault(
+                BOT_STATE_KEY, BotState()
+            )
+            await tracked_reply_photo(
+                update.message,
+                state,
                 photo=image_urls[0],
                 caption=message,
                 parse_mode=ParseMode.HTML,

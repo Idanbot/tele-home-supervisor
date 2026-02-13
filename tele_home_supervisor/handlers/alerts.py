@@ -20,7 +20,7 @@ from ..alerting import (
     parse_threshold,
 )
 from ..state import BotState
-from .common import guard_sensitive, get_state, set_audit_target
+from .common import guard_sensitive, get_state, set_audit_target, tracked_reply_photo
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,9 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         chart = view.render_alerts_chart(alert_history, rules)
         if chart:
-            await update.message.reply_photo(photo=chart, caption="Alert Dashboard")
+            await tracked_reply_photo(
+                update.message, state, photo=chart, caption="Alert Dashboard"
+            )
 
         msg, keyboard = render_alerts_overview(state, chat_id)
         await update.message.reply_text(

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import html
 import logging
+import threading
 from typing import Optional
 
 try:
@@ -45,6 +46,36 @@ def fmt_bytes_compact_decimal(num_bytes: int) -> str:
     if unit_idx == 0:
         return f"{int(value)}{units[unit_idx]}"
     return f"{value:.1f}{units[unit_idx]}"
+
+
+# ---------------------------------------------------------------------------
+# Shared manager singleton – avoids re-authenticating on every API call
+# ---------------------------------------------------------------------------
+
+_mgr_lock = threading.Lock()
+_mgr: TorrentManager | None = None
+
+
+def get_manager() -> TorrentManager | None:
+    """Return a shared :class:`TorrentManager`, connecting lazily.
+
+    Thread-safe.  Returns ``None`` when the connection cannot be
+    established.
+    """
+    global _mgr
+    with _mgr_lock:
+        if _mgr is None:
+            _mgr = TorrentManager()
+        if _mgr.qbt_client is None and not _mgr.connect():
+            return None
+        return _mgr
+
+
+def reset_manager() -> None:
+    """Discard the shared manager so the next call reconnects."""
+    global _mgr
+    with _mgr_lock:
+        _mgr = None
 
 
 class TorrentManager:

@@ -18,6 +18,7 @@ from .common import (
     record_error,
     reply_usage_with_suggestions,
     set_audit_target,
+    tracked_reply_photo,
 )
 from .callbacks import (
     DOCKER_PAGE_SIZE,
@@ -166,7 +167,10 @@ async def cmd_dstats_rich(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Send chart image if available
     chart = view.render_docker_stats_chart(stats)
     if chart:
-        await update.message.reply_photo(photo=chart, caption="Docker Stats")
+        state, _ = get_state_and_recorder(context)
+        await tracked_reply_photo(
+            update.message, state, photo=chart, caption="Docker Stats"
+        )
 
     msg = view.render_container_stats(stats)
     for part in view.chunk(msg):

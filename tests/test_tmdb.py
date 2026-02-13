@@ -32,7 +32,7 @@ def test_tmdb_extract_items_filters_and_limits() -> None:
 
 
 def test_tmdb_fetch_raises_on_http_error(monkeypatch) -> None:
-    monkeypatch.setattr(tmdb, "TMDB_API_KEY", "test-key")
+    monkeypatch.setattr(tmdb.config.settings, "TMDB_API_KEY", "test-key")
 
     def fake_get(*_args, **_kwargs):
         return DummyResponse({}, status=403, text="nope")

@@ -13,7 +13,7 @@ from telegram.constants import ParseMode
 from telegram.ext import Application
 
 from .state import BOT_STATE_KEY, BotState
-from .torrent import TorrentManager, fmt_bytes_compact_decimal
+from .torrent import fmt_bytes_compact_decimal, get_manager, reset_manager
 from .models.torrent_snapshot import TorrentSnapshot
 from . import scheduled as scheduled_fetchers
 from . import alerting
@@ -25,9 +25,60 @@ _TASK_TORRENT_COMPLETION = "torrent_completion"
 _TASK_GAMEOFFERS = "gameoffers_scheduler"
 _TASK_HACKERNEWS = "hackernews_scheduler"
 _TASK_ALERTS = "alerts_scheduler"
+_TASK_MEDIA_CLEANUP = "media_cleanup"
 _POLL_INTERVAL_S = 30.0
 _ALERT_POLL_INTERVAL_S = 60.0
+_MEDIA_CLEANUP_INTERVAL_S = 900.0  # check every 15 minutes
 _ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
+
+# ---------------------------------------------------------------------------
+# Graceful shutdown coordination
+# ---------------------------------------------------------------------------
+
+_shutdown_requested = False
+
+
+async def _interruptible_sleep(seconds: float) -> bool:
+    """Sleep for up to *seconds*, waking early on shutdown.
+
+    Checks the shutdown flag every second.  Returns ``True`` if shutdown
+    was requested (callers should break out of their loop), ``False`` on
+    a normal timeout.
+    """
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if _shutdown_requested:
+            return True
+        await asyncio.sleep(min(1.0, end - time.monotonic()))
+    return _shutdown_requested
+
+
+def request_shutdown() -> None:
+    """Signal all background loops to exit at their next sleep point."""
+    global _shutdown_requested
+    _shutdown_requested = True
+
+
+async def cancel_tasks(state: BotState) -> None:
+    """Cancel running background tasks and wait for them to finish."""
+    request_shutdown()
+    task_names = [
+        _TASK_TORRENT_COMPLETION,
+        _TASK_GAMEOFFERS,
+        _TASK_HACKERNEWS,
+        _TASK_ALERTS,
+        _TASK_MEDIA_CLEANUP,
+    ]
+    for name in task_names:
+        task = state.tasks.get(name)
+        if isinstance(task, asyncio.Task) and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError, Exception:
+                pass
+            logger.info("Background task %s stopped", name)
+    state.tasks.clear()
 
 
 def ensure_started(app: Application) -> None:
@@ -58,6 +109,11 @@ def ensure_started(app: Application) -> None:
     if not isinstance(task, asyncio.Task) or task.done():
         state.tasks[_TASK_ALERTS] = asyncio.create_task(_alerts_loop(app))
 
+    # Start media cleanup loop
+    task = state.tasks.get(_TASK_MEDIA_CLEANUP)
+    if not isinstance(task, asyncio.Task) or task.done():
+        state.tasks[_TASK_MEDIA_CLEANUP] = asyncio.create_task(_media_cleanup_loop(app))
+
 
 def _get_state(app: Application) -> BotState:
     return app.bot_data.setdefault(BOT_STATE_KEY, BotState())
@@ -72,13 +128,14 @@ def _get_torrent_hash(torrent_obj: object) -> str | None:
 
 
 def _snapshot_torrents() -> dict[str, TorrentSnapshot] | None:
-    mgr = TorrentManager()
-    if not mgr.connect() or mgr.qbt_client is None:
+    mgr = get_manager()
+    if mgr is None or mgr.qbt_client is None:
         return None
     try:
         torrents = mgr.qbt_client.torrents_info() or []
     except Exception:
         logger.exception("Failed to query torrents_info()")
+        reset_manager()
         return None
 
     out: dict[str, TorrentSnapshot] = {}
@@ -149,18 +206,20 @@ async def _torrent_completion_loop(app: Application) -> None:
     seen_complete: dict[str, bool] = {}
 
     logger.info("Starting torrent completion loop (interval=%ss)", _POLL_INTERVAL_S)
-    while True:
+    while not _shutdown_requested:
         try:
             start = time.monotonic()
             snapshot = await asyncio.to_thread(_snapshot_torrents)
             if snapshot is None:
-                await asyncio.sleep(_POLL_INTERVAL_S)
+                if await _interruptible_sleep(_POLL_INTERVAL_S):
+                    break
                 continue
 
             if not initialized:
                 seen_complete = {h: t.is_complete for h, t in snapshot.items()}
                 initialized = True
-                await asyncio.sleep(_POLL_INTERVAL_S)
+                if await _interruptible_sleep(_POLL_INTERVAL_S):
+                    break
                 continue
 
             current_complete = {h: t.is_complete for h, t in snapshot.items()}
@@ -188,22 +247,26 @@ async def _torrent_completion_loop(app: Application) -> None:
                             )
 
             elapsed = time.monotonic() - start
-            await asyncio.sleep(max(0.0, _POLL_INTERVAL_S - elapsed))
+            if await _interruptible_sleep(max(0.0, _POLL_INTERVAL_S - elapsed)):
+                break
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Torrent completion loop error")
-            await asyncio.sleep(_POLL_INTERVAL_S)
+            if await _interruptible_sleep(_POLL_INTERVAL_S):
+                break
+    logger.info("Torrent completion loop stopped")
 
 
 async def _alerts_loop(app: Application) -> None:
     logger.info("Starting alerts loop (interval=%ss)", _ALERT_POLL_INTERVAL_S)
-    while True:
+    while not _shutdown_requested:
         try:
             start = time.monotonic()
             state = _get_state(app)
             if not state.alerts_enabled:
-                await asyncio.sleep(_ALERT_POLL_INTERVAL_S)
+                if await _interruptible_sleep(_ALERT_POLL_INTERVAL_S):
+                    break
                 continue
             metrics = await alerting.collect_alert_metrics(state)
             if metrics:
@@ -220,14 +283,17 @@ async def _alerts_loop(app: Application) -> None:
                             "Failed sending alert notification to chat_id=%s", chat_id
                         )
                 if changed:
-                    state._save_state()
+                    state.save()
             elapsed = time.monotonic() - start
-            await asyncio.sleep(max(0.0, _ALERT_POLL_INTERVAL_S - elapsed))
+            if await _interruptible_sleep(max(0.0, _ALERT_POLL_INTERVAL_S - elapsed)):
+                break
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Alerts loop error")
-            await asyncio.sleep(_ALERT_POLL_INTERVAL_S)
+            if await _interruptible_sleep(_ALERT_POLL_INTERVAL_S):
+                break
+    logger.info("Alerts loop stopped")
 
 
 def _seconds_until_time(target_hour: int, target_minute: int = 0) -> float:
@@ -249,20 +315,22 @@ async def _game_offers_scheduler(app: Application) -> None:
     """Schedule combined Game Offers notification at 8 PM Israel time daily."""
     logger.info("Starting Game Offers scheduler (8 PM Israel time)")
 
-    while True:
+    while not _shutdown_requested:
         try:
             # Wait until 8 PM Israel time
             wait_seconds = _seconds_until_time(20, 0)  # 8 PM = 20:00
             logger.info(
                 "Game Offers: waiting %.1f seconds until next run", wait_seconds
             )
-            await asyncio.sleep(wait_seconds)
+            if await _interruptible_sleep(wait_seconds):
+                break
 
             # Fetch and send
             state = _get_state(app)
             if not settings.ALLOWED_CHAT_IDS:
                 logger.warning("No allowed chat IDs configured")
-                await asyncio.sleep(3600)  # Wait 1 hour before retry
+                if await _interruptible_sleep(3600):
+                    break
                 continue
 
             combined_msg, image_url = await asyncio.to_thread(
@@ -277,12 +345,14 @@ async def _game_offers_scheduler(app: Application) -> None:
                 try:
                     if image_url:
                         try:
-                            await app.bot.send_photo(
+                            sent = await app.bot.send_photo(
                                 chat_id=chat_id,
                                 photo=image_url,
                                 caption=combined_msg,
                                 parse_mode=ParseMode.HTML,
                             )
+                            if sent and hasattr(sent, "message_id"):
+                                state.track_media_message(chat_id, sent.message_id)
                         except Exception as img_err:
                             logger.warning(
                                 "Failed to send Game Offers image, sending text: %s",
@@ -311,37 +381,42 @@ async def _game_offers_scheduler(app: Application) -> None:
                     )
 
             # Wait a bit to avoid rescheduling immediately
-            await asyncio.sleep(120)
+            if await _interruptible_sleep(120):
+                break
 
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Game Offers scheduler error")
-            await asyncio.sleep(3600)  # Wait 1 hour on error
+            if await _interruptible_sleep(3600):
+                break
+    logger.info("Game Offers scheduler stopped")
 
 
 async def _hackernews_scheduler(app: Application) -> None:
     """Schedule Hacker News top stories at 8 AM Israel time daily."""
     logger.info("Starting Hacker News scheduler (8 AM Israel time)")
 
-    while True:
+    while not _shutdown_requested:
         try:
             # Wait until 8 AM Israel time
             wait_seconds = _seconds_until_time(8, 0)  # 8 AM = 08:00
             logger.info(
                 "Hacker News: waiting %.1f seconds until next run", wait_seconds
             )
-            await asyncio.sleep(wait_seconds)
+            if await _interruptible_sleep(wait_seconds):
+                break
 
             # Fetch and send
             state = _get_state(app)
             if not settings.ALLOWED_CHAT_IDS:
                 logger.warning("No allowed chat IDs configured")
-                await asyncio.sleep(3600)  # Wait 1 hour before retry
+                if await _interruptible_sleep(3600):
+                    break
                 continue
 
             message = await asyncio.to_thread(
-                scheduled_fetchers.fetch_hackernews_top, 10
+                scheduled_fetchers.fetch_hackernews_top, 5
             )
 
             for chat_id in settings.ALLOWED_CHAT_IDS:
@@ -363,10 +438,66 @@ async def _hackernews_scheduler(app: Application) -> None:
                     )
 
             # Wait a bit to avoid rescheduling immediately
-            await asyncio.sleep(120)
+            if await _interruptible_sleep(120):
+                break
 
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Hacker News scheduler error")
-            await asyncio.sleep(3600)  # Wait 1 hour on error
+            if await _interruptible_sleep(3600):
+                break
+    logger.info("Hacker News scheduler stopped")
+
+
+# ---------------------------------------------------------------------------
+# Media auto-delete loop
+# ---------------------------------------------------------------------------
+
+
+async def delete_media_messages(
+    app: Application, entries: list[tuple[int, int]]
+) -> int:
+    """Delete a batch of tracked media messages.
+
+    Returns the number of successfully deleted messages.
+    """
+    deleted = 0
+    for chat_id, message_id in entries:
+        try:
+            await app.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            deleted += 1
+        except Exception:
+            logger.debug(
+                "Could not delete media message %s in chat %s", message_id, chat_id
+            )
+    return deleted
+
+
+async def _media_cleanup_loop(app: Application) -> None:
+    """Periodically delete tracked media older than the configured TTL."""
+    max_age_s = settings.BOT_AUTO_DELETE_MEDIA_HOURS * 3600
+    logger.info(
+        "Starting media cleanup loop (TTL=%sh, interval=%ss)",
+        settings.BOT_AUTO_DELETE_MEDIA_HOURS,
+        _MEDIA_CLEANUP_INTERVAL_S,
+    )
+    while not _shutdown_requested:
+        try:
+            state = _get_state(app)
+            expired = state.pop_expired_media(max_age_s)
+            if expired:
+                deleted = await delete_media_messages(app, expired)
+                state.save()
+                logger.info(
+                    "Auto-deleted %d/%d expired media messages", deleted, len(expired)
+                )
+            if await _interruptible_sleep(_MEDIA_CLEANUP_INTERVAL_S):
+                break
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Media cleanup loop error")
+            if await _interruptible_sleep(_MEDIA_CLEANUP_INTERVAL_S):
+                break
+    logger.info("Media cleanup loop stopped")

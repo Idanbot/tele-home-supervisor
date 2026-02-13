@@ -1,6 +1,6 @@
 import pytest
 import io
-from tele_home_supervisor.handlers import docker, callbacks
+from tele_home_supervisor.handlers import docker, callbacks, cb_docker
 from tele_home_supervisor.handlers.common import get_state
 from tele_home_supervisor.models.cache import CacheEntry
 import time
@@ -107,7 +107,7 @@ async def test_dlogs_file_callback(monkeypatch) -> None:
     async def mock_get_logs(container, since=None) -> str:
         return "log content line 1\nline 2"
 
-    monkeypatch.setattr(callbacks.services, "get_container_logs_full", mock_get_logs)
+    monkeypatch.setattr(cb_docker.services, "get_container_logs_full", mock_get_logs)
 
     update = DummyUpdate()
     update.callback_query.data = "dlogs:file:c1:0"

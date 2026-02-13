@@ -144,7 +144,7 @@ class TestBotStatePersistence:
             state.grant_auth(100, time.time() + 3600)
 
             # Save
-            state._save_state()
+            state.save()
 
             # Create new state and load
             state2 = BotState()
@@ -170,7 +170,7 @@ class TestBotStatePersistence:
             state._state_file = state_file
 
             state.gameoffers_muted.add(123)
-            state._save_state()
+            state.save()
             state.load_state()
 
             # Modify after load

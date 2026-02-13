@@ -516,7 +516,7 @@ class EZTVSource(TorrentSource):
                         size = f"{size_mb / 1024:.1f} GB"
                     else:
                         size = f"{size_mb:.1f} MB"
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     pass
 
             results.append(

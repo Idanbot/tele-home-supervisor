@@ -27,14 +27,13 @@ _last_command_ts = 0.0
 # We use a simple timestamp check. Since we are in asyncio,
 # strictly speaking race conditions are only possible at await points.
 # A simple float comparison is atomic enough for this use case.
-_DAY_S = 24 * 60 * 60  # 24 hours
-_AUTH_TTL_S = _DAY_S
 _AUTH_FLAG_KEY = "_auth_ok"
 _AUDIT_TARGET_KEY = "_audit_target"
 
 
-def auth_ttl_seconds() -> int:
-    return _AUTH_TTL_S
+def auth_ttl_seconds() -> float:
+    """Return auth TTL in seconds from configured BOT_AUTH_TTL_HOURS (default 168 = 7 days)."""
+    return config.BOT_AUTH_TTL_HOURS * 3600
 
 
 def get_state(app) -> BotState:
@@ -53,6 +52,35 @@ def get_state(app) -> BotState:
     state = app.bot_data.setdefault(BOT_STATE_KEY, BotState())
     state.load_state()  # Safe to call multiple times (has _state_loaded guard)
     return state
+
+
+# ── Media tracking helpers ───────────────────────────────────────────
+
+
+async def tracked_reply_photo(message, state: BotState, **kwargs) -> object:
+    """Send a photo reply and record it for auto-deletion.
+
+    Accepts the same keyword arguments as ``message.reply_photo``.
+    Returns the sent :class:`telegram.Message`.
+    """
+    sent = await message.reply_photo(**kwargs)
+    if sent and hasattr(sent, "message_id"):
+        chat_id = getattr(getattr(sent, "chat", None), "id", None)
+        if chat_id is not None:
+            state.track_media_message(chat_id, sent.message_id)
+    return sent
+
+
+async def tracked_send_photo(bot, state: BotState, *, chat_id: int, **kwargs) -> object:
+    """Send a photo via *bot* and record it for auto-deletion.
+
+    Accepts the same keyword arguments as ``bot.send_photo``.
+    Returns the sent :class:`telegram.Message`.
+    """
+    sent = await bot.send_photo(chat_id=chat_id, **kwargs)
+    if sent and hasattr(sent, "message_id"):
+        state.track_media_message(chat_id, sent.message_id)
+    return sent
 
 
 def get_state_and_recorder(context) -> tuple[BotState, DebugRecorder]:

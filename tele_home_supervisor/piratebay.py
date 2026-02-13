@@ -4,23 +4,14 @@ from __future__ import annotations
 
 import html
 import logging
-import os
 import re
 from typing import Iterable
 
 import requests
 
+from . import config
+
 logger = logging.getLogger(__name__)
-BASE_URL = os.environ.get("TPB_BASE_URL", "https://thepiratebay.org").rstrip("/")
-TPB_API_BASE_URL = os.environ.get("TPB_API_BASE_URL", "https://apibay.org").rstrip("/")
-TPB_API_BASE_URLS = os.environ.get("TPB_API_BASE_URLS", "")
-TPB_USER_AGENT = os.environ.get(
-    "TPB_USER_AGENT",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-)
-TPB_COOKIE = os.environ.get("TPB_COOKIE", "")
-TPB_REFERER = os.environ.get("TPB_REFERER", "")
 
 CATEGORY_ALIASES: dict[str, int] = {
     "audio": 101,
@@ -99,17 +90,17 @@ def resolve_top_mode(value: str | None) -> str | None:
 def _fetch(url: str) -> str:
     logger.debug("piratebay fetch html: %s", url)
     headers = {
-        "User-Agent": TPB_USER_AGENT,
+        "User-Agent": config.settings.TPB_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
         "Upgrade-Insecure-Requests": "1",
     }
-    if TPB_REFERER:
-        headers["Referer"] = TPB_REFERER
-    if TPB_COOKIE:
-        headers["Cookie"] = TPB_COOKIE
+    if config.settings.TPB_REFERER:
+        headers["Referer"] = config.settings.TPB_REFERER
+    if config.settings.TPB_COOKIE:
+        headers["Cookie"] = config.settings.TPB_COOKIE
     resp = requests.get(url, headers=headers, timeout=12)
     resp.raise_for_status()
     return resp.text
@@ -118,7 +109,7 @@ def _fetch(url: str) -> str:
 def _fetch_json(url: str) -> list[dict[str, object]]:
     logger.debug("piratebay fetch json: %s", url)
     headers = {
-        "User-Agent": TPB_USER_AGENT,
+        "User-Agent": config.settings.TPB_USER_AGENT,
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
@@ -267,15 +258,15 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
 
     top_mode = resolve_top_mode(category)
     if top_mode == "top100":
-        url = f"{BASE_URL}/top.php"
+        url = f"{config.settings.TPB_BASE_URL}/top.php"
     elif top_mode == "top48h":
-        url = f"{BASE_URL}/search/top100:48h/0/99/0"
+        url = f"{config.settings.TPB_BASE_URL}/search/top100:48h/0/99/0"
     else:
         cat = resolve_category(category)
         if cat is None:
-            url = f"{BASE_URL}/top/0"
+            url = f"{config.settings.TPB_BASE_URL}/top/0"
         else:
-            url = f"{BASE_URL}/top/{cat}"
+            url = f"{config.settings.TPB_BASE_URL}/top/{cat}"
     try:
         html_text = _fetch(url)
         _ensure_not_blocked(html_text)
@@ -317,7 +308,7 @@ def search(query: str, debug_sink=None) -> list[dict[str, object]]:
     if not q:
         return []
     q_escaped = requests.utils.quote(q, safe="")
-    url = f"{BASE_URL}/search/{q_escaped}/0/99/0"
+    url = f"{config.settings.TPB_BASE_URL}/search/{q_escaped}/0/99/0"
     try:
         html_text = _fetch(url)
         _ensure_not_blocked(html_text)
@@ -355,13 +346,15 @@ def search(query: str, debug_sink=None) -> list[dict[str, object]]:
 
 def _api_base_candidates() -> list[str]:
     bases: list[str] = []
-    if TPB_API_BASE_URLS:
-        for part in TPB_API_BASE_URLS.split(","):
-            b = part.strip().rstrip("/")
-            if b and b not in bases:
-                bases.append(b)
-    if TPB_API_BASE_URL and TPB_API_BASE_URL not in bases:
-        bases.append(TPB_API_BASE_URL)
+    for part in config.settings.TPB_API_BASE_URLS:
+        b = part.strip().rstrip("/")
+        if b and b not in bases:
+            bases.append(b)
+    if (
+        config.settings.TPB_API_BASE_URL
+        and config.settings.TPB_API_BASE_URL not in bases
+    ):
+        bases.append(config.settings.TPB_API_BASE_URL)
     expanded: list[str] = []
     for base in bases:
         expanded.append(base)

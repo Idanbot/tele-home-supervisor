@@ -10,10 +10,12 @@ from telegram.ext import ContextTypes
 
 from .. import services, view
 from .common import (
+    get_state,
     get_state_and_recorder,
     guard_sensitive,
     record_error,
     set_audit_target,
+    tracked_reply_photo,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,8 +63,9 @@ async def cmd_wifiqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if password:
             caption += f"\nPassword: <code>{password}</code>"
 
-        await update.message.reply_photo(
-            photo=bio, caption=caption, parse_mode=ParseMode.HTML
+        state = get_state(context.application)
+        await tracked_reply_photo(
+            update.message, state, photo=bio, caption=caption, parse_mode=ParseMode.HTML
         )
     except Exception as e:
         logger.error("Failed to generate WiFi QR: %s", e)
@@ -140,8 +143,9 @@ async def cmd_traceroute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if hops:
         chart = view.render_traceroute_chart(hops)
         if chart:
-            await update.message.reply_photo(
-                photo=chart, caption=f"Traceroute to {host}"
+            state = get_state(context.application)
+            await tracked_reply_photo(
+                update.message, state, photo=chart, caption=f"Traceroute to {host}"
             )
 
     title = f"Traceroute {host}:"
@@ -178,7 +182,10 @@ async def cmd_speedtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         download_mbps = float(mbps_match.group(1))
         chart = view.render_speedtest_chart(download_mbps)
         if chart:
-            await update.message.reply_photo(photo=chart, caption="Speedtest Results")
+            state = get_state(context.application)
+            await tracked_reply_photo(
+                update.message, state, photo=chart, caption="Speedtest Results"
+            )
 
     text = f"{view.bold('Speedtest (download):')}\n{result}"
     await msg.edit_text(text, parse_mode=ParseMode.HTML)

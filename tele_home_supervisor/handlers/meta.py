@@ -13,7 +13,13 @@ from telegram.ext import ContextTypes
 from .. import config, services, view
 from ..background import ensure_started
 from ..commands import COMMANDS, GROUP_ORDER
-from .common import auth_ttl_seconds, get_state, guard, guard_sensitive
+from .common import (
+    auth_ttl_seconds,
+    get_state,
+    guard,
+    guard_sensitive,
+    tracked_reply_photo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,9 +130,15 @@ async def cmd_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     state = get_state(context.application)
     user_id = update.effective_user.id
-    expiry = time.time() + auth_ttl_seconds()
+    ttl = auth_ttl_seconds()
+    expiry = time.time() + ttl
     state.grant_auth(user_id, expiry)
-    await update.message.reply_text("✅ Authorized for 24 hours.")
+    hours = ttl / 3600
+    if hours % 24 == 0 and hours >= 24:
+        duration = f"{int(hours // 24)} day{'s' if hours // 24 != 1 else ''}"
+    else:
+        duration = f"{int(hours)} hour{'s' if int(hours) != 1 else ''}"
+    await update.message.reply_text(f"✅ Authorized for {duration}.")
 
 
 async def cmd_check_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -146,9 +158,12 @@ async def cmd_check_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
     remaining = expiry - now
-    hours, remainder = divmod(int(remaining), 3600)
+    days, day_rem = divmod(int(remaining), 86400)
+    hours, remainder = divmod(day_rem, 3600)
     minutes, seconds = divmod(remainder, 60)
-    if hours > 0:
+    if days > 0:
+        time_str = f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
         time_str = f"{hours}h {minutes}m"
     elif minutes > 0:
         time_str = f"{minutes}m {seconds}s"
@@ -171,7 +186,9 @@ async def cmd_metrics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if len(caption) > 1000:
             caption = caption[:997] + "..."
         try:
-            await update.message.reply_photo(
+            await tracked_reply_photo(
+                update.message,
+                state,
                 photo=chart,
                 caption=caption,
                 parse_mode=ParseMode.HTML,

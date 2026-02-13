@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 
 from .. import view
 from ..state import BotState
-from .common import guard_sensitive, get_state
+from .common import guard_sensitive, get_state, tracked_reply_photo
 
 
 def _format_entry(entry) -> str:
@@ -45,7 +45,9 @@ async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Send chart image if available
     chart = view.render_audit_chart(entries)
     if chart:
-        await update.message.reply_photo(photo=chart, caption="Audit Log")
+        await tracked_reply_photo(
+            update.message, state, photo=chart, caption="Audit Log"
+        )
 
     lines = [_format_entry(entry) for entry in entries]
     msg = f"{view.bold('Audit log:')}\n{view.pre('\\n'.join(lines))}"

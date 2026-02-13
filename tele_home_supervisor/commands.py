@@ -13,7 +13,7 @@ _INFO_COMMANDS = (
         "auth",
         "Info",
         "/auth <code>",
-        "authorize sensitive commands for 24 hours",
+        "authorize sensitive commands for 7 days",
         "cmd_auth",
     ),
     CommandSpec(
@@ -84,6 +84,13 @@ _SYSTEM_COMMANDS = (
         "/remind <minutes> <msg>",
         "set a reminder timer",
         "cmd_remind",
+    ),
+    CommandSpec(
+        "cleanup",
+        "System",
+        "/cleanup",
+        "delete all tracked media messages now",
+        "cmd_cleanup",
     ),
 )
 

@@ -3,36 +3,30 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import requests
 
-logger = logging.getLogger(__name__)
+from . import config
 
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
-TMDB_BASE_URL = os.environ.get("TMDB_BASE_URL", "https://api.themoviedb.org/3").rstrip(
-    "/"
-)
-TMDB_USER_AGENT = os.environ.get(
-    "TMDB_USER_AGENT",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-)
+logger = logging.getLogger(__name__)
 
 
 def _ensure_api_key() -> None:
-    if not TMDB_API_KEY:
+    if not config.settings.TMDB_API_KEY:
         raise RuntimeError("TMDB_API_KEY is not configured")
 
 
 def _fetch(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     _ensure_api_key()
-    url = f"{TMDB_BASE_URL}{path}"
-    payload = {"api_key": TMDB_API_KEY, "language": "en-US"}
+    url = f"{config.settings.TMDB_BASE_URL}{path}"
+    payload = {"api_key": config.settings.TMDB_API_KEY, "language": "en-US"}
     if params:
         payload.update(params)
-    headers = {"User-Agent": TMDB_USER_AGENT, "Accept": "application/json"}
+    headers = {
+        "User-Agent": config.settings.TMDB_USER_AGENT,
+        "Accept": "application/json",
+    }
     resp = requests.get(url, params=payload, headers=headers, timeout=12)
     if not resp.ok:
         snippet = resp.text[:500].replace("\n", " ")

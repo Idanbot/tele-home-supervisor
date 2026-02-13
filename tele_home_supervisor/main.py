@@ -16,7 +16,7 @@ from .commands import COMMANDS
 from .handlers import dispatch
 from .handlers.callbacks import handle_callback_query
 from .state import BOT_STATE_KEY, BotState
-from .background import ensure_started
+from .background import ensure_started, cancel_tasks
 from .runtime import STARTUP_TIME
 
 logger = logging.getLogger(__name__)
@@ -82,6 +82,15 @@ async def send_startup_notification(app: Application) -> None:
             )
 
 
+async def _post_shutdown(app: Application) -> None:
+    """Gracefully stop background tasks on application shutdown."""
+    state: BotState = app.bot_data.get(BOT_STATE_KEY)  # type: ignore[assignment]
+    if state is not None:
+        await cancel_tasks(state)
+        state.save()
+    logger.info("Shutdown complete")
+
+
 def run() -> None:
     setup_logging()
     logger.info("Starting tele_home_supervisor")
@@ -89,6 +98,7 @@ def run() -> None:
 
     # Register post_init callback to send startup notification
     app.post_init = send_startup_notification
+    app.post_shutdown = _post_shutdown
 
     # run polling; keep the stop_signals None so container shutdown behaves normally
     app.run_polling(stop_signals=None)

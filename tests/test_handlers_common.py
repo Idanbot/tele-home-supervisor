@@ -174,6 +174,12 @@ class TestGetState:
 class TestAuthTtlSeconds:
     """Tests for auth_ttl_seconds() function."""
 
-    def test_returns_24_hours(self) -> None:
+    def test_returns_configured_ttl(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "BOT_AUTH_TTL_HOURS", 168)
         ttl = common.auth_ttl_seconds()
-        assert ttl == 24 * 60 * 60
+        assert ttl == 168 * 3600
+
+    def test_returns_custom_ttl(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "BOT_AUTH_TTL_HOURS", 48)
+        ttl = common.auth_ttl_seconds()
+        assert ttl == 48 * 3600

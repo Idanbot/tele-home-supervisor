@@ -177,8 +177,8 @@ async def torrent_start(name_substr: str) -> str:
 
 async def torrent_names() -> set[str]:
     def _get():
-        mgr = torrent_mod.TorrentManager()
-        if not mgr.connect() or mgr.qbt_client is None:
+        mgr = torrent_mod.get_manager()
+        if mgr is None or mgr.qbt_client is None:
             return set()
         try:
             torrents = mgr.qbt_client.torrents_info() or []
@@ -188,6 +188,7 @@ async def torrent_names() -> set[str]:
                 if getattr(t, "name", None)
             }
         except Exception:
+            torrent_mod.reset_manager()
             return set()
 
     return await asyncio.to_thread(_get)
@@ -225,8 +226,8 @@ async def get_torrent_list() -> list[dict]:
     """Get list of torrents for inline keyboard."""
 
     def _get():
-        mgr = torrent_mod.TorrentManager()
-        if not mgr.connect():
+        mgr = torrent_mod.get_manager()
+        if mgr is None:
             return []
         return mgr.get_torrent_list()
 
@@ -246,11 +247,23 @@ async def torrent_clean_missing(delete_files: bool = True) -> str:
 
 
 def _call_with_mgr(method_name: str, *args, **kwargs) -> str:
-    """Create a TorrentManager, connect, and call a method on it."""
-    mgr = torrent_mod.TorrentManager()
-    if not mgr.connect():
-        return "Failed to connect to qBittorrent."
-    method = getattr(mgr, method_name, None)
-    if not callable(method):
-        return "Internal error: invalid torrent operation"
-    return method(*args, **kwargs)
+    """Call *method_name* on the shared TorrentManager.
+
+    Uses the cached connection and retries once on failure (the session
+    may have expired).
+    """
+    for attempt in range(2):
+        mgr = torrent_mod.get_manager()
+        if mgr is None:
+            return "Failed to connect to qBittorrent."
+        method = getattr(mgr, method_name, None)
+        if not callable(method):
+            return "Internal error: invalid torrent operation"
+        try:
+            return method(*args, **kwargs)
+        except Exception:
+            if attempt == 0:
+                torrent_mod.reset_manager()
+                continue
+            raise
+    return "Failed to connect to qBittorrent."  # unreachable; satisfies type checker

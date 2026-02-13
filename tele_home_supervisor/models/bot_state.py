@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import secrets
 import time
@@ -11,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import services
+from . import persistence
 from .alerts import AlertRule, AlertState
 from .audit import AuditEntry
 from .cache import CacheEntry, LogCacheEntry
@@ -19,6 +19,8 @@ from .metrics import CommandMetrics
 from .tmdb_cache import TmdbCacheEntry
 
 logger = logging.getLogger(__name__)
+
+BOT_STATE_KEY = "state"
 
 MAX_LATENCY_SAMPLES = 200
 _MAGNET_CACHE_TTL_S = 30 * 60
@@ -73,6 +75,9 @@ class BotState:
         default_factory=OrderedDict
     )
     audit_log: dict[int, deque[AuditEntry]] = field(default_factory=dict)
+
+    # Media message tracking for auto-delete [(chat_id, message_id, timestamp)]
+    media_messages: list[list] = field(default_factory=list)
 
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
     _debug_recorder: DebugRecorder | None = field(default=None, init=False, repr=False)
@@ -332,7 +337,7 @@ class BotState:
         else:
             self.alerts_enabled.discard(chat_id)
             self.reset_alert_states(chat_id, cleared_at=time.time())
-        self._save_state()
+        self.save()
         return enable
 
     def alert_rules_for_chat(self, chat_id: int) -> list[AlertRule]:
@@ -367,7 +372,7 @@ class BotState:
         )
         self.alert_rules[rule_id] = rule
         self.alert_states.setdefault(rule_id, AlertState())
-        self._save_state()
+        self.save()
         return rule
 
     def update_alert_rule(
@@ -390,7 +395,7 @@ class BotState:
             rule.enabled = enabled
         state = self.alert_states.setdefault(rule_id, AlertState())
         state.active_since = None
-        self._save_state()
+        self.save()
         return rule
 
     def remove_alert_rule(self, chat_id: int, rule_id: str) -> bool:
@@ -399,7 +404,7 @@ class BotState:
             return False
         self.alert_rules.pop(rule_id, None)
         self.alert_states.pop(rule_id, None)
-        self._save_state()
+        self.save()
         return True
 
     def toggle_alert_rule(self, chat_id: int, rule_id: str) -> bool | None:
@@ -411,7 +416,7 @@ class BotState:
         state.active_since = None
         if not rule.enabled:
             state.last_cleared_at = time.time()
-        self._save_state()
+        self.save()
         return rule.enabled
 
     def alert_state_for(self, rule_id: str) -> AlertState:
@@ -444,10 +449,10 @@ class BotState:
         """Toggle combined Game Offers notifications. Returns True if now muted."""
         if chat_id in self.gameoffers_muted:
             self.gameoffers_muted.discard(chat_id)
-            self._save_state()
+            self.save()
             return False
         self.gameoffers_muted.add(chat_id)
-        self._save_state()
+        self.save()
         return True
 
     def is_gameoffers_muted(self, chat_id: int) -> bool:
@@ -457,10 +462,10 @@ class BotState:
         """Toggle Hacker News notifications. Returns True if now muted."""
         if chat_id in self.hackernews_muted:
             self.hackernews_muted.discard(chat_id)
-            self._save_state()
+            self.save()
             return False
         self.hackernews_muted.add(chat_id)
-        self._save_state()
+        self.save()
         return True
 
     def is_hackernews_muted(self, chat_id: int) -> bool:
@@ -469,146 +474,60 @@ class BotState:
     def grant_auth(self, user_id: int, expiry: float) -> None:
         """Grant auth to a user until expiry time (wall-clock via time.time())."""
         self.auth_grants[user_id] = expiry
-        self._save_state()
+        self.save()
 
     def revoke_auth(self, user_id: int) -> None:
         """Revoke auth for a user."""
         self.auth_grants.pop(user_id, None)
-        self._save_state()
+        self.save()
 
-    def _serialize_auth_grants(self) -> list[dict]:
-        """Serialize auth grants for persistence.
+    # ── Media tracking ───────────────────────────────────────────────
 
-        Auth grants use wall-clock time (time.time()) so they persist across restarts.
+    def track_media_message(self, chat_id: int, message_id: int) -> None:
+        """Record a media message for future auto-deletion."""
+        self.media_messages.append([chat_id, message_id, time.time()])
+
+    def pop_expired_media(self, max_age_s: float) -> list[tuple[int, int]]:
+        """Remove and return media entries older than *max_age_s*.
+
+        Returns:
+            List of (chat_id, message_id) tuples that should be deleted.
         """
-        now = time.time()
-        grants = []
-        for user_id, expiry in self.auth_grants.items():
-            if expiry > now:
-                grants.append({"user_id": user_id, "expiry": expiry})
-        return grants
+        cutoff = time.time() - max_age_s
+        expired: list[tuple[int, int]] = []
+        kept: list[list] = []
+        for entry in self.media_messages:
+            if entry[2] <= cutoff:
+                expired.append((entry[0], entry[1]))
+            else:
+                kept.append(entry)
+        if expired:
+            self.media_messages = kept
+        return expired
 
-    def _deserialize_auth_grants(self, grants: list[dict]) -> None:
-        """Restore auth grants from persistence.
+    def pop_all_media(self) -> list[tuple[int, int]]:
+        """Remove and return all tracked media entries.
 
-        Auth grants use wall-clock time, so we just load them directly.
+        Returns:
+            List of (chat_id, message_id) tuples that should be deleted.
         """
-        now = time.time()
-        self.auth_grants = {}
-        for item in grants:
-            if not isinstance(item, dict):
-                continue
-            user_id = item.get("user_id")
-            expiry = item.get("expiry")
-            if user_id is None or expiry is None:
-                continue
-            try:
-                user_id = int(user_id)
-                expiry = float(expiry)
-            except (TypeError, ValueError):
-                continue
-            if expiry > now:
-                self.auth_grants[user_id] = expiry
+        entries = [(e[0], e[1]) for e in self.media_messages]
+        self.media_messages.clear()
+        return entries
 
-    def _save_state(self) -> None:
-        """Persist mute preferences to disk."""
-        try:
-            self._state_file.parent.mkdir(parents=True, exist_ok=True)
-            data = {
-                "gameoffers_muted": list(self.gameoffers_muted),
-                "hackernews_muted": list(self.hackernews_muted),
-                "torrent_completion_subscribers": list(
-                    self.torrent_completion_subscribers
-                ),
-                "alerts_enabled": list(self.alerts_enabled),
-                "alert_rules": [
-                    {
-                        "id": rule.id,
-                        "chat_id": rule.chat_id,
-                        "metric": rule.metric,
-                        "operator": rule.operator,
-                        "threshold": rule.threshold,
-                        "duration_s": rule.duration_s,
-                        "enabled": rule.enabled,
-                    }
-                    for rule in self.alert_rules.values()
-                ],
-                "alert_states": {
-                    rule_id: {
-                        "last_triggered_at": state.last_triggered_at,
-                        "last_cleared_at": state.last_cleared_at,
-                        "last_value": state.last_value,
-                        "active_since": state.active_since,
-                    }
-                    for rule_id, state in self.alert_states.items()
-                },
-                "auth_grants": self._serialize_auth_grants(),
-            }
-            self._state_file.write_text(json.dumps(data, indent=2))
-        except Exception:
-            logger.exception("Failed to save bot state")
+    # ── Persistence ──────────────────────────────────────────────────
+
+    def save(self) -> None:
+        """Persist current state to disk."""
+        persistence.save(self, self._state_file)
+
+    # Keep the old private name around so any in-tree callers that
+    # haven't been updated yet still work.
+    _save_state = save
 
     def load_state(self) -> None:
-        """Load persisted state from disk. Only loads once per instance."""
+        """Load persisted state from disk.  Only loads once per instance."""
         if self._state_loaded:
             return
         self._state_loaded = True
-        try:
-            if not self._state_file.exists():
-                return
-            data = json.loads(self._state_file.read_text())
-            legacy_epic = set(data.get("epic_games_muted", []))
-            self.gameoffers_muted = set(data.get("gameoffers_muted", [])) or legacy_epic
-            self.hackernews_muted = set(data.get("hackernews_muted", []))
-            self.torrent_completion_subscribers = set(
-                data.get("torrent_completion_subscribers", [])
-            )
-            self.alerts_enabled = set(data.get("alerts_enabled", []))
-
-            def _coerce_int(value: object) -> int | None:
-                try:
-                    return int(value)
-                except (TypeError, ValueError):
-                    return None
-
-            self.alert_rules = {}
-            for item in data.get("alert_rules", []) or []:
-                if not isinstance(item, dict):
-                    continue
-                rule_id = str(item.get("id", ""))
-                chat_id = _coerce_int(item.get("chat_id"))
-                duration_s = _coerce_int(item.get("duration_s", 0))
-                if not rule_id or not chat_id:
-                    continue
-                if duration_s is None:
-                    duration_s = 0
-                rule = AlertRule(
-                    id=rule_id,
-                    chat_id=chat_id,
-                    metric=str(item.get("metric", "")),
-                    operator=str(item.get("operator", "")),
-                    threshold=item.get("threshold"),
-                    duration_s=duration_s,
-                    enabled=bool(item.get("enabled", True)),
-                )
-                self.alert_rules[rule.id] = rule
-            self.alert_states = {}
-            for rule_id, state in (data.get("alert_states", {}) or {}).items():
-                if not isinstance(state, dict):
-                    continue
-                self.alert_states[str(rule_id)] = AlertState(
-                    last_triggered_at=state.get("last_triggered_at"),
-                    last_cleared_at=state.get("last_cleared_at"),
-                    last_value=state.get("last_value"),
-                    active_since=state.get("active_since"),
-                )
-
-            # Load auth grants
-            self._deserialize_auth_grants(data.get("auth_grants", []) or [])
-
-            logger.info("Loaded bot state from %s", self._state_file)
-        except Exception:
-            logger.exception("Failed to load bot state")
-
-
-BOT_STATE_KEY = "state"
+        persistence.load(self, self._state_file)

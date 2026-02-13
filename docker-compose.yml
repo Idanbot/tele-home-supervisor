@@ -36,6 +36,7 @@ services:
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - TMDB_BASE_URL=${TMDB_BASE_URL:-https://api.themoviedb.org/3}
       - TMDB_USER_AGENT=${TMDB_USER_AGENT:-}
+      - BOT_AUTH_TTL_HOURS=${BOT_AUTH_TTL_HOURS:-168}
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

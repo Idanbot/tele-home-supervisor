@@ -17,6 +17,7 @@ from .common import (
     record_error,
     reply_usage_with_suggestions,
     set_audit_target,
+    tracked_reply_photo,
 )
 from .callbacks import build_torrent_keyboard, paginate_torrents
 
@@ -69,7 +70,10 @@ async def cmd_torrent_status(
     # Send chart image if available
     chart = view.render_torrent_chart(torrents)
     if chart:
-        await update.message.reply_photo(photo=chart, caption="Torrent Status")
+        state = get_state(context.application)
+        await tracked_reply_photo(
+            update.message, state, photo=chart, caption="Torrent Status"
+        )
 
     page_torrents, page, total_pages = paginate_torrents(torrents, 0)
     msg = view.render_torrent_list_page(page_torrents, page, total_pages)

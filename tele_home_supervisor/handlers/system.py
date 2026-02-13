@@ -10,7 +10,8 @@ from telegram.ext import ContextTypes
 
 from .. import config, services
 from .. import view
-from .common import guard_sensitive, get_state, set_audit_target
+from ..background import delete_media_messages
+from .common import guard_sensitive, get_state, set_audit_target, tracked_reply_photo
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,10 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # Send chart image if available
     chart = view.render_health_chart(data)
     if chart:
-        await update.message.reply_photo(photo=chart, caption="Health Dashboard")
+        state = get_state(context.application)
+        await tracked_reply_photo(
+            update.message, state, photo=chart, caption="Health Dashboard"
+        )
 
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
@@ -157,3 +161,23 @@ async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     raw = await services.utils.get_top_processes()
     msg = f"<b>Top Processes:</b>\n<pre>{html.escape(raw)}</pre>"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Delete all tracked media messages from the chat immediately."""
+    if not await guard_sensitive(update, context):
+        return
+
+    state = get_state(context.application)
+    entries = state.pop_all_media()
+
+    if not entries:
+        await update.message.reply_text("No tracked media to delete.")
+        return
+
+    deleted = await delete_media_messages(context.application, entries)
+    state.save()
+    await update.message.reply_text(
+        f"🗑 Deleted {deleted}/{len(entries)} media messages.",
+        parse_mode=ParseMode.HTML,
+    )

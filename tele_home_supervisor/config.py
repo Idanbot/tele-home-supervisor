@@ -90,8 +90,45 @@ def _read_settings() -> Settings:
     ollama_host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
     ollama_model = os.environ.get("OLLAMA_MODEL") or "llama2"
     bot_auth_totp_secret = os.environ.get("BOT_AUTH_TOTP_SECRET") or None
+    try:
+        bot_auth_ttl_hours = float(os.environ.get("BOT_AUTH_TTL_HOURS", "168") or "168")
+    except Exception:
+        bot_auth_ttl_hours = 168.0
+    try:
+        bot_auto_delete_media_hours = float(
+            os.environ.get("BOT_AUTO_DELETE_MEDIA_HOURS", "24") or "24"
+        )
+    except Exception:
+        bot_auto_delete_media_hours = 24.0
     alert_ping_lan = _split_csv(os.environ.get("ALERT_PING_LAN_TARGETS", ""))
     alert_ping_wan = _split_csv(os.environ.get("ALERT_PING_WAN_TARGETS", ""))
+
+    # TMDB
+    tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
+    tmdb_base_url = os.environ.get(
+        "TMDB_BASE_URL", "https://api.themoviedb.org/3"
+    ).rstrip("/")
+    tmdb_user_agent = os.environ.get(
+        "TMDB_USER_AGENT",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    )
+
+    # PirateBay / TPB
+    tpb_base_url = os.environ.get("TPB_BASE_URL", "https://thepiratebay.org").rstrip(
+        "/"
+    )
+    tpb_api_base_url = os.environ.get("TPB_API_BASE_URL", "https://apibay.org").rstrip(
+        "/"
+    )
+    tpb_api_base_urls = _split_csv(os.environ.get("TPB_API_BASE_URLS", ""))
+    tpb_user_agent = os.environ.get(
+        "TPB_USER_AGENT",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    )
+    tpb_cookie = os.environ.get("TPB_COOKIE", "")
+    tpb_referer = os.environ.get("TPB_REFERER", "")
 
     return Settings(
         BOT_TOKEN=token,
@@ -107,8 +144,19 @@ def _read_settings() -> Settings:
         OLLAMA_HOST=ollama_host,
         OLLAMA_MODEL=ollama_model,
         BOT_AUTH_TOTP_SECRET=bot_auth_totp_secret,
+        BOT_AUTH_TTL_HOURS=bot_auth_ttl_hours,
+        BOT_AUTO_DELETE_MEDIA_HOURS=bot_auto_delete_media_hours,
         ALERT_PING_LAN_TARGETS=alert_ping_lan,
         ALERT_PING_WAN_TARGETS=alert_ping_wan,
+        TMDB_API_KEY=tmdb_api_key,
+        TMDB_BASE_URL=tmdb_base_url,
+        TMDB_USER_AGENT=tmdb_user_agent,
+        TPB_BASE_URL=tpb_base_url,
+        TPB_API_BASE_URL=tpb_api_base_url,
+        TPB_API_BASE_URLS=tpb_api_base_urls,
+        TPB_USER_AGENT=tpb_user_agent,
+        TPB_COOKIE=tpb_cookie,
+        TPB_REFERER=tpb_referer,
     )
 
 
@@ -141,6 +189,8 @@ OLLAMA_HOST: str = settings.OLLAMA_HOST
 OLLAMA_MODEL: str = settings.OLLAMA_MODEL
 QBT_TIMEOUT_S: float = settings.QBT_TIMEOUT_S
 BOT_AUTH_TOTP_SECRET: str | None = settings.BOT_AUTH_TOTP_SECRET
+BOT_AUTH_TTL_HOURS: float = settings.BOT_AUTH_TTL_HOURS
+BOT_AUTO_DELETE_MEDIA_HOURS: float = settings.BOT_AUTO_DELETE_MEDIA_HOURS
 ALERT_PING_LAN_TARGETS: list[str] = settings.ALERT_PING_LAN_TARGETS
 ALERT_PING_WAN_TARGETS: list[str] = settings.ALERT_PING_WAN_TARGETS
 
