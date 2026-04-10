@@ -26,6 +26,9 @@ def serialize(state: BotState) -> dict:
     return {
         "gameoffers_muted": list(state.gameoffers_muted),
         "hackernews_muted": list(state.hackernews_muted),
+        "disabled_intel_modules": {
+            str(k): list(v) for k, v in state.disabled_intel_modules.items()
+        },
         "torrent_completion_subscribers": list(state.torrent_completion_subscribers),
         "alerts_enabled": list(state.alerts_enabled),
         "alert_rules": [
@@ -73,6 +76,15 @@ def load(state: BotState, path: Path) -> None:
         legacy_epic = set(data.get("epic_games_muted", []))
         state.gameoffers_muted = set(data.get("gameoffers_muted", [])) or legacy_epic
         state.hackernews_muted = set(data.get("hackernews_muted", []))
+
+        state.disabled_intel_modules = {}
+        raw_disabled = data.get("disabled_intel_modules") or {}
+        for k, v in raw_disabled.items():
+            try:
+                state.disabled_intel_modules[int(k)] = set(v)
+            except TypeError, ValueError:
+                continue
+
         state.torrent_completion_subscribers = set(
             data.get("torrent_completion_subscribers", [])
         )

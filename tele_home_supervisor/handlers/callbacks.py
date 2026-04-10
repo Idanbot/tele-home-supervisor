@@ -14,6 +14,7 @@ import logging
 from telegram.constants import ParseMode
 
 from .common import allowed
+from . import notifications
 from . import alerts as alerts_handler
 
 # Sub-module handlers
@@ -344,6 +345,14 @@ async def handle_callback_query(update, context) -> None:
                 "protondbinfo",
                 data,
                 cb_media.handle_protondb_info(query, context, data),
+            )
+        elif data.startswith("intel_toggle:"):
+            await _run_audit_action(
+                update,
+                context,
+                "intel_toggle",
+                data.split(":", 1)[1],
+                notifications.cb_intel_toggle(update, context),
             )
         else:
             await _safe_edit_message_text(query, "❓ Unknown action")

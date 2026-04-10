@@ -137,9 +137,9 @@ class TestBotStatePersistence:
             state = BotState()
             state._state_file = state_file
 
-            # Set up some state
             state.gameoffers_muted.add(123)
             state.hackernews_muted.add(456)
+            state.disabled_intel_modules[123] = {"weather", "news"}
             state.torrent_completion_subscribers.add(789)
             state.grant_auth(100, time.time() + 3600)
 
@@ -151,9 +151,12 @@ class TestBotStatePersistence:
             state2._state_file = state_file
             state2.load_state()
 
+            # Verify
             assert 123 in state2.gameoffers_muted
             assert 456 in state2.hackernews_muted
+            assert state2.disabled_intel_modules[123] == {"weather", "news"}
             assert 789 in state2.torrent_completion_subscribers
+
             assert 100 in state2.auth_grants
 
     def test_load_nonexistent_file(self) -> None:

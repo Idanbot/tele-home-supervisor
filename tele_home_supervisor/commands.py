@@ -328,6 +328,20 @@ _NOTIFICATIONS_COMMANDS = (
         "show current Humble Bundle free games",
         "cmd_humblefree_now",
     ),
+    CommandSpec(
+        "intel_settings",
+        "Notifications",
+        "/intel_settings",
+        "Morning Intel module settings",
+        "cmd_intel_settings",
+    ),
+    CommandSpec(
+        "morning_intel",
+        "Notifications",
+        "/morning_intel",
+        "fetch Morning Intel on demand",
+        "cmd_morning_intel",
+    ),
 )
 
 _MEDIA_COMMANDS = (

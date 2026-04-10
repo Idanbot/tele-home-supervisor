@@ -6,11 +6,12 @@ import asyncio
 import html
 import logging
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from .. import scheduled as scheduled_fetchers
+from .. import intel
 from ..state import BOT_STATE_KEY, BotState
 from .common import guard, tracked_reply_photo
 
@@ -312,3 +313,96 @@ async def cmd_humblefree_now(
             )
     except Exception as e:
         await msg.edit_text(f"❌ Error: {e}")
+
+
+async def cmd_intel_settings(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Show Morning Intel module settings."""
+    if not await guard(update, context):
+        return
+
+    state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    chat_id = update.effective_chat.id
+
+    disabled = state.disabled_intel_modules.get(chat_id, set())
+
+    keyboard = []
+    for mod_id, label in intel.INTEL_MODULES:
+        status = "❌" if mod_id in disabled else "✅"
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"{status} {label}", callback_data=f"intel_toggle:{mod_id}"
+                )
+            ]
+        )
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    msg = (
+        "⚙️ <b>Morning Intel Settings</b>\n\n"
+        "Configure which modules appear in your 8 AM daily report.\n"
+        "Click a button to toggle a module."
+    )
+
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+    )
+
+
+async def cb_intel_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle module toggle from the settings keyboard."""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data or not data.startswith("intel_toggle:"):
+        return
+
+    mod_id = data.split(":", 1)[1]
+    chat_id = update.effective_chat.id
+    state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
+
+    disabled = state.disabled_intel_modules.setdefault(chat_id, set())
+    if mod_id in disabled:
+        disabled.remove(mod_id)
+    else:
+        disabled.add(mod_id)
+
+    # Refresh keyboard
+    keyboard = []
+    for mid, label in intel.INTEL_MODULES:
+        status = "❌" if mid in disabled else "✅"
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"{status} {label}", callback_data=f"intel_toggle:{mid}"
+                )
+            ]
+        )
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_reply_markup(reply_markup=reply_markup)
+    state.save()
+
+
+async def cmd_morning_intel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fetch and display Morning Intel on demand."""
+    if not await guard(update, context):
+        return
+
+    msg = await update.message.reply_text("🔄 Preparing your morning intel...")
+
+    try:
+        chat_id = update.effective_chat.id
+        state: BotState = context.application.bot_data.setdefault(
+            BOT_STATE_KEY, BotState()
+        )
+
+        result = await intel.build_morning_intel(chat_id, state)
+        await msg.edit_text(
+            result, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
+    except Exception as e:
+        logger.exception("Morning Intel fetch failed")
+        await msg.edit_text(f"❌ Error: {html.escape(str(e))}")

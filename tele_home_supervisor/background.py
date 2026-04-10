@@ -16,6 +16,7 @@ from .state import BOT_STATE_KEY, BotState
 from .torrent import fmt_bytes_compact_decimal, get_manager, reset_manager
 from .models.torrent_snapshot import TorrentSnapshot
 from . import scheduled as scheduled_fetchers
+from . import intel
 from . import alerting
 from .config import settings
 
@@ -23,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 _TASK_TORRENT_COMPLETION = "torrent_completion"
 _TASK_GAMEOFFERS = "gameoffers_scheduler"
-_TASK_HACKERNEWS = "hackernews_scheduler"
+_TASK_MORNING_INTEL = "morning_intel_scheduler"
 _TASK_ALERTS = "alerts_scheduler"
 _TASK_MEDIA_CLEANUP = "media_cleanup"
+
 _POLL_INTERVAL_S = 30.0
 _ALERT_POLL_INTERVAL_S = 60.0
 _MEDIA_CLEANUP_INTERVAL_S = 900.0  # check every 15 minutes
@@ -65,7 +67,7 @@ async def cancel_tasks(state: BotState) -> None:
     task_names = [
         _TASK_TORRENT_COMPLETION,
         _TASK_GAMEOFFERS,
-        _TASK_HACKERNEWS,
+        _TASK_MORNING_INTEL,
         _TASK_ALERTS,
         _TASK_MEDIA_CLEANUP,
     ]
@@ -103,10 +105,12 @@ def ensure_started(app: Application) -> None:
     if not isinstance(task, asyncio.Task) or task.done():
         state.tasks[_TASK_GAMEOFFERS] = asyncio.create_task(_game_offers_scheduler(app))
 
-    # Start Hacker News scheduler
-    task = state.tasks.get(_TASK_HACKERNEWS)
+    # Start Morning Intel scheduler (8 AM)
+    task = state.tasks.get(_TASK_MORNING_INTEL)
     if not isinstance(task, asyncio.Task) or task.done():
-        state.tasks[_TASK_HACKERNEWS] = asyncio.create_task(_hackernews_scheduler(app))
+        state.tasks[_TASK_MORNING_INTEL] = asyncio.create_task(
+            _morning_intel_scheduler(app)
+        )
 
     # Start alerts loop
     task = state.tasks.get(_TASK_ALERTS)
@@ -397,16 +401,16 @@ async def _game_offers_scheduler(app: Application) -> None:
     logger.info("Game Offers scheduler stopped")
 
 
-async def _hackernews_scheduler(app: Application) -> None:
-    """Schedule Hacker News top stories at 8 AM Israel time daily."""
-    logger.info("Starting Hacker News scheduler (8 AM Israel time)")
+async def _morning_intel_scheduler(app: Application) -> None:
+    """Schedule Morning Intel at 8 AM Israel time daily."""
+    logger.info("Starting Morning Intel scheduler (8 AM Israel time)")
 
     while not _shutdown_requested:
         try:
             # Wait until 8 AM Israel time
             wait_seconds = _seconds_until_time(8, 0)  # 8 AM = 08:00
             logger.info(
-                "Hacker News: waiting %.1f seconds until next run", wait_seconds
+                "Morning Intel: waiting %.1f seconds until next run", wait_seconds
             )
             if await _interruptible_sleep(wait_seconds):
                 break
@@ -419,26 +423,22 @@ async def _hackernews_scheduler(app: Application) -> None:
                     break
                 continue
 
-            message = await asyncio.to_thread(
-                scheduled_fetchers.fetch_hackernews_top, 5
-            )
-
             for chat_id in settings.ALLOWED_CHAT_IDS:
-                if state.is_hackernews_muted(chat_id):
-                    logger.debug("Hacker News muted for chat_id=%s", chat_id)
-                    continue
-
                 try:
+                    message = await intel.build_morning_intel(chat_id, state)
                     await app.bot.send_message(
                         chat_id=chat_id,
                         text=message,
                         parse_mode=ParseMode.HTML,
                         disable_web_page_preview=True,
                     )
-                    logger.info("Sent Hacker News notification to chat_id=%s", chat_id)
+                    logger.info(
+                        "Sent Morning Intel notification to chat_id=%s", chat_id
+                    )
                 except Exception:
                     logger.exception(
-                        "Failed to send Hacker News notification to chat_id=%s", chat_id
+                        "Failed to send Morning Intel notification to chat_id=%s",
+                        chat_id,
                     )
 
             # Wait a bit to avoid rescheduling immediately
@@ -448,10 +448,10 @@ async def _hackernews_scheduler(app: Application) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Hacker News scheduler error")
+            logger.exception("Morning Intel scheduler error")
             if await _interruptible_sleep(3600):
                 break
-    logger.info("Hacker News scheduler stopped")
+    logger.info("Morning Intel scheduler stopped")
 
 
 # ---------------------------------------------------------------------------
