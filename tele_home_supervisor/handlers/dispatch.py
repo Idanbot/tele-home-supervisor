@@ -23,6 +23,7 @@ cmd_help = rate_limit(meta.cmd_help, name="help")
 cmd_whoami = rate_limit(meta.cmd_whoami, name="whoami")
 cmd_auth = rate_limit(meta.cmd_auth, name="auth")
 cmd_check_auth = rate_limit(meta.cmd_check_auth, name="check_auth")
+cmd_auth_file = rate_limit(meta.cmd_auth_file, name="auth_file")
 cmd_version = rate_limit(meta.cmd_version, name="version")
 cmd_metrics = rate_limit(meta.cmd_metrics, name="metrics")
 cmd_debug = rate_limit(meta.cmd_debug, name="debug")
@@ -53,6 +54,7 @@ cmd_dns = rate_limit(network.cmd_dns, name="dns")
 cmd_traceroute = rate_limit(network.cmd_traceroute, name="traceroute")
 cmd_speedtest = rate_limit(network.cmd_speedtest, name="speedtest")
 cmd_wifiqr = rate_limit(network.cmd_wifiqr, name="wifiqr")
+cmd_wol = rate_limit(network.cmd_wol, name="wol")
 
 # Torrents
 cmd_torrent_add = rate_limit(torrents.cmd_torrent_add, name="torrentadd")
@@ -77,7 +79,10 @@ cmd_steamfree_now = rate_limit(notifications.cmd_steamfree_now, name="steamfree"
 cmd_gogfree_now = rate_limit(notifications.cmd_gogfree_now, name="gogfree")
 cmd_humblefree_now = rate_limit(notifications.cmd_humblefree_now, name="humblefree")
 cmd_intel_settings = rate_limit(notifications.cmd_intel_settings, name="intel_settings")
-cmd_morning_intel = rate_limit(notifications.cmd_morning_intel, name="morning_intel")
+cmd_intel_briefing = rate_limit(notifications.cmd_intel_briefing, name="intel_briefing")
+cmd_intel_briefing_dry_run = rate_limit(
+    notifications.cmd_intel_briefing_dry_run, name="intel_briefing_run"
+)
 cmd_alerts = rate_limit(alerts.cmd_alerts, name="alerts")
 
 # AI

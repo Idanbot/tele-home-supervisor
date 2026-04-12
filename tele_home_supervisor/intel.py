@@ -147,7 +147,7 @@ async def get_system_health() -> str:
         return f"🖥️ <b>System Health</b>\n❌ Stats unavailable: {html.escape(str(e))}"
 
 
-async def build_morning_intel(
+async def build_intel_briefing(
     chat_id: int | None = None, state: BotState | None = None
 ) -> str:
     """Orchestrate all modules into a single message."""

@@ -24,6 +24,13 @@ _INFO_COMMANDS = (
         "cmd_check_auth",
     ),
     CommandSpec(
+        "auth_file",
+        "Info",
+        "/auth_file",
+        "show all authenticated user IDs and expiry from file",
+        "cmd_auth_file",
+    ),
+    CommandSpec(
         "version",
         "Info",
         "/version",
@@ -179,6 +186,13 @@ _NETWORK_COMMANDS = (
         "generate WiFi QR code",
         "cmd_wifiqr",
     ),
+    CommandSpec(
+        "wol",
+        "Network",
+        "/wol <mac|ip>",
+        "send Magic Packet Wake-on-LAN",
+        "cmd_wol",
+    ),
 )
 
 _TORRENTS_COMMANDS = (
@@ -332,15 +346,22 @@ _NOTIFICATIONS_COMMANDS = (
         "intel_settings",
         "Notifications",
         "/intel_settings",
-        "Morning Intel module settings",
+        "Intel Briefing module settings",
         "cmd_intel_settings",
     ),
     CommandSpec(
-        "morning_intel",
+        "intel_briefing",
         "Notifications",
-        "/morning_intel",
-        "fetch Morning Intel on demand",
-        "cmd_morning_intel",
+        "/intel_briefing",
+        "fetch Intel Briefing on demand",
+        "cmd_intel_briefing",
+    ),
+    CommandSpec(
+        "intel_briefing_run",
+        "Notifications",
+        "/intel_briefing_run",
+        "manual trigger of Intel Briefing scheduler",
+        "cmd_intel_briefing_dry_run",
     ),
 )
 
@@ -469,6 +490,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
 
 
 GROUP_ORDER: tuple[Group, ...] = (
+    "Info",
     "System",
     "Docker",
     "Network",
@@ -476,5 +498,4 @@ GROUP_ORDER: tuple[Group, ...] = (
     "Notifications",
     "Media",
     "AI",
-    "Info",
 )

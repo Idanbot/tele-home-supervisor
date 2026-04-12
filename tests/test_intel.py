@@ -73,7 +73,7 @@ async def test_get_stoic_quote():
 
 
 @pytest.mark.asyncio
-async def test_build_morning_intel_filtering():
+async def test_build_intel_briefing_filtering():
     state = BotState()
     chat_id = 12345
 
@@ -87,7 +87,7 @@ async def test_build_morning_intel_filtering():
         patch("tele_home_supervisor.intel.get_system_health", return_value="SYSTEM"),
         patch("tele_home_supervisor.intel.get_stoic_quote", return_value="QUOTE"),
     ):
-        intel_msg = await intel.build_morning_intel(chat_id, state)
+        intel_msg = await intel.build_intel_briefing(chat_id, state)
 
         assert "GREETING" in intel_msg
         assert "SYSTEM" in intel_msg
@@ -97,12 +97,12 @@ async def test_build_morning_intel_filtering():
 
 
 @pytest.mark.asyncio
-async def test_build_morning_intel_all_disabled():
+async def test_build_intel_briefing_all_disabled():
     state = BotState()
     chat_id = 12345
 
     # Disable all modules
     state.disabled_intel_modules[chat_id] = {m[0] for m in intel.INTEL_MODULES}
 
-    intel_msg = await intel.build_morning_intel(chat_id, state)
+    intel_msg = await intel.build_intel_briefing(chat_id, state)
     assert "All intel modules are disabled" in intel_msg

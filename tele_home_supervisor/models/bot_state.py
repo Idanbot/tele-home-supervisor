@@ -54,7 +54,7 @@ class BotState:
     gameoffers_muted: set[int] = field(default_factory=set)
     hackernews_muted: set[int] = field(default_factory=set)
 
-    # Morning Intel module settings (chat_id -> set of disabled module IDs)
+    # Intel Briefing module settings (chat_id -> set of disabled module IDs)
     disabled_intel_modules: dict[int, set[str]] = field(default_factory=dict)
 
     # Alerts (per-chat)

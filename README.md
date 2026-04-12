@@ -2,7 +2,7 @@
 
 [![CI/CD](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/idanbot/tele-home-supervisor/actions/workflows/ci-cd.yml)
 [![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/idanbot/tele-home-supervisor/pkgs/container/tele-home-supervisor)
-[![Python 3.13](https://img.shields.io/badge/python-3.13-yellow.svg)](https://python.org)
+[![Python 3.14](https://img.shields.io/badge/python-3.14-yellow.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **Tele-Home Supervisor** is a powerful, all-in-one Telegram bot designed to monitor and manage your home server (Raspberry Pi, Linux VPS, NAS) remotely. 
@@ -16,8 +16,10 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 ### 🖥️ System & Network
 *   **Real-time Monitoring**: Visual bars for CPU, RAM, and Disk usage (`/health`, `/diskusage`).
 *   **Network Tools**: Ping, DNS lookup, Traceroute, and Speedtest (`/speedtest`).
+*   **Wake-on-LAN**: Wake local devices using MAC or IP address (`/wol`).
 *   **Guest WiFi**: Generate QR codes for instant WiFi access (`/wifiqr`).
 *   **Utilities**: Set async reminders (`/remind`), check uptime, and view top processes.
+*   **Intel Briefing**: Daily 8 AM summary of weather, news, system health, and stoic wisdom.
 *   **Alerts**: Threshold-based notifications with per-chat rules (`/alerts`).
 *   **Audit Log**: Recent command/callback history (`/audit`).
 
@@ -112,15 +114,25 @@ docker compose up -d
 
 ## 📚 Command Reference
 
-### 🛠 System
+### 🛠 Info
+*   `/auth <code>` - Authorize sensitive commands for 7 days.
+*   `/check_auth` - Check current auth status and time remaining.
+*   `/auth_file` - List all active auth grants with start/end dates.
+*   `/version` - Show bot version and build info.
+
+### 🖥 System
 *   `/health` - Comprehensive system dashboard (CPU, RAM, Disk, Load).
 *   `/diskusage` - Visual bar charts of disk space.
 *   `/remind <min> <msg>` - Set a timer to ping you later.
 *   `/wifiqr <ssid> [pass]` - Generate WiFi login QR code.
+*   `/wol <mac|ip>` - Send Magic Packet Wake-on-LAN.
 *   `/ip` - Show LAN and WAN IP addresses.
 *   `/top` - Show top resource-consuming processes.
 
-### 🔔 Alerts & Audit
+### 🔔 Alerts & Briefing
+*   `/intel_briefing` - Fetch latest intel briefing on-demand.
+*   `/intel_briefing_run` - Manual trigger for scheduled briefing (dry run).
+*   `/intel_settings` - Configure which modules appear in briefing.
 *   `/alerts` - Manage alert rules and status.
 *   `/audit [n]` - Show recent audit entries (or `/audit clear`).
 

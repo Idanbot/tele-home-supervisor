@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 _TASK_TORRENT_COMPLETION = "torrent_completion"
 _TASK_GAMEOFFERS = "gameoffers_scheduler"
-_TASK_MORNING_INTEL = "morning_intel_scheduler"
+_TASK_INTEL_BRIEFING = "intel_briefing_scheduler"
 _TASK_ALERTS = "alerts_scheduler"
 _TASK_MEDIA_CLEANUP = "media_cleanup"
 
@@ -67,7 +67,7 @@ async def cancel_tasks(state: BotState) -> None:
     task_names = [
         _TASK_TORRENT_COMPLETION,
         _TASK_GAMEOFFERS,
-        _TASK_MORNING_INTEL,
+        _TASK_INTEL_BRIEFING,
         _TASK_ALERTS,
         _TASK_MEDIA_CLEANUP,
     ]
@@ -105,11 +105,11 @@ def ensure_started(app: Application) -> None:
     if not isinstance(task, asyncio.Task) or task.done():
         state.tasks[_TASK_GAMEOFFERS] = asyncio.create_task(_game_offers_scheduler(app))
 
-    # Start Morning Intel scheduler (8 AM)
-    task = state.tasks.get(_TASK_MORNING_INTEL)
+    # Start Intel Briefing scheduler (8 AM)
+    task = state.tasks.get(_TASK_INTEL_BRIEFING)
     if not isinstance(task, asyncio.Task) or task.done():
-        state.tasks[_TASK_MORNING_INTEL] = asyncio.create_task(
-            _morning_intel_scheduler(app)
+        state.tasks[_TASK_INTEL_BRIEFING] = asyncio.create_task(
+            _intel_briefing_scheduler(app)
         )
 
     # Start alerts loop
@@ -401,16 +401,16 @@ async def _game_offers_scheduler(app: Application) -> None:
     logger.info("Game Offers scheduler stopped")
 
 
-async def _morning_intel_scheduler(app: Application) -> None:
-    """Schedule Morning Intel at 8 AM Israel time daily."""
-    logger.info("Starting Morning Intel scheduler (8 AM Israel time)")
+async def _intel_briefing_scheduler(app: Application) -> None:
+    """Schedule Intel Briefing at 8 AM Israel time daily."""
+    logger.info("Starting Intel Briefing scheduler (8 AM Israel time)")
 
     while not _shutdown_requested:
         try:
             # Wait until 8 AM Israel time
             wait_seconds = _seconds_until_time(8, 0)  # 8 AM = 08:00
             logger.info(
-                "Morning Intel: waiting %.1f seconds until next run", wait_seconds
+                "Intel Briefing: waiting %.1f seconds until next run", wait_seconds
             )
             if await _interruptible_sleep(wait_seconds):
                 break
@@ -425,7 +425,7 @@ async def _morning_intel_scheduler(app: Application) -> None:
 
             for chat_id in settings.ALLOWED_CHAT_IDS:
                 try:
-                    message = await intel.build_morning_intel(chat_id, state)
+                    message = await intel.build_intel_briefing(chat_id, state)
                     await app.bot.send_message(
                         chat_id=chat_id,
                         text=message,
@@ -433,11 +433,11 @@ async def _morning_intel_scheduler(app: Application) -> None:
                         disable_web_page_preview=True,
                     )
                     logger.info(
-                        "Sent Morning Intel notification to chat_id=%s", chat_id
+                        "Sent Intel Briefing notification to chat_id=%s", chat_id
                     )
                 except Exception:
                     logger.exception(
-                        "Failed to send Morning Intel notification to chat_id=%s",
+                        "Failed to send Intel Briefing notification to chat_id=%s",
                         chat_id,
                     )
 
@@ -448,10 +448,10 @@ async def _morning_intel_scheduler(app: Application) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Morning Intel scheduler error")
+            logger.exception("Intel Briefing scheduler error")
             if await _interruptible_sleep(3600):
                 break
-    logger.info("Morning Intel scheduler stopped")
+    logger.info("Intel Briefing scheduler stopped")
 
 
 # ---------------------------------------------------------------------------

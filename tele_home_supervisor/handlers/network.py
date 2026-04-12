@@ -3,6 +3,10 @@ from __future__ import annotations
 import io
 import logging
 import qrcode
+import socket
+import re
+import subprocess
+import html
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -189,3 +193,89 @@ async def cmd_speedtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     text = f"{view.bold('Speedtest (download):')}\n{result}"
     await msg.edit_text(text, parse_mode=ParseMode.HTML)
+
+
+async def cmd_wol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send Magic Packet Wake-on-LAN to a MAC or IP address."""
+    if not await guard_sensitive(update, context):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /wol <mac|ip>")
+        return
+
+    target = context.args[0].strip()
+    set_audit_target(context, target)
+
+    # Regex for MAC address
+    mac_re = re.compile(r"^([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2})$")
+    # Regex for IP address (simple)
+    ip_re = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+
+    mac = None
+    if mac_re.match(target):
+        mac = target
+    elif ip_re.match(target):
+        # Try to resolve MAC from IP
+        mac = _resolve_mac_from_arp(target)
+        if not mac:
+            await update.message.reply_text(
+                f"❌ Could not resolve MAC for IP {target} from ARP cache.\n"
+                "Machine must have been seen recently or have a static ARP entry."
+            )
+            return
+    else:
+        await update.message.reply_text("❌ Invalid MAC or IP address format.")
+        return
+
+    try:
+        _send_wol_packet(mac)
+        await update.message.reply_text(
+            f"✅ Sent WOL Magic Packet to <code>{html.escape(mac)}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        logger.exception("WOL failed")
+        await update.message.reply_text(f"❌ WOL failed: {html.escape(str(e))}")
+
+
+def _resolve_mac_from_arp(ip: str) -> str | None:
+    """Try to find MAC address for a given IP in the system ARP cache."""
+    # 1. Try /proc/net/arp (Linux)
+    try:
+        with open("/proc/net/arp", "r") as f:
+            for line in f.readlines()[1:]:
+                parts = line.split()
+                if len(parts) >= 4 and parts[0] == ip:
+                    res = parts[3]
+                    if res != "00:00:00:00:00:00":
+                        return res
+    except Exception:
+        pass
+
+    # 2. Try 'arp -n' command (fallback)
+    try:
+        output = subprocess.check_output(["arp", "-n", ip], timeout=2).decode()
+        for line in output.splitlines():
+            if ip in line:
+                match = re.search(r"(([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})", line)
+                if match:
+                    return match.group(0)
+    except Exception:
+        pass
+
+    return None
+
+
+def _send_wol_packet(mac: str) -> None:
+    """Construct and send a WOL Magic Packet (UDP broadcast)."""
+    # Clean MAC to 12 hex digits
+    clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac)
+    if len(clean_mac) != 12:
+        raise ValueError("Invalid MAC address length")
+
+    data = bytes.fromhex("ff" * 6 + clean_mac * 16)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        # Send to standard WOL port 9
+        s.sendto(data, ("255.255.255.255", 9))

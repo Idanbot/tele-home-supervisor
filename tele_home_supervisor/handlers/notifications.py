@@ -318,7 +318,7 @@ async def cmd_humblefree_now(
 async def cmd_intel_settings(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Show Morning Intel module settings."""
+    """Show Intel Briefing module settings."""
     if not await guard(update, context):
         return
 
@@ -340,7 +340,7 @@ async def cmd_intel_settings(
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     msg = (
-        "⚙️ <b>Morning Intel Settings</b>\n\n"
+        "⚙️ <b>Intel Briefing Settings</b>\n\n"
         "Configure which modules appear in your 8 AM daily report.\n"
         "Click a button to toggle a module."
     )
@@ -386,12 +386,14 @@ async def cb_intel_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     state.save()
 
 
-async def cmd_morning_intel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Fetch and display Morning Intel on demand."""
+async def cmd_intel_briefing(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Fetch and display Intel Briefing on demand."""
     if not await guard(update, context):
         return
 
-    msg = await update.message.reply_text("🔄 Preparing your morning intel...")
+    msg = await update.message.reply_text("🔄 Preparing your intel briefing...")
 
     try:
         chat_id = update.effective_chat.id
@@ -399,10 +401,52 @@ async def cmd_morning_intel(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             BOT_STATE_KEY, BotState()
         )
 
-        result = await intel.build_morning_intel(chat_id, state)
+        result = await intel.build_intel_briefing(chat_id, state)
         await msg.edit_text(
             result, parse_mode=ParseMode.HTML, disable_web_page_preview=True
         )
     except Exception as e:
-        logger.exception("Morning Intel fetch failed")
+        logger.exception("Intel Briefing fetch failed")
         await msg.edit_text(f"❌ Error: {html.escape(str(e))}")
+
+
+async def cmd_intel_briefing_dry_run(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Manual trigger of the Intel Briefing scheduler (sends to all allowed chats)."""
+    if not await guard(update, context):
+        return
+
+    from .. import config
+
+    status_msg = await update.message.reply_text(
+        "🚀 Triggering Intel Briefing for all chats..."
+    )
+    state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
+
+    if not config.ALLOWED:
+        await status_msg.edit_text("⚠️ No ALLOWED_CHAT_IDS configured.")
+        return
+
+    success_count = 0
+    fail_count = 0
+
+    for chat_id in config.ALLOWED:
+        try:
+            message = await intel.build_intel_briefing(chat_id, state)
+            await context.application.bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            success_count += 1
+        except Exception:
+            logger.exception("Dry run: failed to send to %s", chat_id)
+            fail_count += 1
+
+    await status_msg.edit_text(
+        f"✅ Intel Briefing dry run complete.\n"
+        f"Sent: {success_count}\n"
+        f"Failed: {fail_count}"
+    )

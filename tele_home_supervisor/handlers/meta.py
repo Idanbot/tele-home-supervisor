@@ -27,14 +27,16 @@ logger = logging.getLogger(__name__)
 def _render_help() -> str:
     by_group: dict[str, list[str]] = {}
     for spec in COMMANDS:
-        line = f"{spec.usage} – {spec.description}"
+        line = (
+            f"<code>{html.escape(spec.usage)}</code> – {html.escape(spec.description)}"
+        )
         by_group.setdefault(spec.group, []).append(line)
     lines: list[str] = ["Hi! Commands:\n"]
     for group in GROUP_ORDER:
         entries = by_group.get(group, [])
         if not entries:
             continue
-        lines.append(group)
+        lines.append(f"<b>{html.escape(group)}</b>")
         lines.extend(entries)
         lines.append("")
     return "\n".join(lines).strip()
@@ -56,7 +58,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ensure_started(context.application)
     except Exception as e:
         logger.debug("ensure_started failed: %s", e)
-    await update.message.reply_text(_render_help())
+    await update.message.reply_text(_render_help(), parse_mode=ParseMode.HTML)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -170,6 +172,44 @@ async def cmd_check_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         time_str = f"{seconds}s"
     await update.message.reply_text(f"✅ Authenticated. Expires in {time_str}.")
+
+
+async def cmd_auth_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show all authenticated user IDs and expiry from the persistence file."""
+    if not await guard_sensitive(update, context):
+        return
+
+    state = get_state(context.application)
+    now = time.time()
+    grants = state.auth_grants
+
+    if not grants:
+        await update.message.reply_text(
+            "No active authentication grants found in memory."
+        )
+        return
+
+    lines = ["🔐 <b>Active Auth Grants</b>\n"]
+    for uid, expiry in sorted(grants.items(), key=lambda x: x[1]):
+        if expiry <= now:
+            continue
+
+        exp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry))
+        # We don't have start date stored, but we know it lasts 7 days
+        # So start is roughly expiry - 7 days
+        start_time = expiry - (config.BOT_AUTH_TTL_HOURS * 3600)
+        start_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time))
+
+        lines.append(f"👤 <code>{uid}</code>")
+        lines.append(f"  🏁 Start: {html.escape(start_str)}")
+        lines.append(f"  ⌛ End:   {html.escape(exp_str)}")
+        lines.append("")
+
+    msg = "\n".join(lines).strip()
+    if not msg or msg == "🔐 <b>Active Auth Grants</b>":
+        await update.message.reply_text("No active authentication grants found.")
+    else:
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
 async def cmd_metrics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
