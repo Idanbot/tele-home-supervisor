@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import logging
 import asyncio
+import time
 from datetime import datetime
 
 import requests
@@ -43,7 +44,7 @@ def get_greeting(name: str = "Idan") -> str:
 
 
 def get_weather() -> str:
-    """Weather Module using Open-Meteo."""
+    """Weather Module using Open-Meteo with retry."""
     locations = [
         {"name": "Haifa", "lat": 32.7940, "lon": 34.9896},
         {"name": "Omer", "lat": 31.2464, "lon": 34.7961},
@@ -52,23 +53,39 @@ def get_weather() -> str:
 
     lines = ["🌡️ <b>Weather in Israel</b>"]
 
+    # Multi-location request
+    lats = ",".join(str(loc["lat"]) for loc in locations)
+    lons = ",".join(str(loc["lon"]) for loc in locations)
+
+    url = (
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={lats}&longitude={lons}&"
+        f"current=temperature_2m,relative_humidity_2m,weather_code&"
+        f"daily=temperature_2m_max,temperature_2m_min,precipitation_sum&"
+        f"timezone=auto"
+    )
+
+    data = None
+    last_error = None
+
+    for attempt in range(2):
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning("Weather fetch attempt %d failed: %s", attempt + 1, e)
+            if attempt == 0:
+                time.sleep(5)
+
+    if not data:
+        logger.exception("Failed to fetch weather after retries")
+        lines.append(f"❌ Weather unavailable: {html.escape(str(last_error))}")
+        return "\n".join(lines)
+
     try:
-        # Multi-location request
-        lats = ",".join(str(loc["lat"]) for loc in locations)
-        lons = ",".join(str(loc["lon"]) for loc in locations)
-
-        url = (
-            f"https://api.open-meteo.com/v1/forecast?"
-            f"latitude={lats}&longitude={lons}&"
-            f"current=temperature_2m,relative_humidity_2m,weather_code&"
-            f"daily=temperature_2m_max,temperature_2m_min,precipitation_sum&"
-            f"timezone=auto"
-        )
-
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-
         # Open-Meteo returns a list if multiple locations are requested
         if not isinstance(data, list):
             data = [data]
@@ -87,8 +104,8 @@ def get_weather() -> str:
             lines.append(line)
 
     except Exception as e:
-        logger.exception("Failed to fetch weather")
-        lines.append(f"❌ Weather unavailable: {html.escape(str(e))}")
+        logger.exception("Failed to process weather data")
+        lines.append(f"❌ Weather processing error: {html.escape(str(e))}")
 
     return "\n".join(lines)
 
@@ -108,20 +125,31 @@ def get_news() -> str:
 
 
 def get_stoic_quote() -> str:
-    """Quote Module - 1 Stoic Quote."""
-    try:
-        # Using stoic-quotes.com API
-        response = requests.get("https://stoic-quotes.com/api/quote", timeout=10)
-        response.raise_for_status()
-        data = response.json()
+    """Quote Module - 1 Stoic Quote with retry."""
+    url = "https://stoic-quotes.com/api/quote"
+    data = None
+    last_error = None
 
-        quote = data.get("text", "No quote found")
-        author = data.get("author", "Unknown")
+    for attempt in range(2):
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning("Stoic quote fetch attempt %d failed: %s", attempt + 1, e)
+            if attempt == 0:
+                time.sleep(5)
 
-        return f'🏛️ <b>Stoic Wisdom</b>\n<i>"{quote}"</i> — {author}'
-    except Exception:
-        logger.exception("Failed to fetch stoic quote")
-        return "🏛️ <b>Stoic Wisdom</b>\n❌ Wisdom unavailable today."
+    if not data:
+        logger.exception("Failed to fetch stoic quote after retries")
+        return f"🏛️ <b>Stoic Wisdom</b>\n❌ Wisdom unavailable today: {html.escape(str(last_error))}"
+
+    quote = data.get("text", "No quote found")
+    author = data.get("author", "Unknown")
+
+    return f'🏛️ <b>Stoic Wisdom</b>\n<i>"{quote}"</i> — {author}'
 
 
 async def get_system_health() -> str:

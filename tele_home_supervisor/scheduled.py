@@ -305,62 +305,73 @@ def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
 
 
 def fetch_hackernews_top(limit: int = 10) -> str:
-    """Fetch top stories from Hacker News.
+    """Fetch top stories from Hacker News with retry logic.
 
     Args:
         limit: Number of top stories to fetch (default: 10)
 
     Returns formatted HTML message or error string.
     """
-    try:
-        # Fetch top story IDs
-        top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
-        response = requests.get(top_url, timeout=10)
-        response.raise_for_status()
-        story_ids = response.json()[:limit]
+    last_error = None
+    for attempt in range(2):
+        try:
+            # Fetch top story IDs
+            top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
+            response = requests.get(top_url, timeout=10)
+            response.raise_for_status()
+            story_ids = response.json()[:limit]
 
-        stories: list[dict[str, Any]] = []
-        for story_id in story_ids:
-            story_url = f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
-            story_response = requests.get(story_url, timeout=10)
-            story_response.raise_for_status()
-            story_data = story_response.json()
+            stories: list[dict[str, Any]] = []
+            for story_id in story_ids:
+                story_url = (
+                    f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
+                )
+                try:
+                    story_response = requests.get(story_url, timeout=10)
+                    story_response.raise_for_status()
+                    story_data = story_response.json()
+                    if story_data:
+                        stories.append(
+                            {
+                                "title": story_data.get("title", "No title"),
+                                "url": story_data.get(
+                                    "url",
+                                    f"https://news.ycombinator.com/item?id={story_id}",
+                                ),
+                                "score": story_data.get("score", 0),
+                                "comments": story_data.get("descendants", 0),
+                            }
+                        )
+                except requests.RequestException:
+                    # Individual story failure shouldn't kill the whole fetch
+                    logger.warning("Failed to fetch HN story %s", story_id)
+                    continue
 
-            if story_data:
-                stories.append(
-                    {
-                        "title": story_data.get("title", "No title"),
-                        "url": story_data.get(
-                            "url", f"https://news.ycombinator.com/item?id={story_id}"
-                        ),
-                        "score": story_data.get("score", 0),
-                        "comments": story_data.get("descendants", 0),
-                    }
+            if not stories:
+                return "📰 <b>Hacker News</b>\n\nNo stories available."
+
+            lines = ["📰 <b>Hacker News - Top Stories</b>\n"]
+            for i, story in enumerate(stories, 1):
+                title = html.escape(story["title"])
+                url = html.escape(story["url"])
+                score = story["score"]
+                comments = story["comments"]
+
+                lines.append(
+                    f"{i}. <a href='{url}'>{title}</a>\n"
+                    f"   ⬆️ {score} points • 💬 {comments} comments\n"
                 )
 
-        if not stories:
-            return "📰 <b>Hacker News</b>\n\nNo stories available."
+            return "\n".join(lines)
 
-        lines = ["📰 <b>Hacker News - Top Stories</b>\n"]
-        for i, story in enumerate(stories, 1):
-            title = html.escape(story["title"])
-            url = html.escape(story["url"])
-            score = story["score"]
-            comments = story["comments"]
+        except (requests.RequestException, Exception) as e:
+            last_error = e
+            logger.warning("HN fetch attempt %d failed: %s", attempt + 1, e)
+            if attempt == 0:
+                time.sleep(5)
 
-            lines.append(
-                f"{i}. <a href='{url}'>{title}</a>\n"
-                f"   ⬆️ {score} points • 💬 {comments} comments\n"
-            )
-
-        return "\n".join(lines)
-
-    except requests.RequestException as e:
-        logger.exception("Failed to fetch Hacker News stories")
-        return f"❌ Failed to fetch Hacker News: {html.escape(str(e))}"
-    except Exception as e:
-        logger.exception("Error processing Hacker News data")
-        return f"❌ Error processing Hacker News data: {html.escape(str(e))}"
+    logger.exception("Failed to fetch Hacker News stories after retries")
+    return f"❌ Failed to fetch Hacker News: {html.escape(str(last_error))}"
 
 
 def fetch_steam_free_games(limit: int = 5) -> tuple[str, list[str]]:

@@ -356,13 +356,6 @@ _NOTIFICATIONS_COMMANDS = (
         "fetch Intel Briefing on demand",
         "cmd_intel_briefing",
     ),
-    CommandSpec(
-        "intel_briefing_run",
-        "Notifications",
-        "/intel_briefing_run",
-        "manual trigger of Intel Briefing scheduler",
-        "cmd_intel_briefing_dry_run",
-    ),
 )
 
 _MEDIA_COMMANDS = (

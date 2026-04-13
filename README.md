@@ -131,7 +131,6 @@ docker compose up -d
 
 ### 🔔 Alerts & Briefing
 *   `/intel_briefing` - Fetch latest intel briefing on-demand.
-*   `/intel_briefing_run` - Manual trigger for scheduled briefing (dry run).
 *   `/intel_settings` - Configure which modules appear in briefing.
 *   `/alerts` - Manage alert rules and status.
 *   `/audit [n]` - Show recent audit entries (or `/audit clear`).

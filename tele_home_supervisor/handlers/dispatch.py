@@ -80,9 +80,6 @@ cmd_gogfree_now = rate_limit(notifications.cmd_gogfree_now, name="gogfree")
 cmd_humblefree_now = rate_limit(notifications.cmd_humblefree_now, name="humblefree")
 cmd_intel_settings = rate_limit(notifications.cmd_intel_settings, name="intel_settings")
 cmd_intel_briefing = rate_limit(notifications.cmd_intel_briefing, name="intel_briefing")
-cmd_intel_briefing_dry_run = rate_limit(
-    notifications.cmd_intel_briefing_dry_run, name="intel_briefing_run"
-)
 cmd_alerts = rate_limit(alerts.cmd_alerts, name="alerts")
 
 # AI
