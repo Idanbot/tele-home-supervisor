@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import io
 import logging
-import qrcode
-import socket
-import re
-import subprocess
 import html
+import re
+import socket
+
+import qrcode
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -241,7 +241,6 @@ async def cmd_wol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def _resolve_mac_from_arp(ip: str) -> str | None:
     """Try to find MAC address for a given IP in the system ARP cache."""
-    # 1. Try /proc/net/arp (Linux)
     try:
         with open("/proc/net/arp", "r") as f:
             for line in f.readlines()[1:]:
@@ -250,19 +249,8 @@ def _resolve_mac_from_arp(ip: str) -> str | None:
                     res = parts[3]
                     if res != "00:00:00:00:00:00":
                         return res
-    except Exception:
-        pass
-
-    # 2. Try 'arp -n' command (fallback)
-    try:
-        output = subprocess.check_output(["arp", "-n", ip], timeout=2).decode()
-        for line in output.splitlines():
-            if ip in line:
-                match = re.search(r"(([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})", line)
-                if match:
-                    return match.group(0)
-    except Exception:
-        pass
+    except OSError as exc:
+        logger.debug("Failed to read /proc/net/arp while resolving %s: %s", ip, exc)
 
     return None
 

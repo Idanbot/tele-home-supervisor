@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .. import config
 from .alerts import AlertRule, AlertState
+from .auth import AuthGrantRecord
 
 if TYPE_CHECKING:
     from .bot_state import BotState
@@ -61,7 +65,8 @@ def save(state: BotState, path: Path) -> None:
     """Persist *state* to *path* as JSON."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(serialize(state), indent=2))
+        payload = json.dumps(serialize(state), indent=2, sort_keys=True)
+        _atomic_write_text(path, payload)
     except Exception:
         logger.exception("Failed to save bot state")
 
@@ -82,7 +87,7 @@ def load(state: BotState, path: Path) -> None:
         for k, v in raw_disabled.items():
             try:
                 state.disabled_intel_modules[int(k)] = set(v)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
 
         state.torrent_completion_subscribers = set(
@@ -105,29 +110,101 @@ def load(state: BotState, path: Path) -> None:
 
 def _serialize_auth_grants(state: BotState) -> list[dict]:
     now = time.time()
-    return [
-        {"user_id": uid, "expiry": exp}
-        for uid, exp in state.auth_grants.items()
-        if exp > now
-    ]
+    items: list[dict] = []
+    if state.auth_records:
+        for uid, record in sorted(state.auth_records.items()):
+            if not record.is_active(now):
+                continue
+            items.append(
+                {
+                    "user_id": uid,
+                    "granted_at": record.granted_at,
+                    "expires_at": record.expires_at,
+                    "username": record.username,
+                    "user_name": record.user_name,
+                }
+            )
+        return items
+    for uid, exp in sorted(state.auth_grants.items()):
+        if exp <= now:
+            continue
+        items.append(
+            {
+                "user_id": uid,
+                "granted_at": exp - (config.BOT_AUTH_TTL_HOURS * 3600),
+                "expires_at": exp,
+            }
+        )
+    return items
 
 
 def _deserialize_auth_grants(state: BotState, grants: list) -> None:
     now = time.time()
     state.auth_grants = {}
+    state.auth_records = {}
     for item in grants:
         if not isinstance(item, dict):
             continue
         uid = item.get("user_id")
-        exp = item.get("expiry")
+        exp = item.get("expires_at", item.get("expiry"))
+        granted_at = item.get("granted_at")
         if uid is None or exp is None:
             continue
         try:
-            uid, exp = int(uid), float(exp)
-        except TypeError, ValueError:
+            uid = int(uid)
+            exp = float(exp)
+            if granted_at is None:
+                granted_at = exp - (config.BOT_AUTH_TTL_HOURS * 3600)
+            granted_at = float(granted_at)
+        except (TypeError, ValueError):
             continue
         if exp > now:
             state.auth_grants[uid] = exp
+            state.auth_records[uid] = AuthGrantRecord(
+                user_id=uid,
+                granted_at=granted_at,
+                expires_at=exp,
+                username=_coerce_optional_str(item.get("username")),
+                user_name=_coerce_optional_str(item.get("user_name")),
+            )
+
+
+def _coerce_optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _atomic_write_text(path: Path, payload: str) -> None:
+    """Atomically replace *path* with *payload*."""
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+        text=True,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        try:
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 # ── Alert rules / state ─────────────────────────────────────────────
@@ -136,7 +213,7 @@ def _deserialize_auth_grants(state: BotState, grants: list) -> None:
 def _coerce_int(value: object) -> int | None:
     try:
         return int(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 
@@ -188,6 +265,6 @@ def _load_media_messages(raw: list) -> list[list]:
             continue
         try:
             result.append([int(entry[0]), int(entry[1]), float(entry[2])])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
     return result

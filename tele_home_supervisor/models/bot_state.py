@@ -12,6 +12,7 @@ from pathlib import Path
 from .. import services
 from . import persistence
 from .alerts import AlertRule, AlertState
+from .auth import AuthGrantRecord
 from .audit import AuditEntry
 from .cache import CacheEntry, LogCacheEntry
 from .debug import DebugEntry, DebugRecorder
@@ -63,8 +64,10 @@ class BotState:
     alert_states: dict[str, AlertState] = field(default_factory=dict)
     alert_torrent_seen: dict[str, bool] = field(default_factory=dict)
 
-    # Auth grants (user_id -> wall-clock expiry timestamp via time.time())
+    # Fast in-memory auth lookup (user_id -> wall-clock expiry timestamp via time.time())
     auth_grants: dict[int, float] = field(default_factory=dict)
+    # Structured persisted auth records keyed by user ID.
+    auth_records: dict[int, AuthGrantRecord] = field(default_factory=dict)
 
     command_metrics: dict[str, CommandMetrics] = field(default_factory=dict)
 
@@ -474,15 +477,66 @@ class BotState:
     def is_hackernews_muted(self, chat_id: int) -> bool:
         return chat_id in self.hackernews_muted
 
-    def grant_auth(self, user_id: int, expiry: float) -> None:
+    def grant_auth(
+        self,
+        user_id: int,
+        expiry: float,
+        *,
+        granted_at: float | None = None,
+        username: str | None = None,
+        user_name: str | None = None,
+    ) -> None:
         """Grant auth to a user until expiry time (wall-clock via time.time())."""
+        start = granted_at if granted_at is not None else time.time()
+        existing = self.auth_records.get(user_id)
         self.auth_grants[user_id] = expiry
+        self.auth_records[user_id] = AuthGrantRecord(
+            user_id=user_id,
+            granted_at=start,
+            expires_at=expiry,
+            username=username
+            if username is not None
+            else getattr(existing, "username", None),
+            user_name=user_name
+            if user_name is not None
+            else getattr(existing, "user_name", None),
+        )
         self.save()
 
     def revoke_auth(self, user_id: int) -> None:
         """Revoke auth for a user."""
-        self.auth_grants.pop(user_id, None)
+        removed_expiry = self.auth_grants.pop(user_id, None)
+        removed_record = self.auth_records.pop(user_id, None)
+        if removed_expiry is not None or removed_record is not None:
+            self.save()
+
+    def prune_expired_auth(self) -> list[int]:
+        """Drop expired auth grants from memory and disk."""
+        now = time.time()
+        expired_ids = {
+            uid for uid, expiry in self.auth_grants.items() if expiry <= now
+        } | {
+            uid
+            for uid, record in self.auth_records.items()
+            if not record.is_active(now)
+        }
+        if not expired_ids:
+            return []
+        for uid in expired_ids:
+            self.auth_grants.pop(uid, None)
+            self.auth_records.pop(uid, None)
         self.save()
+        return sorted(expired_ids)
+
+    def auth_record_for(self, user_id: int) -> AuthGrantRecord | None:
+        """Return the structured auth record for a user when available."""
+        record = self.auth_records.get(user_id)
+        if record is not None:
+            return record
+        expiry = self.auth_grants.get(user_id)
+        if expiry is None:
+            return None
+        return AuthGrantRecord(user_id=user_id, granted_at=expiry, expires_at=expiry)
 
     # ── Media tracking ───────────────────────────────────────────────
 

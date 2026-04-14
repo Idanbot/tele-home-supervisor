@@ -18,17 +18,35 @@ class TestBotStateAuth:
         state.grant_auth(123, expiry)
         assert 123 in state.auth_grants
         assert state.auth_grants[123] == expiry
+        assert state.auth_records[123].expires_at == expiry
 
     def test_revoke_auth(self) -> None:
         state = BotState()
         state.auth_grants[123] = time.time() + 3600
+        state.auth_records[123] = state.auth_record_for(123)
         state.revoke_auth(123)
         assert 123 not in state.auth_grants
+        assert 123 not in state.auth_records
 
     def test_revoke_nonexistent(self) -> None:
         state = BotState()
         # Should not raise
         state.revoke_auth(999)
+
+    def test_regrant_updates_existing_record(self) -> None:
+        state = BotState()
+        first_start = time.time()
+        first_expiry = first_start + 3600
+        state.grant_auth(123, first_expiry, granted_at=first_start, username="old")
+
+        second_start = first_start + 120
+        second_expiry = second_start + 3600
+        state.grant_auth(123, second_expiry, granted_at=second_start, username="new")
+
+        assert len(state.auth_records) == 1
+        assert state.auth_records[123].granted_at == second_start
+        assert state.auth_records[123].expires_at == second_expiry
+        assert state.auth_records[123].username == "new"
 
 
 class TestBotStateCache:
@@ -158,6 +176,7 @@ class TestBotStatePersistence:
             assert 789 in state2.torrent_completion_subscribers
 
             assert 100 in state2.auth_grants
+            assert 100 in state2.auth_records
 
     def test_load_nonexistent_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

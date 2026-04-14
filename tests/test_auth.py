@@ -91,3 +91,6 @@ async def test_cmd_auth_accepts_valid_code(monkeypatch) -> None:
     expiry = state.auth_grants.get(update.effective_user.id)
     assert expiry is not None
     assert expiry > time.time()
+    record = state.auth_records.get(update.effective_user.id)
+    assert record is not None
+    assert record.expires_at == expiry

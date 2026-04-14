@@ -42,7 +42,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /srv/media:/srv/media:ro
       - /sys/class/thermal/thermal_zone0:/host_thermal:ro
-      - ./bot_data:/app/data
+      - telebot_data:/app/data
 
     logging:
       driver: "json-file"
@@ -84,3 +84,6 @@ services:
 networks:
   bit-net:
     external: true
+
+volumes:
+  telebot_data:

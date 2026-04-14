@@ -130,6 +130,38 @@ class TestCmdCheckAuth:
         assert "Expires" in update.message.replies[0]
 
 
+class TestCmdAuthFile:
+    """Tests for /auth_file command."""
+
+    @pytest.mark.asyncio
+    async def test_shows_structured_auth_records(self, monkeypatch) -> None:
+        async def mock_guard(update, context):
+            return True
+
+        monkeypatch.setattr(meta, "guard_sensitive", mock_guard)
+
+        update = DummyUpdate(chat_id=123, user_id=123)
+        update.effective_user.username = "idan"
+        context = DummyContext()
+
+        state = get_state(context.application)
+        state.grant_auth(
+            123,
+            time.time() + 3600,
+            granted_at=time.time(),
+            username="idan",
+            user_name="Idan",
+        )
+
+        await meta.cmd_auth_file(update, context)
+
+        reply = update.message.replies[0]
+        assert "Active Auth Grants" in reply
+        assert "@idan" in reply
+        assert "Start:" in reply
+        assert "End:" in reply
+
+
 class TestCmdMetrics:
     """Tests for /metrics command."""
 

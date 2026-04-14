@@ -28,7 +28,8 @@ def build_application() -> Application:
 
     app = Application.builder().token(config.TOKEN).build()
 
-    app.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    state: BotState = app.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    state.load_state()
 
     for spec in COMMANDS:
         fn = getattr(dispatch, spec.handler)

@@ -239,7 +239,7 @@ def _auth_valid(state: BotState, user_id: int) -> bool:
     now = time.time()
     expiry = state.auth_grants.get(user_id)
     if not expiry or expiry <= now:
-        state.auth_grants.pop(user_id, None)
+        state.revoke_auth(user_id)
         return False
     return True
 
@@ -265,7 +265,7 @@ async def guard_sensitive(
         return True
     if update and update.effective_chat:
         await update.effective_chat.send_message(
-            "🔒 Please authenticate with /auth <secret> (valid for 24 hours)."
+            "🔒 Please authenticate with /auth <secret> (valid for 7 days by default)."
         )
     _set_auth_flag(context, False)
     return False

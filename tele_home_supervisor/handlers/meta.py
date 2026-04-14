@@ -133,8 +133,24 @@ async def cmd_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = get_state(context.application)
     user_id = update.effective_user.id
     ttl = auth_ttl_seconds()
-    expiry = time.time() + ttl
-    state.grant_auth(user_id, expiry)
+    granted_at = time.time()
+    expiry = granted_at + ttl
+    user = update.effective_user
+    full_name = " ".join(
+        part
+        for part in (
+            getattr(user, "first_name", "") or "",
+            getattr(user, "last_name", "") or "",
+        )
+        if part
+    ).strip()
+    state.grant_auth(
+        user_id,
+        expiry,
+        granted_at=granted_at,
+        username=getattr(user, "username", None),
+        user_name=full_name or getattr(user, "username", None),
+    )
     hours = ttl / 3600
     if hours % 24 == 0 and hours >= 24:
         duration = f"{int(hours // 24)} day{'s' if hours // 24 != 1 else ''}"
@@ -154,7 +170,7 @@ async def cmd_check_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     expiry = state.auth_grants.get(user_id)
     now = time.time()
     if not expiry or expiry <= now:
-        state.auth_grants.pop(user_id, None)
+        state.revoke_auth(user_id)
         await update.message.reply_text(
             "🔒 Not authenticated. Use /auth <code> to authenticate."
         )
@@ -180,27 +196,35 @@ async def cmd_auth_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     state = get_state(context.application)
-    now = time.time()
-    grants = state.auth_grants
+    state.prune_expired_auth()
+    records = sorted(state.auth_records.values(), key=lambda record: record.expires_at)
+    if not records:
+        records = [
+            state.auth_record_for(uid)
+            for uid in sorted(state.auth_grants)
+            if state.auth_record_for(uid) is not None
+        ]
 
-    if not grants:
+    if not records:
         await update.message.reply_text(
             "No active authentication grants found in memory."
         )
         return
 
     lines = ["🔐 <b>Active Auth Grants</b>\n"]
-    for uid, expiry in sorted(grants.items(), key=lambda x: x[1]):
-        if expiry <= now:
+    for record in records:
+        if record is None:
             continue
-
-        exp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry))
-        # We don't have start date stored, but we know it lasts 7 days
-        # So start is roughly expiry - 7 days
-        start_time = expiry - (config.BOT_AUTH_TTL_HOURS * 3600)
-        start_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time))
-
-        lines.append(f"👤 <code>{uid}</code>")
+        start_str = time.strftime(
+            "%Y-%m-%d %H:%M:%S", time.localtime(record.granted_at)
+        )
+        exp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(record.expires_at))
+        header = f"👤 <code>{record.user_id}</code>"
+        if record.username:
+            header = f"{header} (@{html.escape(record.username)})"
+        lines.append(header)
+        if record.user_name:
+            lines.append(f"  🙍 Name:  {html.escape(record.user_name)}")
         lines.append(f"  🏁 Start: {html.escape(start_str)}")
         lines.append(f"  ⌛ End:   {html.escape(exp_str)}")
         lines.append("")
