@@ -62,6 +62,17 @@ class DummyApplication:
 
     def __init__(self) -> None:
         self.bot_data: dict[str, object] = {}
+        self.bot = DummyBot()
+
+
+class DummyBot:
+    """Dummy Telegram bot for testing direct bot sends."""
+
+    def __init__(self) -> None:
+        self.sent_messages: list[tuple[int, str]] = []
+
+    async def send_message(self, chat_id: int, text: str, **_: Any) -> None:
+        self.sent_messages.append((chat_id, text))
 
 
 class DummyContext:

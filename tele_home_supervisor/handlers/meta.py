@@ -17,11 +17,14 @@ from .common import (
     auth_ttl_seconds,
     get_state,
     guard,
+    guard_owner,
     guard_sensitive,
     tracked_reply_photo,
 )
 
 logger = logging.getLogger(__name__)
+_FAILED_AUTH_LIMIT = 5
+_FAILED_AUTH_COOLDOWN_S = 3600.0
 
 
 def _render_help() -> str:
@@ -116,9 +119,34 @@ async def cmd_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
         await update.message.reply_text("Usage: /auth <code>")
         return
+    state = get_state(context.application)
+    user_id = update.effective_user.id
+    cooldown_until = state.auth_cooldown_until(user_id)
+    if cooldown_until is not None:
+        remaining = max(0, int(cooldown_until - time.time()))
+        minutes, seconds = divmod(remaining, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            cooldown_text = f"{hours}h {minutes}m"
+        elif minutes:
+            cooldown_text = f"{minutes}m {seconds}s"
+        else:
+            cooldown_text = f"{seconds}s"
+        await update.message.reply_text(
+            f"⏳ Too many failed auth attempts. Try again in {cooldown_text}."
+        )
+        return
     provided = "".join(context.args).strip().replace("-", "")
     if not provided.isdigit():
-        await update.message.reply_text("❌ Invalid auth code.")
+        cooldown_until = await _handle_failed_auth(
+            update, context, state, reason="non-digit auth code"
+        )
+        if cooldown_until is not None:
+            await update.message.reply_text(
+                "⏳ Too many failed auth attempts. Try again in 1h 0m."
+            )
+        else:
+            await update.message.reply_text("❌ Invalid auth code.")
         return
     try:
         totp = pyotp.TOTP(config.BOT_AUTH_TOTP_SECRET)
@@ -128,10 +156,16 @@ async def cmd_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"❌ Auth error: {e}")
         return
     if not valid:
-        await update.message.reply_text("❌ Invalid auth code.")
+        cooldown_until = await _handle_failed_auth(
+            update, context, state, reason="invalid TOTP code"
+        )
+        if cooldown_until is not None:
+            await update.message.reply_text(
+                "⏳ Too many failed auth attempts. Try again in 1h 0m."
+            )
+        else:
+            await update.message.reply_text("❌ Invalid auth code.")
         return
-    state = get_state(context.application)
-    user_id = update.effective_user.id
     ttl = auth_ttl_seconds()
     granted_at = time.time()
     expiry = granted_at + ttl
@@ -234,6 +268,140 @@ async def cmd_auth_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("No active authentication grants found.")
     else:
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Persistently ban a user ID. Owner only."""
+    if not await guard_owner(update, context):
+        return
+    if not context.args or not context.args[0].strip().isdigit():
+        await update.message.reply_text("Usage: /ban <user_id>")
+        return
+    target_id = int(context.args[0].strip())
+    if config.OWNER_ID is not None and target_id == config.OWNER_ID:
+        await update.message.reply_text("⛔ Cannot ban OWNER_ID.")
+        return
+
+    state = get_state(context.application)
+    if target_id in config.BLOCKED_IDS and target_id not in state.blocked_ids:
+        await update.message.reply_text(
+            f"🚫 <code>{target_id}</code> is already blocked via BLOCKED_IDS.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if not state.block_user(target_id):
+        await update.message.reply_text(
+            f"🚫 <code>{target_id}</code> is already blocked.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await update.message.reply_text(
+        f"✅ Blocked <code>{target_id}</code> persistently.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_unban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Remove a user ID from the persistent ban list. Owner only."""
+    if not await guard_owner(update, context):
+        return
+    if not context.args or not context.args[0].strip().isdigit():
+        await update.message.reply_text("Usage: /unban <user_id>")
+        return
+    target_id = int(context.args[0].strip())
+    state = get_state(context.application)
+    removed = state.unblock_user(target_id)
+    if removed and target_id in config.BLOCKED_IDS:
+        await update.message.reply_text(
+            f"⚠️ Removed <code>{target_id}</code> from persisted blocks, but it is still blocked via BLOCKED_IDS.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    if removed:
+        await update.message.reply_text(
+            f"✅ Unblocked <code>{target_id}</code> from persisted blocks.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    if target_id in config.BLOCKED_IDS:
+        await update.message.reply_text(
+            f"⚠️ <code>{target_id}</code> is blocked via BLOCKED_IDS and cannot be removed by /unban.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    await update.message.reply_text(
+        f"ℹ️ <code>{target_id}</code> is not in the persisted block list.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def _handle_failed_auth(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    state,
+    *,
+    reason: str,
+) -> float | None:
+    user = getattr(update, "effective_user", None)
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        return None
+    attempts, cooldown_until = state.record_failed_auth(
+        user_id,
+        max_failures=_FAILED_AUTH_LIMIT,
+        cooldown_s=_FAILED_AUTH_COOLDOWN_S,
+    )
+    await _notify_owner_auth_failure(
+        update,
+        context,
+        reason=reason,
+        attempts=attempts,
+        cooldown_until=cooldown_until,
+    )
+    return cooldown_until
+
+
+async def _notify_owner_auth_failure(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    reason: str,
+    attempts: int,
+    cooldown_until: float | None,
+) -> None:
+    owner_id = config.OWNER_ID
+    if owner_id is None:
+        return
+    app = getattr(context, "application", None)
+    bot = getattr(app, "bot", None)
+    send_message = getattr(bot, "send_message", None)
+    if not callable(send_message):
+        return
+
+    user = getattr(update, "effective_user", None)
+    chat = getattr(update, "effective_chat", None)
+    user_id = getattr(user, "id", None)
+    username = getattr(user, "username", None) or "-"
+    chat_id = getattr(chat, "id", None)
+    lines = [
+        "🚨 Failed /auth",
+        f"User ID: {user_id}",
+        f"Chat ID: {chat_id}",
+        f"Username: @{username}" if username != "-" else "Username: -",
+        f"Reason: {reason}",
+        f"Attempts: {min(max(attempts, 1), _FAILED_AUTH_LIMIT)}/{_FAILED_AUTH_LIMIT}",
+    ]
+    if cooldown_until is not None:
+        lines.append(
+            "Cooldown until: "
+            f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(cooldown_until))}"
+        )
+    try:
+        await send_message(chat_id=owner_id, text="\n".join(lines))
+    except Exception as exc:
+        logger.warning("Failed to notify owner about failed auth: %s", exc)
 
 
 async def cmd_metrics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

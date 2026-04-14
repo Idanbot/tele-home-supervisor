@@ -10,12 +10,12 @@ from typing import Any, Dict, Tuple
 
 import httpx
 from telegram import Update
-from telegram.constants import ParseMode
 from telegram.error import RetryAfter
 from telegram.ext import ContextTypes
 
 from .. import config
-from ..ai_service import OllamaClient
+from ..ai_delivery import build_streaming_delivery
+from ..ai_service import GenerationTarget, create_text_provider
 from ..utils import split_telegram_message
 from .common import guard
 
@@ -34,7 +34,7 @@ STYLE_SYSTEM_PROMPT = (
 
 
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ask a question to the local Ollama model with streaming response."""
+    """Ask a question using the active AI provider with streaming response."""
     if not await guard(update, context):
         return
     if await _ollama_busy_reply(update, context):
@@ -52,13 +52,13 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    msg = await update.message.reply_text("🤔 Thinking...")
-
-    client = OllamaClient(
-        base_url=host,
-        model=model,
-        system_prompt=STYLE_SYSTEM_PROMPT,
-        **overrides,
+    delivery = build_streaming_delivery(update, context)
+    provider = create_text_provider(
+        _resolve_generation_target(
+            user_data=context.user_data,
+            system_prompt=STYLE_SYSTEM_PROMPT,
+            overrides=overrides,
+        )
     )
 
     full_response = []
@@ -68,7 +68,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     last_sent_text = ""
 
     try:
-        async for token in client.generate_stream(prompt):
+        async for token in provider.generate_stream(prompt):
             if "<think>" in token:
                 think_mode = True
                 token = token.replace("<think>", "")
@@ -94,7 +94,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     current_text = _format_text(current_raw, done=False)
                     if current_text != last_sent_text:
                         try:
-                            await msg.edit_text(current_text)
+                            await delivery.push(current_text)
                             last_sent_text = current_text
                             pending_tokens.clear()
                             last_update_time = now
@@ -112,36 +112,16 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Split into chunks if needed
         chunks = split_telegram_message(final_raw)
 
-        # Update the original message with the first chunk
-        first_chunk = _format_text(chunks[0], done=True)
-        first_chunk = _close_unbalanced_fences(first_chunk)
-
-        try:
-            await msg.edit_text(first_chunk, parse_mode=ParseMode.MARKDOWN_V2)
-        except Exception as e:
-            logger.warning("MarkdownV2 render failed for chunk 1; falling back: %s", e)
-            await msg.edit_text(first_chunk)
-
-        # Send subsequent chunks as replies
-        for i, chunk in enumerate(chunks[1:], start=2):
-            # Ensure fences are balanced for each independent message chunk
-            # (split_telegram_message handles this, but _close_unbalanced_fences adds safety)
-            chunk_fmt = _close_unbalanced_fences(chunk)
-            try:
-                await update.message.reply_text(
-                    chunk_fmt, parse_mode=ParseMode.MARKDOWN_V2
-                )
-            except Exception as e:
-                logger.warning(
-                    f"MarkdownV2 render failed for chunk {i}; falling back: {e}"
-                )
-                await update.message.reply_text(chunk_fmt)
+        first_chunk = _close_unbalanced_fences(_format_text(chunks[0], done=True))
+        final_chunks = [
+            first_chunk,
+            *(_close_unbalanced_fences(chunk) for chunk in chunks[1:]),
+        ]
+        await delivery.finalize(final_chunks)
 
     except Exception as e:
         logger.exception("Ollama request failed")
-        await msg.edit_text(
-            f"❌ Error: {str(e)}\nHost: {host}",
-        )
+        await delivery.error(f"❌ Error: {str(e)}\nHost: {host}")
 
 
 async def cmd_askreset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -410,6 +390,22 @@ def _resolve_ollama_target(user_data: Dict[str, Any]) -> Tuple[str, str]:
     host = user_data.get("ollama_host") or config.OLLAMA_HOST
     model = user_data.get("ollama_model") or config.OLLAMA_MODEL
     return str(host), str(model)
+
+
+def _resolve_generation_target(
+    *,
+    user_data: Dict[str, Any],
+    system_prompt: str,
+    overrides: Dict[str, Any],
+) -> GenerationTarget:
+    host, model = _resolve_ollama_target(user_data)
+    return GenerationTarget(
+        provider=str(user_data.get("ai_provider") or "ollama"),
+        model=model,
+        base_url=host,
+        system_prompt=system_prompt,
+        options=dict(overrides),
+    )
 
 
 async def _ollama_busy_reply(

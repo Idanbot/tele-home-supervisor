@@ -68,6 +68,11 @@ class BotState:
     auth_grants: dict[int, float] = field(default_factory=dict)
     # Structured persisted auth records keyed by user ID.
     auth_records: dict[int, AuthGrantRecord] = field(default_factory=dict)
+    # Persisted block list managed by the owner.
+    blocked_ids: set[int] = field(default_factory=set)
+    # Failed /auth counters and cooldowns.
+    auth_failures: dict[int, int] = field(default_factory=dict)
+    auth_cooldowns: dict[int, float] = field(default_factory=dict)
 
     command_metrics: dict[str, CommandMetrics] = field(default_factory=dict)
 
@@ -501,6 +506,7 @@ class BotState:
             if user_name is not None
             else getattr(existing, "user_name", None),
         )
+        self.clear_auth_failures(user_id, save=False)
         self.save()
 
     def revoke_auth(self, user_id: int) -> None:
@@ -509,6 +515,73 @@ class BotState:
         removed_record = self.auth_records.pop(user_id, None)
         if removed_expiry is not None or removed_record is not None:
             self.save()
+
+    def record_failed_auth(
+        self,
+        user_id: int,
+        *,
+        now: float | None = None,
+        max_failures: int = 5,
+        cooldown_s: float = 3600.0,
+    ) -> tuple[int, float | None]:
+        """Track a failed /auth attempt and return (attempts, cooldown_until)."""
+        current = now if now is not None else time.time()
+        cooldown_until = self.auth_cooldowns.get(user_id)
+        if cooldown_until and cooldown_until <= current:
+            self.auth_cooldowns.pop(user_id, None)
+            cooldown_until = None
+        if cooldown_until and cooldown_until > current:
+            return self.auth_failures.get(user_id, 0), cooldown_until
+
+        attempts = self.auth_failures.get(user_id, 0) + 1
+        if attempts >= max_failures:
+            cooldown_until = current + cooldown_s
+            self.auth_failures[user_id] = 0
+            self.auth_cooldowns[user_id] = cooldown_until
+        else:
+            self.auth_failures[user_id] = attempts
+        self.save()
+        return attempts, cooldown_until
+
+    def clear_auth_failures(self, user_id: int, *, save: bool = True) -> None:
+        """Clear failed auth counters and cooldown for a user."""
+        removed_attempts = self.auth_failures.pop(user_id, None)
+        removed_cooldown = self.auth_cooldowns.pop(user_id, None)
+        if save and (removed_attempts is not None or removed_cooldown is not None):
+            self.save()
+
+    def auth_cooldown_until(
+        self, user_id: int, *, now: float | None = None
+    ) -> float | None:
+        """Return active cooldown timestamp for a user, if present."""
+        current = now if now is not None else time.time()
+        cooldown_until = self.auth_cooldowns.get(user_id)
+        if cooldown_until is None:
+            return None
+        if cooldown_until <= current:
+            self.auth_cooldowns.pop(user_id, None)
+            self.auth_failures.pop(user_id, None)
+            self.save()
+            return None
+        return cooldown_until
+
+    def block_user(self, user_id: int) -> bool:
+        """Persistently block a user ID."""
+        if user_id in self.blocked_ids:
+            return False
+        self.blocked_ids.add(user_id)
+        self.revoke_auth(user_id)
+        self.clear_auth_failures(user_id, save=False)
+        self.save()
+        return True
+
+    def unblock_user(self, user_id: int) -> bool:
+        """Remove a user ID from the persistent block list."""
+        if user_id not in self.blocked_ids:
+            return False
+        self.blocked_ids.remove(user_id)
+        self.save()
+        return True
 
     def prune_expired_auth(self) -> list[int]:
         """Drop expired auth grants from memory and disk."""

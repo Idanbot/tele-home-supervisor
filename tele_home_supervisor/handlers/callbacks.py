@@ -13,7 +13,7 @@ import logging
 
 from telegram.constants import ParseMode
 
-from .common import allowed
+from .common import allowed, get_state, is_blocked_user_id
 from . import notifications
 from . import alerts as alerts_handler
 
@@ -58,6 +58,13 @@ from .cb_media import (  # noqa: F401
 logger = logging.getLogger(__name__)
 
 
+def _allowed_for_callback(update, state) -> bool:
+    try:
+        return allowed(update, state)
+    except TypeError:
+        return allowed(update)
+
+
 # ---------------------------------------------------------------------------
 # Alert payload parser (kept here – tiny and only used by the router)
 # ---------------------------------------------------------------------------
@@ -80,11 +87,17 @@ def _parse_alerts_payload(data: str) -> tuple[str, str] | None:
 
 async def handle_callback_query(update, context) -> None:
     query = update.callback_query
+    state = get_state(context.application)
+    user = getattr(update, "effective_user", None)
+    user_id = getattr(user, "id", None)
+    if is_blocked_user_id(user_id, state):
+        return
+
     await query.answer()
 
     data = query.data
 
-    if not allowed(update):
+    if not _allowed_for_callback(update, state):
         await _safe_edit_message_text(query, "⛔ Not authorized")
         return
 

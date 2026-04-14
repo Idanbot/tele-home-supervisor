@@ -124,7 +124,7 @@ async def test_safe_edit_no_error() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_unknown_action(monkeypatch) -> None:
-    monkeypatch.setattr(callbacks, "allowed", lambda _: True)
+    monkeypatch.setattr(callbacks, "allowed", lambda *_: True)
     update = _DummyUpdate("totally:unknown:action")
     ctx = _DummyContext()
     await callbacks.handle_callback_query(update, ctx)
@@ -133,7 +133,7 @@ async def test_dispatch_unknown_action(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_noop_docker(monkeypatch) -> None:
-    monkeypatch.setattr(callbacks, "allowed", lambda _: True)
+    monkeypatch.setattr(callbacks, "allowed", lambda *_: True)
     update = _DummyUpdate("docker:noop")
     ctx = _DummyContext()
     await callbacks.handle_callback_query(update, ctx)
@@ -143,7 +143,7 @@ async def test_dispatch_noop_docker(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_noop_torrent(monkeypatch) -> None:
-    monkeypatch.setattr(callbacks, "allowed", lambda _: True)
+    monkeypatch.setattr(callbacks, "allowed", lambda *_: True)
     update = _DummyUpdate("torrent:noop")
     ctx = _DummyContext()
     await callbacks.handle_callback_query(update, ctx)
@@ -152,11 +152,22 @@ async def test_dispatch_noop_torrent(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_unauthorized(monkeypatch) -> None:
-    monkeypatch.setattr(callbacks, "allowed", lambda _: False)
+    monkeypatch.setattr(callbacks, "allowed", lambda *_: False)
     update = _DummyUpdate("docker:refresh")
     ctx = _DummyContext()
     await callbacks.handle_callback_query(update, ctx)
     assert "Not authorized" in update.callback_query._edited_texts[0]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_silently_ignores_blocked_user(monkeypatch) -> None:
+    monkeypatch.setattr(callbacks, "allowed", lambda *_: True)
+    monkeypatch.setattr(callbacks, "is_blocked_user_id", lambda *_: True)
+    update = _DummyUpdate("docker:refresh")
+    ctx = _DummyContext()
+    await callbacks.handle_callback_query(update, ctx)
+    assert update.callback_query._answered is False
+    assert update.callback_query._edited_texts == []
 
 
 # ---------------------------------------------------------------------------

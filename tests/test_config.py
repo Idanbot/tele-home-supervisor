@@ -8,6 +8,8 @@ def test_settings_defaults():
     with mock.patch.dict(os.environ, {}, clear=True):
         settings = config._read_settings()
         assert settings.BOT_TOKEN is None
+        assert settings.OWNER_ID is None
+        assert settings.BLOCKED_IDS == set()
         assert settings.RATE_LIMIT_S == 1.0
         assert settings.QBT_HOST == "qbittorrent"
         assert settings.QBT_PORT == 8080
@@ -17,7 +19,9 @@ def test_settings_defaults():
 def test_settings_custom():
     env = {
         "BOT_TOKEN": "123:ABC",
+        "OWNER_ID": "999",
         "ALLOWED_CHAT_IDS": "123, 456",
+        "BLOCKED_IDS": "111, 222",
         "RATE_LIMIT_S": "2.5",
         "SHOW_WAN": "true",
         "QBT_PORT": "9090",
@@ -26,7 +30,9 @@ def test_settings_custom():
     with mock.patch.dict(os.environ, env, clear=True):
         settings = config._read_settings()
         assert settings.BOT_TOKEN == "123:ABC"
+        assert settings.OWNER_ID == 999
         assert settings.ALLOWED_CHAT_IDS == {123, 456}
+        assert settings.BLOCKED_IDS == {111, 222}
         assert settings.RATE_LIMIT_S == 2.5
         assert settings.SHOW_WAN is True
         assert settings.QBT_PORT == 9090

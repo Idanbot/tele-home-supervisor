@@ -99,6 +99,29 @@ class TestCmdAuth:
 
         assert "Usage" in update.message.replies[0]
 
+    @pytest.mark.asyncio
+    async def test_failed_auth_notifies_owner(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "ALLOWED", {123})
+        monkeypatch.setattr(config, "OWNER_ID", 999)
+        monkeypatch.setattr(config, "BOT_AUTH_TOTP_SECRET", "SECRET")
+
+        class DummyTotp:
+            def __init__(self, secret: str) -> None:
+                self.secret = secret
+
+            def verify(self, otp: str, valid_window: int = 0) -> bool:
+                return False
+
+        monkeypatch.setattr(meta.pyotp, "TOTP", DummyTotp)
+
+        update = DummyUpdate(chat_id=123, user_id=123)
+        context = DummyContext(args=["000000"])
+
+        await meta.cmd_auth(update, context)
+
+        assert context.application.bot.sent_messages
+        assert "Failed /auth" in context.application.bot.sent_messages[0][1]
+
 
 class TestCmdCheckAuth:
     """Tests for /check_auth command."""
@@ -160,6 +183,39 @@ class TestCmdAuthFile:
         assert "@idan" in reply
         assert "Start:" in reply
         assert "End:" in reply
+
+
+class TestCmdBanUnban:
+    """Tests for owner-managed persistent blocks."""
+
+    @pytest.mark.asyncio
+    async def test_ban_requires_owner(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "ALLOWED", {123})
+        monkeypatch.setattr(config, "OWNER_ID", 999)
+        update = DummyUpdate(chat_id=123, user_id=123)
+        context = DummyContext(args=["555"])
+
+        await meta.cmd_ban(update, context)
+
+        assert "Owner only" in update.effective_chat.sent[0]
+
+    @pytest.mark.asyncio
+    async def test_ban_and_unban_persisted_id(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "ALLOWED", set())
+        monkeypatch.setattr(config, "OWNER_ID", 999)
+        monkeypatch.setattr(config, "BLOCKED_IDS", set())
+        update = DummyUpdate(chat_id=999, user_id=999)
+        context = DummyContext(args=["555"])
+
+        await meta.cmd_ban(update, context)
+        state = get_state(context.application)
+        assert 555 in state.blocked_ids
+        assert "Blocked" in update.message.replies[-1]
+
+        context.args = ["555"]
+        await meta.cmd_unban(update, context)
+        assert 555 not in state.blocked_ids
+        assert "Unblocked" in update.message.replies[-1]
 
 
 class TestCmdMetrics:

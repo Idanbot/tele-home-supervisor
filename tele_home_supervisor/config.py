@@ -32,6 +32,13 @@ def _split_ints(s: str) -> Set[int]:
     return out
 
 
+def _read_optional_int(name: str) -> int | None:
+    value = (os.environ.get(name) or "").strip()
+    if not value:
+        return None
+    return int(value) if value.isdigit() else None
+
+
 def _split_paths(s: str) -> List[str]:
     """Parse comma-separated string into a list of filesystem paths.
 
@@ -64,7 +71,9 @@ def _read_settings() -> Settings:
         Boolean values accept: 1/true/yes (case-insensitive) as True.
     """
     token = os.environ.get("BOT_TOKEN") or None
+    owner_id = _read_optional_int("OWNER_ID")
     allowed = _split_ints(os.environ.get("ALLOWED_CHAT_IDS", ""))
+    blocked = _split_ints(os.environ.get("BLOCKED_IDS", ""))
     try:
         rate_limit = float(os.environ.get("RATE_LIMIT_S", "1.0") or "1.0")
     except Exception:
@@ -132,7 +141,9 @@ def _read_settings() -> Settings:
 
     return Settings(
         BOT_TOKEN=token,
+        OWNER_ID=owner_id,
         ALLOWED_CHAT_IDS=allowed,
+        BLOCKED_IDS=blocked,
         RATE_LIMIT_S=rate_limit,
         SHOW_WAN=show_wan,
         WATCH_PATHS=watch_paths,
@@ -181,7 +192,9 @@ def validate_settings() -> None:
 
 # Exported constants
 TOKEN: str | None = settings.BOT_TOKEN
+OWNER_ID: int | None = settings.OWNER_ID
 ALLOWED: set[int] = settings.ALLOWED_CHAT_IDS
+BLOCKED_IDS: set[int] = settings.BLOCKED_IDS
 RATE_LIMIT_S: float = settings.RATE_LIMIT_S
 SHOW_WAN: bool = settings.SHOW_WAN
 WATCH_PATHS: list[str] = settings.WATCH_PATHS

@@ -49,6 +49,7 @@ async def test_cmd_auth_rejects_non_digit_codes(monkeypatch) -> None:
 async def test_cmd_auth_rejects_invalid_code(monkeypatch) -> None:
     monkeypatch.setattr(config, "ALLOWED", {123})
     monkeypatch.setattr(config, "BOT_AUTH_TOTP_SECRET", "BASE32")
+    monkeypatch.setattr(config, "OWNER_ID", 999)
 
     class DummyTotp:
         def __init__(self, secret: str) -> None:
@@ -66,6 +67,8 @@ async def test_cmd_auth_rejects_invalid_code(monkeypatch) -> None:
     assert update.message.replies == ["❌ Invalid auth code."]
     state = get_state(context.application)
     assert update.effective_user.id not in state.auth_grants
+    assert context.application.bot.sent_messages
+    assert context.application.bot.sent_messages[0][0] == 999
 
 
 @pytest.mark.asyncio
@@ -94,3 +97,31 @@ async def test_cmd_auth_accepts_valid_code(monkeypatch) -> None:
     record = state.auth_records.get(update.effective_user.id)
     assert record is not None
     assert record.expires_at == expiry
+
+
+@pytest.mark.asyncio
+async def test_cmd_auth_cooldown_after_five_failures(monkeypatch) -> None:
+    monkeypatch.setattr(config, "ALLOWED", {123})
+    monkeypatch.setattr(config, "BOT_AUTH_TOTP_SECRET", "BASE32")
+
+    class DummyTotp:
+        def __init__(self, secret: str) -> None:
+            self.secret = secret
+
+        def verify(self, otp: str, valid_window: int = 0) -> bool:
+            return False
+
+    monkeypatch.setattr(meta.pyotp, "TOTP", DummyTotp)
+    context = DummyContext(args=["123456"])
+
+    for _ in range(4):
+        update = DummyUpdate(chat_id=123, user_id=123)
+        await meta.cmd_auth(update, context)
+        assert update.message.replies[-1] == "❌ Invalid auth code."
+
+    update = DummyUpdate(chat_id=123, user_id=123)
+    await meta.cmd_auth(update, context)
+
+    assert "Too many failed auth attempts" in update.message.replies[-1]
+    state = get_state(context.application)
+    assert state.auth_cooldown_until(123) is not None

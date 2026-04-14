@@ -29,6 +29,7 @@ _last_command_ts = 0.0
 # A simple float comparison is atomic enough for this use case.
 _AUTH_FLAG_KEY = "_auth_ok"
 _AUDIT_TARGET_KEY = "_audit_target"
+_OWNER_ONLY_MSG = "⛔ Owner only."
 
 
 def auth_ttl_seconds() -> float:
@@ -52,6 +53,27 @@ def get_state(app) -> BotState:
     state = app.bot_data.setdefault(BOT_STATE_KEY, BotState())
     state.load_state()  # Safe to call multiple times (has _state_loaded guard)
     return state
+
+
+def is_owner_user_id(user_id: int | None) -> bool:
+    return (
+        user_id is not None
+        and config.OWNER_ID is not None
+        and user_id == config.OWNER_ID
+    )
+
+
+def blocked_user_ids(state: BotState | None = None) -> set[int]:
+    blocked = set(config.BLOCKED_IDS)
+    if state is not None:
+        blocked |= state.blocked_ids
+    if config.OWNER_ID is not None:
+        blocked.discard(config.OWNER_ID)
+    return blocked
+
+
+def is_blocked_user_id(user_id: int | None, state: BotState | None = None) -> bool:
+    return user_id is not None and user_id in blocked_user_ids(state)
 
 
 # ── Media tracking helpers ───────────────────────────────────────────
@@ -188,7 +210,7 @@ async def record_error(
     await reply(f"❌ Error: {html.escape(str(exc))}", parse_mode=ParseMode.HTML)
 
 
-def allowed(update: "Update") -> bool:
+def allowed(update: "Update", state: BotState | None = None) -> bool:
     """Check if the update sender is authorized to use the bot.
 
     Args:
@@ -200,13 +222,17 @@ def allowed(update: "Update") -> bool:
     Note:
         Returns False if ALLOWED_CHAT_IDS is empty or update has no chat.
     """
-    if not config.ALLOWED:
-        return False
     if not update.effective_chat:
         return False
     chat_id = update.effective_chat.id
     effective_user = getattr(update, "effective_user", None)
     user_id = getattr(effective_user, "id", None)
+    if is_blocked_user_id(user_id, state):
+        return False
+    if is_owner_user_id(user_id):
+        return chat_id == user_id
+    if not config.ALLOWED:
+        return False
     # Allow only private chats where chat_id == user_id and user is on the allowlist.
     if user_id is None:
         return chat_id in config.ALLOWED
@@ -226,11 +252,32 @@ async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
     Note:
         This is the primary authorization mechanism for all guarded commands.
     """
-    if allowed(update):
+    app = getattr(context, "application", None)
+    state = get_state(app) if app is not None else None
+    user = getattr(update, "effective_user", None)
+    user_id = getattr(user, "id", None)
+    if is_blocked_user_id(user_id, state):
+        _set_auth_flag(context, False)
+        return False
+    if allowed(update, state):
         _set_auth_flag(context, True)
         return True
     if update and update.effective_chat:
         await update.effective_chat.send_message("⛔ Not authorized")
+    _set_auth_flag(context, False)
+    return False
+
+
+async def guard_owner(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
+    """Allow only the configured owner to continue."""
+    if not await guard(update, context):
+        return False
+    user = getattr(update, "effective_user", None)
+    user_id = getattr(user, "id", None)
+    if is_owner_user_id(user_id):
+        return True
+    if update and update.effective_chat:
+        await update.effective_chat.send_message(_OWNER_ONLY_MSG)
     _set_auth_flag(context, False)
     return False
 

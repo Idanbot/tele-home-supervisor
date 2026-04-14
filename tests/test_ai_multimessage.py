@@ -47,6 +47,23 @@ class DummyContext:
         self.application = None  # Not needed for this test
 
 
+class DummyBot:
+    def __init__(self) -> None:
+        self.drafts: list[tuple[int, int, str]] = []
+
+    async def send_message_draft(
+        self, chat_id: int, draft_id: int, text: str, **_
+    ) -> bool:
+        self.drafts.append((chat_id, draft_id, text))
+        return True
+
+
+class DummyApplication:
+    def __init__(self, bot: DummyBot) -> None:
+        self.bot = bot
+        self.bot_data: dict[str, object] = {}
+
+
 @pytest.mark.asyncio
 async def test_cmd_ask_splits_long_response(monkeypatch) -> None:
     """Test that a very long response triggers multiple messages."""
@@ -70,7 +87,9 @@ async def test_cmd_ask_splits_long_response(monkeypatch) -> None:
                 yield token
                 await asyncio.sleep(0)
 
-    monkeypatch.setattr(ai, "OllamaClient", DummyClient)
+    monkeypatch.setattr(
+        ai, "create_text_provider", lambda *_args, **_kwargs: DummyClient()
+    )
 
     outbound = DummyOutboundMessage()
     inbound = DummyInboundMessage(outbound)
@@ -113,3 +132,35 @@ async def test_cmd_ask_splits_long_response(monkeypatch) -> None:
     assert total_content.count("A") == 5000
     assert first_chunk.count("A") > 3000
     assert second_chunk.count("A") > 0
+
+
+@pytest.mark.asyncio
+async def test_cmd_ask_uses_draft_streaming_when_bot_supports_it(monkeypatch) -> None:
+    monkeypatch.setattr(config, "ALLOWED", {123})
+    monkeypatch.setattr(ai, "STREAM_MIN_TOKENS", 1)
+    monkeypatch.setattr(ai, "STREAM_UPDATE_INTERVAL", 0)
+
+    class DummyClient:
+        def __init__(self, *_, **__) -> None:
+            pass
+
+        async def generate_stream(self, _prompt: str):
+            yield "shalom"
+            await asyncio.sleep(0)
+
+    monkeypatch.setattr(
+        ai, "create_text_provider", lambda *_args, **_kwargs: DummyClient()
+    )
+
+    bot = DummyBot()
+    outbound = DummyOutboundMessage()
+    inbound = DummyInboundMessage(outbound)
+    update = DummyUpdate(inbound, chat_id=123)
+    context = DummyContext(args=["test"])
+    context.application = DummyApplication(bot)
+
+    await ai.cmd_ask(update, context)
+
+    assert bot.drafts
+    assert inbound.reply_calls == ["shalom"]
+    assert outbound.edit_calls == []

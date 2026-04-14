@@ -31,6 +31,20 @@ _INFO_COMMANDS = (
         "cmd_auth_file",
     ),
     CommandSpec(
+        "ban",
+        "Info",
+        "/ban <user_id>",
+        "owner-only persistent block for a user ID",
+        "cmd_ban",
+    ),
+    CommandSpec(
+        "unban",
+        "Info",
+        "/unban <user_id>",
+        "owner-only remove a user ID from persistent blocks",
+        "cmd_unban",
+    ),
+    CommandSpec(
         "version",
         "Info",
         "/version",

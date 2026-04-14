@@ -48,6 +48,24 @@ class TestBotStateAuth:
         assert state.auth_records[123].expires_at == second_expiry
         assert state.auth_records[123].username == "new"
 
+    def test_failed_auth_cooldown(self) -> None:
+        state = BotState()
+        now = time.time()
+        for _ in range(4):
+            attempts, cooldown_until = state.record_failed_auth(123, now=now)
+            assert cooldown_until is None
+            assert attempts >= 1
+        attempts, cooldown_until = state.record_failed_auth(123, now=now)
+        assert attempts == 5
+        assert cooldown_until is not None
+
+    def test_block_and_unblock_user(self) -> None:
+        state = BotState()
+        assert state.block_user(123) is True
+        assert 123 in state.blocked_ids
+        assert state.unblock_user(123) is True
+        assert 123 not in state.blocked_ids
+
 
 class TestBotStateCache:
     """Tests for caching functionality."""
@@ -160,6 +178,8 @@ class TestBotStatePersistence:
             state.disabled_intel_modules[123] = {"weather", "news"}
             state.torrent_completion_subscribers.add(789)
             state.grant_auth(100, time.time() + 3600)
+            state.block_user(200)
+            state.record_failed_auth(300, now=time.time())
 
             # Save
             state.save()
@@ -177,6 +197,8 @@ class TestBotStatePersistence:
 
             assert 100 in state2.auth_grants
             assert 100 in state2.auth_records
+            assert 200 in state2.blocked_ids
+            assert state2.auth_failures.get(300) == 1
 
     def test_load_nonexistent_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

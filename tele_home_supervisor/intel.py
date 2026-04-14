@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import html
-import logging
 import asyncio
-import time
+import logging
 from datetime import datetime
+from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from zoneinfo import ZoneInfo
 
 from . import scheduled as scheduled_fetchers
@@ -24,6 +26,17 @@ INTEL_MODULES = [
     ("system", "🖥️ System Health"),
     ("quote", "🏛️ Stoic Quote"),
 ]
+
+_WEATHER_TIMEOUT = (3.5, 12.0)
+_FETCH_RETRY = Retry(
+    total=2,
+    connect=2,
+    read=2,
+    status=2,
+    backoff_factor=0.8,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset({"GET"}),
+)
 
 
 def get_greeting(name: str = "Idan") -> str:
@@ -44,55 +57,31 @@ def get_greeting(name: str = "Idan") -> str:
 
 
 def get_weather() -> str:
-    """Weather Module using Open-Meteo with retry."""
+    """Weather module using Open-Meteo with resilient fallback fetches."""
     locations = [
         {"name": "Haifa", "lat": 32.7940, "lon": 34.9896},
         {"name": "Omer", "lat": 31.2464, "lon": 34.7961},
         {"name": "Tel Aviv", "lat": 32.0853, "lon": 34.7818},
     ]
-
     lines = ["🌡️ <b>Weather in Israel</b>"]
-
-    # Multi-location request
-    lats = ",".join(str(loc["lat"]) for loc in locations)
-    lons = ",".join(str(loc["lon"]) for loc in locations)
-
-    url = (
-        f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={lats}&longitude={lons}&"
-        f"current=temperature_2m,relative_humidity_2m,weather_code&"
-        f"daily=temperature_2m_max,temperature_2m_min,precipitation_sum&"
-        f"timezone=auto"
-    )
-
-    data = None
-    last_error = None
-
-    for attempt in range(2):
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            break
-        except Exception as e:
-            last_error = e
-            logger.warning("Weather fetch attempt %d failed: %s", attempt + 1, e)
-            if attempt == 0:
-                time.sleep(5)
+    data, failures = _fetch_weather_payloads(locations)
 
     if not data:
-        logger.exception("Failed to fetch weather after retries")
-        lines.append(f"❌ Weather unavailable: {html.escape(str(last_error))}")
+        failure = failures[0] if failures else RuntimeError("unknown weather failure")
+        logger.warning("Weather unavailable after retries: %s", failure)
+        lines.append(
+            f"❌ Weather unavailable right now: {html.escape(_format_fetch_error(failure))}"
+        )
         return "\n".join(lines)
 
     try:
-        # Open-Meteo returns a list if multiple locations are requested
-        if not isinstance(data, list):
-            data = [data]
+        for loc, payload in zip(locations, data):
+            if payload is None:
+                lines.append(f"• <b>{loc['name']}</b>: unavailable")
+                continue
 
-        for i, loc in enumerate(locations):
-            current = data[i].get("current", {})
-            daily = data[i].get("daily", {})
+            current = payload.get("current", {})
+            daily = payload.get("daily", {})
 
             temp = current.get("temperature_2m", "?")
             humidity = current.get("relative_humidity_2m", "?")
@@ -132,15 +121,13 @@ def get_stoic_quote() -> str:
 
     for attempt in range(2):
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=_WEATHER_TIMEOUT)
             response.raise_for_status()
             data = response.json()
             break
         except Exception as e:
             last_error = e
             logger.warning("Stoic quote fetch attempt %d failed: %s", attempt + 1, e)
-            if attempt == 0:
-                time.sleep(5)
 
     if not data:
         logger.exception("Failed to fetch stoic quote after retries")
@@ -212,3 +199,73 @@ async def build_intel_briefing(
     results = await asyncio.gather(*tasks)
 
     return "\n\n".join(results)
+
+
+def _fetch_weather_payloads(
+    locations: list[dict[str, float | str]],
+) -> tuple[list[dict[str, Any] | None], list[Exception]]:
+    """Fetch weather for all locations, falling back to per-location requests."""
+    failures: list[Exception] = []
+
+    try:
+        batch_data = _weather_request(locations)
+        if len(batch_data) == len(locations):
+            return batch_data, failures
+        logger.warning(
+            "Weather batch response size mismatch: expected %d locations, got %d",
+            len(locations),
+            len(batch_data),
+        )
+    except Exception as exc:
+        logger.warning("Batch weather fetch failed, retrying per location: %s", exc)
+        failures.append(exc)
+
+    payloads: list[dict[str, Any] | None] = []
+    for loc in locations:
+        try:
+            payloads.append(_weather_request([loc])[0])
+        except Exception as exc:
+            logger.warning("Weather fetch failed for %s: %s", loc["name"], exc)
+            failures.append(exc)
+            payloads.append(None)
+    return payloads, failures
+
+
+def _weather_request(locations: list[dict[str, float | str]]) -> list[dict[str, Any]]:
+    url = _build_weather_url(locations)
+    session = _build_retry_session()
+    response = session.get(url, timeout=_WEATHER_TIMEOUT)
+    response.raise_for_status()
+    data = response.json()
+    if isinstance(data, list):
+        return data
+    return [data]
+
+
+def _build_weather_url(locations: list[dict[str, float | str]]) -> str:
+    lats = ",".join(str(loc["lat"]) for loc in locations)
+    lons = ",".join(str(loc["lon"]) for loc in locations)
+    return (
+        "https://api.open-meteo.com/v1/forecast?"
+        f"latitude={lats}&longitude={lons}&"
+        "current=temperature_2m,relative_humidity_2m,weather_code&"
+        "daily=temperature_2m_max,temperature_2m_min,precipitation_sum&"
+        "forecast_days=1&timezone=auto"
+    )
+
+
+def _build_retry_session() -> requests.Session:
+    session = requests.Session()
+    adapter = HTTPAdapter(max_retries=_FETCH_RETRY)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _format_fetch_error(exc: Exception) -> str:
+    message = str(exc).strip()
+    if not message:
+        return exc.__class__.__name__
+    if len(message) > 120:
+        return f"{message[:117]}..."
+    return message

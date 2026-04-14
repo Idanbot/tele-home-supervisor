@@ -29,6 +29,18 @@ class TestAllowed:
         update = DummyUpdate(chat_id=123, user_id=123)
         assert common.allowed(update) is False
 
+    def test_owner_allowed_even_if_not_in_allowlist(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "ALLOWED", set())
+        monkeypatch.setattr(config, "OWNER_ID", 999)
+        update = DummyUpdate(chat_id=999, user_id=999)
+        assert common.allowed(update) is True
+
+    def test_blocked_user_denied(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "ALLOWED", {123})
+        monkeypatch.setattr(config, "BLOCKED_IDS", {123})
+        update = DummyUpdate(chat_id=123, user_id=123)
+        assert common.allowed(update) is False
+
 
 class TestGuard:
     """Tests for guard() function."""
@@ -48,6 +60,16 @@ class TestGuard:
         context = DummyContext()
         result = await common.guard(update, context)
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_guard_silently_blocks_blocked_user(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "ALLOWED", {123})
+        monkeypatch.setattr(config, "BLOCKED_IDS", {123})
+        update = DummyUpdate(chat_id=123, user_id=123)
+        context = DummyContext()
+        result = await common.guard(update, context)
+        assert result is False
+        assert update.effective_chat.sent == []
 
 
 class TestGuardSensitive:

@@ -1,5 +1,8 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import requests
+
 from tele_home_supervisor import intel
 from tele_home_supervisor.models.bot_state import BotState
 
@@ -13,21 +16,48 @@ async def test_get_greeting():
 
 @pytest.mark.asyncio
 async def test_get_weather():
-    with patch("requests.get") as mock_get:
-        mock_get.return_value.json.return_value = {
-            "current": {"temperature_2m": 25.5, "relative_humidity_2m": 50},
-            "daily": {
-                "temperature_2m_max": [30.0],
-                "temperature_2m_min": [20.0],
-                "precipitation_sum": [0.0],
-            },
-        }
-        mock_get.return_value.raise_for_status = MagicMock()
+    with patch("tele_home_supervisor.intel._weather_request") as mock_request:
+        mock_request.return_value = [
+            {
+                "current": {"temperature_2m": 25.5, "relative_humidity_2m": 50},
+                "daily": {
+                    "temperature_2m_max": [30.0],
+                    "temperature_2m_min": [20.0],
+                    "precipitation_sum": [0.0],
+                },
+            }
+        ] * 3
 
         weather = intel.get_weather()
         assert "Haifa" in weather
         assert "25.5°C" in weather
         assert "50%" in weather
+
+
+@pytest.mark.asyncio
+async def test_get_weather_falls_back_per_location():
+    payload = {
+        "current": {"temperature_2m": 21.0, "relative_humidity_2m": 60},
+        "daily": {
+            "temperature_2m_max": [24.0],
+            "temperature_2m_min": [18.0],
+            "precipitation_sum": [0.2],
+        },
+    }
+
+    def fake_weather_request(locations):
+        if len(locations) > 1:
+            raise requests.ReadTimeout("timed out")
+        return [payload]
+
+    with patch(
+        "tele_home_supervisor.intel._weather_request", side_effect=fake_weather_request
+    ):
+        weather = intel.get_weather()
+
+    assert "Haifa" in weather
+    assert "Tel Aviv" in weather
+    assert "21.0°C" in weather
 
 
 @pytest.mark.asyncio

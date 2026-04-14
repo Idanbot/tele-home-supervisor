@@ -11,7 +11,9 @@ class Settings:
     """Configuration settings for tele_home_supervisor."""
 
     BOT_TOKEN: str | None
+    OWNER_ID: int | None
     ALLOWED_CHAT_IDS: Set[int]
+    BLOCKED_IDS: Set[int]
     RATE_LIMIT_S: float
     SHOW_WAN: bool
     WATCH_PATHS: List[str]

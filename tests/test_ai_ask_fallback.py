@@ -66,7 +66,9 @@ async def test_cmd_ask_stream_fallbacks_on_markdown_error(monkeypatch) -> None:
                 yield token
                 await asyncio.sleep(0)
 
-    monkeypatch.setattr(ai, "OllamaClient", DummyClient)
+    monkeypatch.setattr(
+        ai, "create_text_provider", lambda *_args, **_kwargs: DummyClient()
+    )
 
     outbound = DummyOutboundMessage(fail_markdown=True)
     inbound = DummyInboundMessage(outbound)
@@ -98,7 +100,9 @@ async def test_cmd_ask_final_fallback_on_markdown_error(monkeypatch) -> None:
                 yield token
                 await asyncio.sleep(0)
 
-    monkeypatch.setattr(ai, "OllamaClient", DummyClient)
+    monkeypatch.setattr(
+        ai, "create_text_provider", lambda *_args, **_kwargs: DummyClient()
+    )
 
     outbound = DummyOutboundMessage(fail_markdown=True)
     inbound = DummyInboundMessage(outbound)
@@ -129,7 +133,9 @@ async def test_cmd_ask_no_fallback_when_markdown_ok(monkeypatch) -> None:
                 yield token
                 await asyncio.sleep(0)
 
-    monkeypatch.setattr(ai, "OllamaClient", DummyClient)
+    monkeypatch.setattr(
+        ai, "create_text_provider", lambda *_args, **_kwargs: DummyClient()
+    )
 
     outbound = DummyOutboundMessage(fail_markdown=False)
     inbound = DummyInboundMessage(outbound)

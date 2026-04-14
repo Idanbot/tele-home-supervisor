@@ -1,14 +1,34 @@
-"""Async Ollama client service."""
+"""Provider-agnostic AI text streaming services."""
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Protocol
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+class TextStreamProvider(Protocol):
+    """Minimal interface for providers that stream text generation."""
+
+    async def generate_stream(self, prompt: str) -> AsyncGenerator[str, None]:
+        """Yield partial response chunks for *prompt*."""
+
+
+@dataclass(slots=True)
+class GenerationTarget:
+    """Resolved generation target for the active provider."""
+
+    provider: str
+    model: str
+    system_prompt: str
+    base_url: str | None = None
+    api_key: str | None = None
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 class OllamaClient:
@@ -16,6 +36,7 @@ class OllamaClient:
 
     def __init__(
         self,
+        *,
         base_url: str,
         model: str,
         system_prompt: str,
@@ -40,11 +61,7 @@ class OllamaClient:
         }
 
     async def generate_stream(self, prompt: str) -> AsyncGenerator[str, None]:
-        """Stream response from Ollama.
-
-        Yields:
-            Chunks of text as they are generated.
-        """
+        """Stream response from Ollama."""
         url = f"{self.base_url}/api/generate"
         payload = {
             "model": self.model,
@@ -74,6 +91,23 @@ class OllamaClient:
                         if chunk.get("done", False):
                             break
 
-            except httpx.HTTPError as e:
-                logger.error(f"Ollama request failed: {e}")
-                raise RuntimeError(f"Ollama request failed: {e}") from e
+            except httpx.HTTPError as exc:
+                logger.error("Ollama request failed: %s", exc)
+                raise RuntimeError(f"Ollama request failed: {exc}") from exc
+
+
+def create_text_provider(target: GenerationTarget) -> TextStreamProvider:
+    """Construct a streaming provider for *target*."""
+    provider = target.provider.strip().lower()
+
+    if provider == "ollama":
+        if not target.base_url:
+            raise ValueError("Ollama target requires base_url")
+        return OllamaClient(
+            base_url=target.base_url,
+            model=target.model,
+            system_prompt=target.system_prompt,
+            **target.options,
+        )
+
+    raise ValueError(f"Unsupported AI provider: {target.provider}")

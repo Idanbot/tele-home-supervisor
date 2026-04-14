@@ -57,6 +57,8 @@ def serialize(state: BotState) -> dict:
             for rule_id, st in state.alert_states.items()
         },
         "auth_grants": _serialize_auth_grants(state),
+        "blocked_ids": sorted(state.blocked_ids),
+        "auth_failures": _serialize_auth_failures(state),
         "media_messages": state.media_messages,
     }
 
@@ -94,10 +96,12 @@ def load(state: BotState, path: Path) -> None:
             data.get("torrent_completion_subscribers", [])
         )
         state.alerts_enabled = set(data.get("alerts_enabled", []))
+        state.blocked_ids = _load_blocked_ids(data.get("blocked_ids") or [])
 
         _load_alert_rules(state, data.get("alert_rules") or [])
         _load_alert_states(state, data.get("alert_states") or {})
         _deserialize_auth_grants(state, data.get("auth_grants") or [])
+        _deserialize_auth_failures(state, data.get("auth_failures") or [])
         state.media_messages = _load_media_messages(data.get("media_messages") or [])
 
         logger.info("Loaded bot state from %s", path)
@@ -167,6 +171,60 @@ def _deserialize_auth_grants(state: BotState, grants: list) -> None:
                 username=_coerce_optional_str(item.get("username")),
                 user_name=_coerce_optional_str(item.get("user_name")),
             )
+
+
+def _serialize_auth_failures(state: BotState) -> list[dict]:
+    now = time.time()
+    items: list[dict] = []
+    user_ids = set(state.auth_failures) | set(state.auth_cooldowns)
+    for uid in sorted(user_ids):
+        attempts = int(state.auth_failures.get(uid, 0))
+        cooldown_until = state.auth_cooldowns.get(uid)
+        if cooldown_until is not None and cooldown_until <= now:
+            cooldown_until = None
+        if attempts <= 0 and cooldown_until is None:
+            continue
+        items.append(
+            {
+                "user_id": uid,
+                "attempts": attempts,
+                "cooldown_until": cooldown_until,
+            }
+        )
+    return items
+
+
+def _deserialize_auth_failures(state: BotState, items: list) -> None:
+    now = time.time()
+    state.auth_failures = {}
+    state.auth_cooldowns = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        uid = _coerce_int(item.get("user_id"))
+        attempts = _coerce_int(item.get("attempts", 0))
+        cooldown_until = item.get("cooldown_until")
+        if uid is None:
+            continue
+        if attempts is not None and attempts > 0:
+            state.auth_failures[uid] = attempts
+        try:
+            cooldown_value = (
+                float(cooldown_until) if cooldown_until is not None else None
+            )
+        except TypeError, ValueError:
+            cooldown_value = None
+        if cooldown_value is not None and cooldown_value > now:
+            state.auth_cooldowns[uid] = cooldown_value
+
+
+def _load_blocked_ids(raw: list) -> set[int]:
+    blocked: set[int] = set()
+    for item in raw:
+        uid = _coerce_int(item)
+        if uid is not None:
+            blocked.add(uid)
+    return blocked
 
 
 def _coerce_optional_str(value: object) -> str | None:
