@@ -200,6 +200,42 @@ class TestBotStatePersistence:
             assert 200 in state2.blocked_ids
             assert state2.auth_failures.get(300) == 1
 
+    def test_save_and_load_preserves_auth_record_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = Path(tmpdir) / "state.json"
+            state = BotState()
+            state._state_file = state_file
+
+            granted_at = time.time()
+            expiry = granted_at + 3600
+            state.grant_auth(
+                100,
+                expiry,
+                granted_at=granted_at,
+                username="idan",
+                user_name="Idan Bot",
+            )
+
+            state2 = BotState()
+            state2._state_file = state_file
+            state2.load_state()
+
+            record = state2.auth_records[100]
+            assert record.granted_at == granted_at
+            assert record.expires_at == expiry
+            assert record.username == "idan"
+            assert record.user_name == "Idan Bot"
+
+    def test_persistence_status_reports_writable_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state = BotState()
+            state._state_file = Path(tmpdir) / "state.json"
+
+            ok, message = state.persistence_status()
+
+            assert ok is True
+            assert "is writable" in message
+
     def test_load_nonexistent_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             state = BotState()

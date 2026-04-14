@@ -337,6 +337,37 @@ async def cmd_unban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def cmd_banlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show aggregated blocked IDs from env and persisted state. Owner only."""
+    if not await guard_owner(update, context):
+        return
+    state = get_state(context.application)
+    aggregated = sorted(set(config.BLOCKED_IDS) | set(state.blocked_ids))
+    persisted = set(state.blocked_ids)
+    env_blocked = set(config.BLOCKED_IDS)
+
+    if config.OWNER_ID is not None:
+        aggregated = [uid for uid in aggregated if uid != config.OWNER_ID]
+        persisted.discard(config.OWNER_ID)
+        env_blocked.discard(config.OWNER_ID)
+
+    if not aggregated:
+        await update.message.reply_text("No blocked user IDs found.")
+        return
+
+    lines = ["🚫 <b>Blocked User IDs</b>\n"]
+    for uid in aggregated:
+        sources: list[str] = []
+        if uid in env_blocked:
+            sources.append("env")
+        if uid in persisted:
+            sources.append("file")
+        source_text = ", ".join(sources) if sources else "runtime"
+        lines.append(f"• <code>{uid}</code> <i>({html.escape(source_text)})</i>")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
 async def _handle_failed_auth(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,

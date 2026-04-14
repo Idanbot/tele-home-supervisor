@@ -45,6 +45,13 @@ _INFO_COMMANDS = (
         "cmd_unban",
     ),
     CommandSpec(
+        "banlist",
+        "Info",
+        "/banlist",
+        "owner-only view aggregated blocked user IDs",
+        "cmd_banlist",
+    ),
+    CommandSpec(
         "version",
         "Info",
         "/version",

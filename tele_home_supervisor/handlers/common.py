@@ -270,12 +270,31 @@ async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
 
 async def guard_owner(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
     """Allow only the configured owner to continue."""
-    if not await guard(update, context):
-        return False
+    app = getattr(context, "application", None)
+    state = get_state(app) if app is not None else None
     user = getattr(update, "effective_user", None)
     user_id = getattr(user, "id", None)
+    chat = getattr(update, "effective_chat", None)
+    chat_id = getattr(chat, "id", None)
+
+    if is_blocked_user_id(user_id, state):
+        _set_auth_flag(context, False)
+        return False
+    if config.OWNER_ID is None:
+        if update and update.effective_chat:
+            await update.effective_chat.send_message("⛔ OWNER_ID is not configured.")
+        _set_auth_flag(context, False)
+        return False
+    if chat_id != user_id:
+        if update and update.effective_chat:
+            await update.effective_chat.send_message("⛔ Not authorized")
+        _set_auth_flag(context, False)
+        return False
     if is_owner_user_id(user_id):
+        _set_auth_flag(context, True)
         return True
+    if not await guard(update, context):
+        return False
     if update and update.effective_chat:
         await update.effective_chat.send_message(_OWNER_ONLY_MSG)
     _set_auth_flag(context, False)

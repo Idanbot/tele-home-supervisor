@@ -200,6 +200,17 @@ class TestCmdBanUnban:
         assert "Owner only" in update.effective_chat.sent[0]
 
     @pytest.mark.asyncio
+    async def test_ban_reports_missing_owner_config(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "ALLOWED", {123})
+        monkeypatch.setattr(config, "OWNER_ID", None)
+        update = DummyUpdate(chat_id=123, user_id=123)
+        context = DummyContext(args=["555"])
+
+        await meta.cmd_ban(update, context)
+
+        assert "OWNER_ID is not configured" in update.effective_chat.sent[0]
+
+    @pytest.mark.asyncio
     async def test_ban_and_unban_persisted_id(self, monkeypatch) -> None:
         monkeypatch.setattr(config, "ALLOWED", set())
         monkeypatch.setattr(config, "OWNER_ID", 999)
@@ -216,6 +227,24 @@ class TestCmdBanUnban:
         await meta.cmd_unban(update, context)
         assert 555 not in state.blocked_ids
         assert "Unblocked" in update.message.replies[-1]
+
+    @pytest.mark.asyncio
+    async def test_banlist_shows_aggregated_sources(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "ALLOWED", set())
+        monkeypatch.setattr(config, "OWNER_ID", 999)
+        monkeypatch.setattr(config, "BLOCKED_IDS", {111})
+        update = DummyUpdate(chat_id=999, user_id=999)
+        context = DummyContext(args=[])
+        state = get_state(context.application)
+        state.block_user(222)
+
+        await meta.cmd_banlist(update, context)
+
+        reply = update.message.replies[-1]
+        assert "111" in reply
+        assert "222" in reply
+        assert "(env)" in reply
+        assert "(file)" in reply
 
 
 class TestCmdMetrics:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import time
 from collections import OrderedDict, deque
@@ -644,6 +645,26 @@ class BotState:
         entries = [(e[0], e[1]) for e in self.media_messages]
         self.media_messages.clear()
         return entries
+
+    def persistence_status(self) -> tuple[bool, str]:
+        """Report whether the state directory is writable for this process."""
+        state_dir = self._state_file.parent
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            stat_result = state_dir.stat()
+        except OSError as exc:
+            return False, f"State directory {state_dir} is unavailable: {exc}"
+
+        if os.access(state_dir, os.W_OK):
+            return True, f"State directory {state_dir} is writable."
+
+        mode = oct(stat_result.st_mode & 0o777)
+        return (
+            False,
+            "State directory "
+            f"{state_dir} is not writable by uid={os.geteuid()} gid={os.getegid()} "
+            f"(owner={stat_result.st_uid}:{stat_result.st_gid}, mode={mode}).",
+        )
 
     # ── Persistence ──────────────────────────────────────────────────
 

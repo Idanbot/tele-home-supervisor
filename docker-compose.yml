@@ -1,19 +1,36 @@
 ---
 services:
+  telebot_data_init:
+    image: busybox:1.36
+    container_name: rpi-telebot-data-init
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - mkdir -p /data && chown -R 10001:10001 /data
+    volumes:
+      - telebot_data:/data
+    restart: "no"
+
   rpi_telebot:
     image: ghcr.io/idanbot/tele-home-supervisor:latest
     container_name: rpi-telebot
     user: "10001:10001"
     group_add:
       - "${DOCKER_GID}"
+    depends_on:
+      telebot_data_init:
+        condition: service_completed_successfully
 
     networks:
       - bit-net
 
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
+      - OWNER_ID=${OWNER_ID}
       - BOT_AUTH_TOTP_SECRET=${BOT_AUTH_TOTP_SECRET}
       - ALLOWED_CHAT_IDS=${ALLOWED_CHAT_IDS}
+      - BLOCKED_IDS=${BLOCKED_IDS:-}
       - QBT_HOST=${QBT_HOST}
       - QBT_PORT=${QBT_PORT}
       - QBT_USER=${QBT_USER}

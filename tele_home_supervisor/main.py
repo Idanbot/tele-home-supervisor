@@ -30,6 +30,11 @@ def build_application() -> Application:
 
     state: BotState = app.bot_data.setdefault(BOT_STATE_KEY, BotState())
     state.load_state()
+    persistence_ok, persistence_message = state.persistence_status()
+    if persistence_ok:
+        logger.info(persistence_message)
+    else:
+        logger.warning(persistence_message)
 
     for spec in COMMANDS:
         fn = getattr(dispatch, spec.handler)
