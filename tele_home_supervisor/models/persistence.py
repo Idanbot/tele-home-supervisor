@@ -87,7 +87,7 @@ def load(state: BotState, path: Path) -> None:
         for k, v in raw_disabled.items():
             try:
                 state.disabled_intel_modules[int(k)] = set(v)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
 
         state.torrent_completion_subscribers = set(
@@ -156,7 +156,7 @@ def _deserialize_auth_grants(state: BotState, grants: list) -> None:
             if granted_at is None:
                 granted_at = exp - (config.BOT_AUTH_TTL_HOURS * 3600)
             granted_at = float(granted_at)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if exp > now:
             state.auth_grants[uid] = exp
@@ -213,7 +213,7 @@ def _atomic_write_text(path: Path, payload: str) -> None:
 def _coerce_int(value: object) -> int | None:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -265,6 +265,6 @@ def _load_media_messages(raw: list) -> list[list]:
             continue
         try:
             result.append([int(entry[0]), int(entry[1]), float(entry[2])])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
     return result
