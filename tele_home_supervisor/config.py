@@ -62,6 +62,13 @@ def _split_csv(s: str) -> List[str]:
     return [p.strip() for p in (s or "").split(",") if p.strip()]
 
 
+def _strip_outer_quotes(value: str) -> str:
+    text = (value or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1].strip()
+    return text
+
+
 def _read_optional_float(name: str, default: float) -> float:
     value = (os.environ.get(name) or "").strip()
     if not value:
@@ -83,7 +90,7 @@ def _normalize_aliases(raw: object) -> tuple[str, ...]:
 
 
 def _read_managed_hosts_json(raw: str) -> list[ManagedHost]:
-    payload = (raw or "").strip()
+    payload = _strip_outer_quotes(raw)
     if not payload:
         return []
     try:

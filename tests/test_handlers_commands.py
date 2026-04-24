@@ -365,6 +365,38 @@ class TestNetworkHandlers:
         ]
 
     @pytest.mark.asyncio
+    async def test_cmd_wol_reports_unknown_managed_host_with_available_hosts(
+        self, monkeypatch
+    ) -> None:
+        async def mock_guard(update, context):
+            return True
+
+        monkeypatch.setattr(network, "guard_sensitive", mock_guard)
+        monkeypatch.setattr(config, "default_managed_host", lambda: None)
+        monkeypatch.setattr(config, "get_managed_host", lambda value: None)
+        monkeypatch.setattr(
+            config,
+            "MANAGED_HOSTS",
+            [
+                ManagedHost(
+                    name="pc1",
+                    ping_host="192.0.2.29",
+                    mac="aa:bb:cc:dd:ee:29",
+                    wol_broadcast_ip="192.0.2.255",
+                    aliases=("pc", "windows"),
+                )
+            ],
+        )
+
+        update = DummyUpdate(chat_id=123, user_id=123)
+        context = DummyContext(args=["desktop"])
+
+        await network.cmd_wol(update, context)
+
+        assert "Unknown host/device name" in update.message.replies[-1]
+        assert "pc1 (pc, windows)" in update.message.replies[-1]
+
+    @pytest.mark.asyncio
     async def test_cmd_traceroute_requires_args(self, monkeypatch) -> None:
         async def mock_guard(update, context):
             return True

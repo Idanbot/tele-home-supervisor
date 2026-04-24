@@ -16,6 +16,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   quality:
@@ -30,6 +31,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
+          save-cache: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -110,6 +112,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
+          save-cache: true
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -175,7 +178,7 @@ jobs:
 
       - name: Filter paths for image rebuild
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             image:
@@ -192,7 +195,7 @@ jobs:
 
       - name: Log into registry ${{ env.REGISTRY }}
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -260,7 +263,7 @@ jobs:
 
       - name: Log into registry ${{ env.REGISTRY }}
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -451,7 +454,7 @@ jobs:
       # Scan the built image (ARM64)
       - name: Trivy Image Scan
         if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: >-
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}@${{
@@ -478,6 +481,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
+          save-cache: false
 
       - name: Set up Python
         uses: actions/setup-python@v6

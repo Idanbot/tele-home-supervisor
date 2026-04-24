@@ -207,6 +207,11 @@ async def cmd_wol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     set_audit_target(context, target)
     resolved = _resolve_wol_request(target)
     if not resolved.ok:
+        logger.warning(
+            "WOL rejected for target=%r: %s",
+            target,
+            resolved.error or "invalid WOL target configuration",
+        )
         await update.message.reply_text(
             resolved.error or "❌ Invalid WOL target configuration."
         )
@@ -219,7 +224,12 @@ async def cmd_wol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             port=resolved.wol_port,
         )
     except Exception as e:
-        logger.exception("WOL failed")
+        logger.exception(
+            "WOL send failed for target=%r mac=%s ping_host=%s",
+            target,
+            resolved.mac,
+            resolved.ping_host,
+        )
         await update.message.reply_text(f"❌ WOL failed: {html.escape(str(e))}")
         return
 
@@ -251,6 +261,11 @@ async def cmd_wolshutdown(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     resolved = _resolve_shutdown_request(target)
     set_audit_target(context, target or resolved.ssh_target or resolved.ping_host)
     if not resolved.ok:
+        logger.warning(
+            "WOL shutdown rejected for target=%r: %s",
+            target,
+            resolved.error or "WOL shutdown is not configured",
+        )
         await update.message.reply_text(
             resolved.error or "❌ WOL shutdown is not configured.",
         )
@@ -259,6 +274,13 @@ async def cmd_wolshutdown(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     rc, out, err = await cli.run_cmd(_build_shutdown_ssh_command(resolved), timeout=15)
     if rc != 0:
         details = err or out or f"exit code {rc}"
+        logger.warning(
+            "WOL shutdown command failed for target=%r ssh_target=%s host=%s: %s",
+            target,
+            resolved.ssh_target,
+            resolved.ping_host,
+            details,
+        )
         await update.message.reply_text(
             f"❌ WOL shutdown failed: <code>{html.escape(details)}</code>",
             parse_mode=ParseMode.HTML,
@@ -399,6 +421,30 @@ def _resolve_wol_request(target: str) -> _ResolvedWolRequest:
             ping_host=requested,
             broadcast_ips=_get_wol_broadcast_targets(None),
             wol_port=config.WOL_PORT,
+        )
+
+    if requested:
+        available = []
+        for host in config.MANAGED_HOSTS:
+            aliases = ", ".join(host.aliases)
+            if aliases:
+                available.append(f"{host.name} ({aliases})")
+            else:
+                available.append(host.name)
+        extra = ""
+        if available:
+            extra = (
+                "\nConfigured managed hosts: <code>"
+                + html.escape("; ".join(available))
+                + "</code>"
+            )
+        return _ResolvedWolRequest(
+            ok=False,
+            error=(
+                "❌ Unknown host/device name.\n"
+                "Use a managed host name, alias, MAC address, or IPv4 address."
+                f"{extra}"
+            ),
         )
 
     return _ResolvedWolRequest(ok=False, error="❌ Invalid MAC or IPv4 address format.")

@@ -81,6 +81,35 @@ def test_settings_custom():
         assert settings.WOL_VERIFY_INTERVAL_S == 2.0
 
 
+def test_settings_custom_with_quoted_managed_hosts_json():
+    managed_hosts = [
+        {
+            "name": "pc1",
+            "ping_host": "192.0.2.29",
+            "mac": "aa:bb:cc:dd:ee:29",
+            "wol_broadcast_ip": "192.0.2.255",
+            "wol_port": 9,
+            "ssh_target": "user@192.0.2.29",
+            "ssh_port": 22,
+            "shutdown_command": "sudo systemctl poweroff",
+            "aliases": ["pc", "windows"],
+        }
+    ]
+    env = {
+        "MANAGED_HOSTS_JSON": "'" + json.dumps(managed_hosts) + "'",
+        "DEFAULT_MANAGED_HOST": "pc1",
+    }
+    with mock.patch.dict(os.environ, env, clear=True):
+        settings = config._read_settings()
+        assert settings.DEFAULT_MANAGED_HOST == "pc1"
+        assert len(settings.MANAGED_HOSTS) == 1
+        host = settings.MANAGED_HOSTS[0]
+        assert host.name == "pc1"
+        assert host.ping_host == "192.0.2.29"
+        assert host.mac == "aa:bb:cc:dd:ee:29"
+        assert host.aliases == ("pc", "windows")
+
+
 def test_settings_legacy_wol_populates_default_managed_host():
     env = {
         "WOL_TARGET_IP": "192.168.1.10",
