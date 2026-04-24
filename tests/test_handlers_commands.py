@@ -329,16 +329,18 @@ class TestNetworkHandlers:
         monkeypatch.setattr(
             config,
             "get_managed_host",
-            lambda value: ManagedHost(
-                name="gaming-pc",
-                ping_host="192.168.1.10",
-                mac="aa:bb:cc:dd:ee:ff",
-                wol_broadcast_ip="192.168.1.255",
-                wol_port=7,
-                aliases=("pc",),
-            )
-            if value == "pc"
-            else None,
+            lambda value: (
+                ManagedHost(
+                    name="gaming-pc",
+                    ping_host="192.168.1.10",
+                    mac="aa:bb:cc:dd:ee:ff",
+                    wol_broadcast_ip="192.168.1.255",
+                    wol_port=7,
+                    aliases=("pc",),
+                )
+                if value == "pc"
+                else None
+            ),
         )
         monkeypatch.setattr(
             network,
