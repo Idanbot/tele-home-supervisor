@@ -1,7 +1,7 @@
 ---
 name: CI/CD
 
-'on':
+"on":
   push:
     branches: ["main"]
     tags: ["v*.*.*"]
@@ -59,15 +59,15 @@ jobs:
       # Trivy Scan (Filesystem)
       # Using specific version tag for stability
       - name: Trivy FS Scan
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
+          scan-type: "fs"
+          scan-ref: "."
           trivy-config: trivy.yaml
           ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-          output: 'trivy-fs.txt'
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          output: "trivy-fs.txt"
 
       - name: Upload quality logs
         if: always()
@@ -439,15 +439,14 @@ jobs:
           image-ref: >-
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}@${{
             steps.build-and-push.outputs.digest }}
-          format: 'table'
-          exit-code: '1'
+          format: "table"
+          exit-code: "1"
           ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
+          severity: "CRITICAL,HIGH"
         env:
           TRIVY_USERNAME: ${{ github.actor }}
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
           TRIVY_PLATFORM: linux/arm64
-
 
   smoke-test:
     name: Smoke Test
