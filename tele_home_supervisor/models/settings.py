@@ -35,8 +35,10 @@ class Settings:
     WOL_TARGET_MAC: str
     WOL_BROADCAST_IP: str
     WOL_PORT: int
+    WOL_HELPER_IMAGE: str
     WOL_SSH_TARGET: str
     WOL_SSH_PORT: int
+    WOL_SSH_PASSWORD: str
     WOL_SHUTDOWN_REMOTE_CMD: str
     WOL_VERIFY_TIMEOUT_S: float
     WOL_VERIFY_INTERVAL_S: float

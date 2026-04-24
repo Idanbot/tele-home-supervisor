@@ -135,6 +135,12 @@ def _read_managed_hosts_json(raw: str) -> list[ManagedHost]:
             or item.get("command")
             or ""
         ).strip()
+        ssh_password = str(
+            item.get("ssh_password") or item.get("password") or ""
+        ).strip()
+        ssh_password_env = str(
+            item.get("ssh_password_env") or item.get("password_env") or ""
+        ).strip()
         aliases = _normalize_aliases(item.get("aliases"))
         hosts.append(
             ManagedHost(
@@ -146,6 +152,8 @@ def _read_managed_hosts_json(raw: str) -> list[ManagedHost]:
                 ssh_target=ssh_target,
                 ssh_port=ssh_port,
                 shutdown_command=shutdown_command,
+                ssh_password=ssh_password,
+                ssh_password_env=ssh_password_env,
                 aliases=aliases,
             )
         )
@@ -157,6 +165,7 @@ def _legacy_wol_host() -> ManagedHost | None:
     wol_target_mac = (os.environ.get("WOL_TARGET_MAC") or "").strip()
     wol_broadcast_ip = (os.environ.get("WOL_BROADCAST_IP") or "").strip()
     wol_ssh_target = (os.environ.get("WOL_SSH_TARGET") or "").strip()
+    wol_ssh_password = (os.environ.get("WOL_SSH_PASSWORD") or "").strip()
     wol_shutdown_remote_cmd = (os.environ.get("WOL_SHUTDOWN_REMOTE_CMD") or "").strip()
     try:
         wol_port = int((os.environ.get("WOL_PORT") or "9").strip() or "9")
@@ -172,6 +181,7 @@ def _legacy_wol_host() -> ManagedHost | None:
             wol_target_mac,
             wol_broadcast_ip,
             wol_ssh_target,
+            wol_ssh_password,
             wol_shutdown_remote_cmd,
         ]
     ):
@@ -185,6 +195,7 @@ def _legacy_wol_host() -> ManagedHost | None:
         ssh_target=wol_ssh_target,
         ssh_port=wol_ssh_port,
         shutdown_command=wol_shutdown_remote_cmd,
+        ssh_password_env="WOL_SSH_PASSWORD" if wol_ssh_password else "",
     )
 
 
@@ -239,6 +250,7 @@ def _read_settings() -> Settings:
         bot_auto_delete_media_hours = 24.0
     alert_ping_lan = _split_csv(os.environ.get("ALERT_PING_LAN_TARGETS", ""))
     alert_ping_wan = _split_csv(os.environ.get("ALERT_PING_WAN_TARGETS", ""))
+    wol_helper_image = (os.environ.get("WOL_HELPER_IMAGE") or "").strip()
     managed_hosts = _read_managed_hosts_json(os.environ.get("MANAGED_HOSTS_JSON", ""))
     legacy_host = _legacy_wol_host()
     if legacy_host is not None and not any(
@@ -304,8 +316,10 @@ def _read_settings() -> Settings:
         if legacy_host is not None
         else "",
         WOL_PORT=legacy_host.wol_port if legacy_host is not None else 9,
+        WOL_HELPER_IMAGE=wol_helper_image,
         WOL_SSH_TARGET=legacy_host.ssh_target if legacy_host is not None else "",
         WOL_SSH_PORT=legacy_host.ssh_port if legacy_host is not None else 22,
+        WOL_SSH_PASSWORD=(os.environ.get("WOL_SSH_PASSWORD") or "").strip(),
         WOL_SHUTDOWN_REMOTE_CMD=legacy_host.shutdown_command
         if legacy_host is not None
         else "",
@@ -393,8 +407,10 @@ WOL_TARGET_IP: str = settings.WOL_TARGET_IP
 WOL_TARGET_MAC: str = settings.WOL_TARGET_MAC
 WOL_BROADCAST_IP: str = settings.WOL_BROADCAST_IP
 WOL_PORT: int = settings.WOL_PORT
+WOL_HELPER_IMAGE: str = settings.WOL_HELPER_IMAGE
 WOL_SSH_TARGET: str = settings.WOL_SSH_TARGET
 WOL_SSH_PORT: int = settings.WOL_SSH_PORT
+WOL_SSH_PASSWORD: str = settings.WOL_SSH_PASSWORD
 WOL_SHUTDOWN_REMOTE_CMD: str = settings.WOL_SHUTDOWN_REMOTE_CMD
 WOL_VERIFY_TIMEOUT_S: float = settings.WOL_VERIFY_TIMEOUT_S
 WOL_VERIFY_INTERVAL_S: float = settings.WOL_VERIFY_INTERVAL_S

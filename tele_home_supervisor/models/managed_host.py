@@ -17,6 +17,8 @@ class ManagedHost:
     ssh_target: str = ""
     ssh_port: int = 22
     shutdown_command: str = ""
+    ssh_password: str = ""
+    ssh_password_env: str = ""
     aliases: tuple[str, ...] = field(default_factory=tuple)
 
     def matches(self, token: str) -> bool:

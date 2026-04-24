@@ -229,7 +229,7 @@ class TestNetworkHandlers:
         def fake_schedule(context, *, chat_id: int, host: str, online: bool) -> None:
             scheduled.append((host, online))
 
-        def fake_send(mac: str, *, broadcast_ips: list[str], port: int) -> None:
+        async def fake_send(mac: str, *, broadcast_ips: list[str], port: int) -> None:
             packets.append((mac, broadcast_ips, port))
 
         monkeypatch.setattr(network, "guard_sensitive", mock_guard)
@@ -319,6 +319,37 @@ class TestNetworkHandlers:
         assert scheduled == [("192.168.1.10", False)]
         assert "Shutdown command accepted by" in update.message.replies[-1]
 
+    def test_build_shutdown_ssh_command_uses_sshpass_when_password_present(self):
+        resolved = network._ResolvedShutdownRequest(
+            ok=True,
+            ping_host="192.0.2.29",
+            ssh_target="user@192.0.2.29",
+            ssh_port=22,
+            shutdown_command="sudo systemctl poweroff",
+            ssh_password="secret-password",
+        )
+
+        command, env = network._build_shutdown_ssh_command(resolved)
+
+        assert command[:3] == ["sshpass", "-e", "ssh"]
+        assert "PreferredAuthentications=password" in command
+        assert "PubkeyAuthentication=no" in command
+        assert command[-2:] == ["user@192.0.2.29", "sudo systemctl poweroff"]
+        assert env == {"SSHPASS": "secret-password"}
+
+    def test_resolve_host_ssh_password_prefers_host_value_over_env_fallback(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(config, "WOL_SSH_PASSWORD", "fallback-password")
+
+        host = ManagedHost(
+            name="pc1",
+            ssh_password="host-password",
+            ssh_password_env="PC1_SSH_PASSWORD",
+        )
+
+        assert network._resolve_host_ssh_password(host) == "host-password"
+
     @pytest.mark.asyncio
     async def test_cmd_wol_selects_named_managed_host(self, monkeypatch) -> None:
         async def mock_guard(update, context):
@@ -349,13 +380,11 @@ class TestNetworkHandlers:
             "_schedule_power_state_watch",
             lambda context, *, chat_id, host, online: None,
         )
-        monkeypatch.setattr(
-            network,
-            "_send_wol_packet",
-            lambda mac, *, broadcast_ips, port: packets.append(
-                (mac, broadcast_ips, port)
-            ),
-        )
+
+        async def fake_send(mac: str, *, broadcast_ips: list[str], port: int) -> None:
+            packets.append((mac, broadcast_ips, port))
+
+        monkeypatch.setattr(network, "_send_wol_packet", fake_send)
 
         update = DummyUpdate(chat_id=123, user_id=123)
         context = DummyContext(args=["pc"])
@@ -397,6 +426,18 @@ class TestNetworkHandlers:
 
         assert "Unknown host/device name" in update.message.replies[-1]
         assert "pc1 (pc, windows)" in update.message.replies[-1]
+
+    def test_build_wol_helper_command_uses_python_helper_container(self) -> None:
+        command = network._build_wol_helper_command(
+            "aa:bb:cc:dd:ee:ff",
+            broadcast_ips=["192.168.1.255", "255.255.255.255"],
+            port=9,
+        )
+
+        assert command[:3] == ["python", "-c", network._WOL_HELPER_SCRIPT]
+        assert command[3] == "aa:bb:cc:dd:ee:ff"
+        assert command[4] == "7,9"
+        assert command[5:] == ["192.168.1.255", "255.255.255.255"]
 
     @pytest.mark.asyncio
     async def test_cmd_traceroute_requires_args(self, monkeypatch) -> None:

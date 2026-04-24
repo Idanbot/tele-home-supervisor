@@ -8,12 +8,15 @@ from __future__ import annotations
 import asyncio
 import shutil
 import logging
+import os
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-async def run_cmd(cmd: list[str], timeout: int = 10) -> Tuple[int, str, str]:
+async def run_cmd(
+    cmd: list[str], timeout: int = 10, env: dict[str, str] | None = None
+) -> Tuple[int, str, str]:
     """Run a command asynchronously and return (returncode, stdout, stderr).
 
     Args:
@@ -36,6 +39,7 @@ async def run_cmd(cmd: list[str], timeout: int = 10) -> Tuple[int, str, str]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, **env} if env is not None else None,
         )
         try:
             stdout, stderr = await asyncio.wait_for(

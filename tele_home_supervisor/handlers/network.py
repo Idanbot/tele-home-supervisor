@@ -4,8 +4,9 @@ import asyncio
 import io
 import logging
 import html
+import os
 import re
-import socket
+import textwrap
 import time
 
 import qrcode
@@ -14,7 +15,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from .. import cli, config, services, view
+from .. import cli, config, services, utils, view
 from ..models.managed_host import ManagedHost
 from .common import (
     get_state,
@@ -26,6 +27,33 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
+
+_WOL_HELPER_SCRIPT = textwrap.dedent(
+    """
+    import re
+    import socket
+    import sys
+
+    mac = sys.argv[1]
+    ports = sorted({int(part) for part in sys.argv[2].split(",") if part})
+    broadcast_ips = [arg for arg in sys.argv[3:] if arg]
+
+    clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac)
+    if len(clean_mac) != 12:
+        raise SystemExit("Invalid MAC address length")
+
+    data = bytes.fromhex("ff" * 6 + clean_mac * 16)
+    sent = 0
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        for ip in broadcast_ips:
+            for port in ports:
+                sock.sendto(data, (ip, port))
+                sent += 1
+
+    print(f"sent={sent} targets={len(broadcast_ips)} ports={ports}")
+    """
+).strip()
 
 
 async def cmd_wifiqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -218,7 +246,7 @@ async def cmd_wol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        _send_wol_packet(
+        await _send_wol_packet(
             resolved.mac,
             broadcast_ips=resolved.broadcast_ips,
             port=resolved.wol_port,
@@ -293,7 +321,8 @@ async def cmd_wolshutdown(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         parse_mode=ParseMode.HTML,
     )
 
-    rc, out, err = await cli.run_cmd(_build_shutdown_ssh_command(resolved), timeout=15)
+    command, env = _build_shutdown_ssh_command(resolved)
+    rc, out, err = await cli.run_cmd(command, timeout=15, env=env)
     if rc != 0:
         details = err or out or f"exit code {rc}"
         logger.warning(
@@ -308,7 +337,14 @@ async def cmd_wolshutdown(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if rc == 124:
             error_msg += "\n\n💡 <i>The SSH connection timed out. Check if the IP is correct and SSH is enabled on the target.</i>"
         elif "Permission denied" in details:
-            error_msg += "\n\n💡 <i>Authentication failed. Ensure the bot's SSH key is in the target's authorized_keys.</i>"
+            auth_hint = (
+                "Check the configured SSH password."
+                if resolved.ssh_password
+                else "Ensure the bot's SSH key is in the target's authorized_keys."
+            )
+            error_msg += (
+                f"\n\n💡 <i>Authentication failed. {html.escape(auth_hint)}</i>"
+            )
 
         await status_msg.edit_text(error_msg, parse_mode=ParseMode.HTML)
         return
@@ -359,6 +395,7 @@ class _ResolvedShutdownRequest:
         ssh_target: str = "",
         ssh_port: int = 22,
         shutdown_command: str = "",
+        ssh_password: str = "",
         host: ManagedHost | None = None,
         error: str | None = None,
     ) -> None:
@@ -367,6 +404,7 @@ class _ResolvedShutdownRequest:
         self.ssh_target = ssh_target
         self.ssh_port = ssh_port
         self.shutdown_command = shutdown_command
+        self.ssh_password = ssh_password
         self.host = host
         self.error = error
 
@@ -503,6 +541,7 @@ def _resolve_shutdown_request(target: str) -> _ResolvedShutdownRequest:
             ssh_target=selected_host.ssh_target,
             ssh_port=selected_host.ssh_port,
             shutdown_command=selected_host.shutdown_command,
+            ssh_password=_resolve_host_ssh_password(selected_host),
             host=selected_host,
         )
 
@@ -534,6 +573,7 @@ def _resolve_shutdown_request(target: str) -> _ResolvedShutdownRequest:
         ssh_target=config.WOL_SSH_TARGET,
         ssh_port=config.WOL_SSH_PORT,
         shutdown_command=config.WOL_SHUTDOWN_REMOTE_CMD,
+        ssh_password=config.WOL_SSH_PASSWORD,
     )
 
 
@@ -596,38 +636,61 @@ def _get_wol_broadcast_targets(host: ManagedHost | None) -> list[str]:
     return list(dict.fromkeys(targets))
 
 
-def _send_wol_packet(mac: str, *, broadcast_ips: list[str], port: int) -> None:
-    """Construct and send a WOL Magic Packet to multiple targets and ports."""
-    clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac)
-    if len(clean_mac) != 12:
-        raise ValueError("Invalid MAC address length")
-
-    data = bytes.fromhex("ff" * 6 + clean_mac * 16)
-
-    # We try both the requested port and standard port 7 if it's different.
-    # Some older machines prefer 7, most use 9.
-    ports = {port, 7, 9}
-
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        for broadcast_ip in broadcast_ips:
-            for p in sorted(ports):
-                try:
-                    s.sendto(data, (broadcast_ip, p))
-                    logger.debug(
-                        "Sent Magic Packet to %s:%d for %s", broadcast_ip, p, mac
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to send Magic Packet to %s:%d", broadcast_ip, p
-                    )
+async def _send_wol_packet(mac: str, *, broadcast_ips: list[str], port: int) -> None:
+    """Send WOL via a one-off helper container on the host network."""
+    await asyncio.to_thread(
+        _run_wol_helper_container, mac, broadcast_ips=broadcast_ips, port=port
+    )
 
 
-def _build_shutdown_ssh_command(resolved: _ResolvedShutdownRequest) -> list[str]:
-    return [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
+def _build_wol_helper_command(
+    mac: str, *, broadcast_ips: list[str], port: int
+) -> list[str]:
+    ports = ",".join(str(p) for p in sorted({port, 7, 9}))
+    return ["python", "-c", _WOL_HELPER_SCRIPT, mac, ports, *broadcast_ips]
+
+
+def _run_wol_helper_container(mac: str, *, broadcast_ips: list[str], port: int) -> str:
+    helper_image = (config.WOL_HELPER_IMAGE or "").strip()
+    if not helper_image:
+        raise RuntimeError("WOL_HELPER_IMAGE is not configured")
+
+    command = _build_wol_helper_command(mac, broadcast_ips=broadcast_ips, port=port)
+    try:
+        output = utils.client.containers.run(
+            helper_image,
+            command=command,
+            network_mode="host",
+            remove=True,
+            detach=False,
+            stdout=True,
+            stderr=True,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"host-network WOL helper failed: {exc}") from exc
+
+    text = ""
+    if isinstance(output, (bytes, bytearray)):
+        text = output.decode().strip()
+    elif output is not None:
+        text = str(output).strip()
+    if text:
+        logger.info("WOL helper output for %s: %s", mac, text)
+    return text
+
+
+def _resolve_host_ssh_password(host: ManagedHost) -> str:
+    if host.ssh_password:
+        return host.ssh_password
+    if host.ssh_password_env:
+        return (os.environ.get(host.ssh_password_env) or "").strip()
+    return config.WOL_SSH_PASSWORD
+
+
+def _build_shutdown_ssh_command(
+    resolved: _ResolvedShutdownRequest,
+) -> tuple[list[str], dict[str, str] | None]:
+    base_cmd = [
         "-o",
         "StrictHostKeyChecking=no",
         "-o",
@@ -639,6 +702,25 @@ def _build_shutdown_ssh_command(resolved: _ResolvedShutdownRequest) -> list[str]
         resolved.ssh_target,
         resolved.shutdown_command,
     ]
+    if resolved.ssh_password:
+        return (
+            [
+                "sshpass",
+                "-e",
+                "ssh",
+                "-o",
+                "BatchMode=no",
+                "-o",
+                "PreferredAuthentications=password",
+                "-o",
+                "PubkeyAuthentication=no",
+                "-o",
+                "NumberOfPasswordPrompts=1",
+                *base_cmd,
+            ],
+            {"SSHPASS": resolved.ssh_password},
+        )
+    return (["ssh", "-o", "BatchMode=yes", *base_cmd], None)
 
 
 def _schedule_power_state_watch(

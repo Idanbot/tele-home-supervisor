@@ -18,8 +18,10 @@ def test_settings_defaults():
         assert settings.WOL_TARGET_IP == ""
         assert settings.WOL_TARGET_MAC == ""
         assert settings.WOL_PORT == 9
+        assert settings.WOL_HELPER_IMAGE == ""
         assert settings.WOL_SSH_TARGET == ""
         assert settings.WOL_SSH_PORT == 22
+        assert settings.WOL_SSH_PASSWORD == ""
         assert settings.WOL_SHUTDOWN_REMOTE_CMD == ""
         assert settings.WOL_VERIFY_TIMEOUT_S == 180.0
         assert settings.WOL_VERIFY_INTERVAL_S == 5.0
@@ -37,6 +39,8 @@ def test_settings_custom():
             "wol_port": 7,
             "ssh_target": "pc-user@192.168.1.10",
             "ssh_port": 2222,
+            "ssh_password": "topsecret",
+            "ssh_password_env": "PC1_SSH_PASSWORD",
             "shutdown_command": "sudo poweroff",
             "aliases": ["pc", "gaming"],
         }
@@ -75,6 +79,8 @@ def test_settings_custom():
         assert host.wol_port == 7
         assert host.ssh_target == "pc-user@192.168.1.10"
         assert host.ssh_port == 2222
+        assert host.ssh_password == "topsecret"
+        assert host.ssh_password_env == "PC1_SSH_PASSWORD"
         assert host.shutdown_command == "sudo poweroff"
         assert host.aliases == ("pc", "gaming")
         assert settings.WOL_VERIFY_TIMEOUT_S == 90.0
@@ -91,6 +97,8 @@ def test_settings_custom_with_quoted_managed_hosts_json():
             "wol_port": 9,
             "ssh_target": "user@192.0.2.29",
             "ssh_port": 22,
+            "ssh_password": "secret123",
+            "ssh_password_env": "PC1_SSH_PASSWORD",
             "shutdown_command": "sudo systemctl poweroff",
             "aliases": ["pc", "windows"],
         }
@@ -107,6 +115,8 @@ def test_settings_custom_with_quoted_managed_hosts_json():
         assert host.name == "pc1"
         assert host.ping_host == "192.0.2.29"
         assert host.mac == "aa:bb:cc:dd:ee:29"
+        assert host.ssh_password == "secret123"
+        assert host.ssh_password_env == "PC1_SSH_PASSWORD"
         assert host.aliases == ("pc", "windows")
 
 
@@ -116,8 +126,10 @@ def test_settings_legacy_wol_populates_default_managed_host():
         "WOL_TARGET_MAC": "aa:bb:cc:dd:ee:ff",
         "WOL_BROADCAST_IP": "192.168.1.255",
         "WOL_PORT": "9",
+        "WOL_HELPER_IMAGE": "ghcr.io/example/wol-helper:latest",
         "WOL_SSH_TARGET": "pc-user@192.168.1.10",
         "WOL_SSH_PORT": "22",
+        "WOL_SSH_PASSWORD": "hunter2",
         "WOL_SHUTDOWN_REMOTE_CMD": "sudo poweroff",
     }
     with mock.patch.dict(os.environ, env, clear=True):
@@ -128,3 +140,6 @@ def test_settings_legacy_wol_populates_default_managed_host():
         assert host.name == "default"
         assert host.ping_host == "192.168.1.10"
         assert host.mac == "aa:bb:cc:dd:ee:ff"
+        assert settings.WOL_HELPER_IMAGE == "ghcr.io/example/wol-helper:latest"
+        assert settings.WOL_SSH_PASSWORD == "hunter2"
+        assert host.ssh_password_env == "WOL_SSH_PASSWORD"
