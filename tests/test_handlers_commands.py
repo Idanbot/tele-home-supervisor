@@ -257,7 +257,7 @@ class TestNetworkHandlers:
             ("aa:bb:cc:dd:ee:ff", ["192.168.1.255", "255.255.255.255"], 9)
         ]
         assert scheduled == [("192.168.1.10", True)]
-        assert "Sent WOL Magic Packet" in update.message.replies[-1]
+        assert "Sent Magic Packets" in update.message.replies[-1]
 
     @pytest.mark.asyncio
     async def test_cmd_wol_rejects_ip_without_mac(self, monkeypatch) -> None:
@@ -307,15 +307,17 @@ class TestNetworkHandlers:
             "tele_home_supervisor.handlers.network.cli.run_cmd",
             new_callable=AsyncMock,
         ) as mock_run:
-            mock_run.return_value = (0, "", "")
+            # First call is ping (rc=0 means online), second is ssh shutdown
+            mock_run.side_effect = [(0, "", ""), (0, "", "")]
             update = DummyUpdate(chat_id=123, user_id=123)
             context = DummyContext(args=[])
 
             await network.cmd_wolshutdown(update, context)
 
-        assert mock_run.await_count == 1
+        assert mock_run.await_count == 2
+
         assert scheduled == [("192.168.1.10", False)]
-        assert "Sent shutdown command" in update.message.replies[-1]
+        assert "Shutdown command accepted by" in update.message.replies[-1]
 
     @pytest.mark.asyncio
     async def test_cmd_wol_selects_named_managed_host(self, monkeypatch) -> None:

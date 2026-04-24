@@ -234,8 +234,15 @@ async def cmd_wol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     lines = [
-        f"✅ Sent WOL Magic Packet to <code>{html.escape(resolved.mac)}</code>.",
+        f"✅ Sent Magic Packets (ports {html.escape(str(sorted({resolved.wol_port, 7, 9})))}) "
+        f"to <code>{html.escape(resolved.mac)}</code>.",
     ]
+    if resolved.broadcast_ips:
+        ips = ", ".join(
+            f"<code>{html.escape(ip)}</code>" for ip in resolved.broadcast_ips
+        )
+        lines.append(f"📡 Broadcast targets: {ips}")
+
     if resolved.ping_host:
         lines.append(
             "📡 Watching <code>"
@@ -271,6 +278,21 @@ async def cmd_wolshutdown(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
+    # Check if already offline
+    if resolved.ping_host:
+        is_online = await _ping_once(resolved.ping_host)
+        if not is_online:
+            await update.message.reply_text(
+                f"ℹ️ Host <code>{html.escape(resolved.ping_host)}</code> is already offline.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+    status_msg = await update.message.reply_text(
+        f"⏳ Sending shutdown command to <code>{html.escape(resolved.ssh_target)}</code>...",
+        parse_mode=ParseMode.HTML,
+    )
+
     rc, out, err = await cli.run_cmd(_build_shutdown_ssh_command(resolved), timeout=15)
     if rc != 0:
         details = err or out or f"exit code {rc}"
@@ -281,24 +303,29 @@ async def cmd_wolshutdown(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             resolved.ping_host,
             details,
         )
-        await update.message.reply_text(
-            f"❌ WOL shutdown failed: <code>{html.escape(details)}</code>",
-            parse_mode=ParseMode.HTML,
-        )
+
+        error_msg = f"❌ WOL shutdown failed: <code>{html.escape(details)}</code>"
+        if rc == 124:
+            error_msg += "\n\n💡 <i>The SSH connection timed out. Check if the IP is correct and SSH is enabled on the target.</i>"
+        elif "Permission denied" in details:
+            error_msg += "\n\n💡 <i>Authentication failed. Ensure the bot's SSH key is in the target's authorized_keys.</i>"
+
+        await status_msg.edit_text(error_msg, parse_mode=ParseMode.HTML)
         return
+
+    await status_msg.edit_text(
+        "✅ Shutdown command accepted by <code>"
+        f"{html.escape(resolved.ssh_target)}</code>.\n"
+        "📡 Watching <code>"
+        f"{html.escape(resolved.ping_host)}</code> for power-off confirmation.",
+        parse_mode=ParseMode.HTML,
+    )
 
     _schedule_power_state_watch(
         context,
         chat_id=update.effective_chat.id,
         host=resolved.ping_host,
         online=False,
-    )
-    await update.message.reply_text(
-        "✅ Sent shutdown command via <code>"
-        f"{html.escape(resolved.ssh_target)}</code>.\n"
-        "📡 Watching <code>"
-        f"{html.escape(resolved.ping_host)}</code> for ping failure.",
-        parse_mode=ParseMode.HTML,
     )
 
 
@@ -570,16 +597,30 @@ def _get_wol_broadcast_targets(host: ManagedHost | None) -> list[str]:
 
 
 def _send_wol_packet(mac: str, *, broadcast_ips: list[str], port: int) -> None:
-    """Construct and send a WOL Magic Packet."""
+    """Construct and send a WOL Magic Packet to multiple targets and ports."""
     clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac)
     if len(clean_mac) != 12:
         raise ValueError("Invalid MAC address length")
 
     data = bytes.fromhex("ff" * 6 + clean_mac * 16)
+
+    # We try both the requested port and standard port 7 if it's different.
+    # Some older machines prefer 7, most use 9.
+    ports = {port, 7, 9}
+
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         for broadcast_ip in broadcast_ips:
-            s.sendto(data, (broadcast_ip, port))
+            for p in sorted(ports):
+                try:
+                    s.sendto(data, (broadcast_ip, p))
+                    logger.debug(
+                        "Sent Magic Packet to %s:%d for %s", broadcast_ip, p, mac
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to send Magic Packet to %s:%d", broadcast_ip, p
+                    )
 
 
 def _build_shutdown_ssh_command(resolved: _ResolvedShutdownRequest) -> list[str]:
@@ -591,6 +632,8 @@ def _build_shutdown_ssh_command(resolved: _ResolvedShutdownRequest) -> list[str]
         "StrictHostKeyChecking=no",
         "-o",
         "UserKnownHostsFile=/dev/null",
+        "-o",
+        "ConnectTimeout=10",
         "-p",
         str(resolved.ssh_port),
         resolved.ssh_target,
