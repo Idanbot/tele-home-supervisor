@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import html
 import re
 import socket
+import time
 
 import qrcode
 
@@ -12,7 +14,8 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from .. import services, view
+from .. import cli, config, services, view
+from ..models.managed_host import ManagedHost
 from .common import (
     get_state,
     get_state_and_recorder,
@@ -200,43 +203,278 @@ async def cmd_wol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
 
-    if not context.args:
-        await update.message.reply_text("Usage: /wol <mac|ip>")
-        return
-
-    target = context.args[0].strip()
+    target = context.args[0].strip() if context.args else ""
     set_audit_target(context, target)
-
-    # Regex for MAC address
-    mac_re = re.compile(r"^([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2})$")
-    # Regex for IP address (simple)
-    ip_re = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
-
-    mac = None
-    if mac_re.match(target):
-        mac = target
-    elif ip_re.match(target):
-        # Try to resolve MAC from IP
-        mac = _resolve_mac_from_arp(target)
-        if not mac:
-            await update.message.reply_text(
-                f"❌ Could not resolve MAC for IP {target} from ARP cache.\n"
-                "Machine must have been seen recently or have a static ARP entry."
-            )
-            return
-    else:
-        await update.message.reply_text("❌ Invalid MAC or IP address format.")
+    resolved = _resolve_wol_request(target)
+    if not resolved.ok:
+        await update.message.reply_text(
+            resolved.error or "❌ Invalid WOL target configuration."
+        )
         return
 
     try:
-        _send_wol_packet(mac)
-        await update.message.reply_text(
-            f"✅ Sent WOL Magic Packet to <code>{html.escape(mac)}</code>",
-            parse_mode=ParseMode.HTML,
+        _send_wol_packet(
+            resolved.mac,
+            broadcast_ips=resolved.broadcast_ips,
+            port=resolved.wol_port,
         )
     except Exception as e:
         logger.exception("WOL failed")
         await update.message.reply_text(f"❌ WOL failed: {html.escape(str(e))}")
+        return
+
+    lines = [
+        f"✅ Sent WOL Magic Packet to <code>{html.escape(resolved.mac)}</code>.",
+    ]
+    if resolved.ping_host:
+        lines.append(
+            "📡 Watching <code>"
+            f"{html.escape(resolved.ping_host)}</code> for ping response."
+        )
+        _schedule_power_state_watch(
+            context,
+            chat_id=update.effective_chat.id,
+            host=resolved.ping_host,
+            online=True,
+        )
+    else:
+        lines.append("ℹ️ No ping host configured, so power-up verification is skipped.")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_wolshutdown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a remote shutdown command and watch for the host to disappear."""
+    if not await guard_sensitive(update, context):
+        return
+
+    target = context.args[0].strip() if context.args else ""
+    resolved = _resolve_shutdown_request(target)
+    set_audit_target(context, target or resolved.ssh_target or resolved.ping_host)
+    if not resolved.ok:
+        await update.message.reply_text(
+            resolved.error or "❌ WOL shutdown is not configured.",
+        )
+        return
+
+    rc, out, err = await cli.run_cmd(_build_shutdown_ssh_command(resolved), timeout=15)
+    if rc != 0:
+        details = err or out or f"exit code {rc}"
+        await update.message.reply_text(
+            f"❌ WOL shutdown failed: <code>{html.escape(details)}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    _schedule_power_state_watch(
+        context,
+        chat_id=update.effective_chat.id,
+        host=resolved.ping_host,
+        online=False,
+    )
+    await update.message.reply_text(
+        "✅ Sent shutdown command via <code>"
+        f"{html.escape(resolved.ssh_target)}</code>.\n"
+        "📡 Watching <code>"
+        f"{html.escape(resolved.ping_host)}</code> for ping failure.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+class _ResolvedWolRequest:
+    def __init__(
+        self,
+        *,
+        ok: bool,
+        mac: str = "",
+        ping_host: str | None = None,
+        broadcast_ips: list[str] | None = None,
+        wol_port: int = 9,
+        host: ManagedHost | None = None,
+        error: str | None = None,
+    ) -> None:
+        self.ok = ok
+        self.mac = mac
+        self.ping_host = ping_host
+        self.broadcast_ips = broadcast_ips or ["255.255.255.255"]
+        self.wol_port = wol_port
+        self.host = host
+        self.error = error
+
+
+class _ResolvedShutdownRequest:
+    def __init__(
+        self,
+        *,
+        ok: bool,
+        ping_host: str = "",
+        ssh_target: str = "",
+        ssh_port: int = 22,
+        shutdown_command: str = "",
+        host: ManagedHost | None = None,
+        error: str | None = None,
+    ) -> None:
+        self.ok = ok
+        self.ping_host = ping_host
+        self.ssh_target = ssh_target
+        self.ssh_port = ssh_port
+        self.shutdown_command = shutdown_command
+        self.host = host
+        self.error = error
+
+
+def _resolve_wol_request(target: str) -> _ResolvedWolRequest:
+    requested = target.strip()
+    selected_host = _select_managed_host(requested)
+    if selected_host is not None:
+        mac = _normalize_mac(selected_host.mac) or (
+            _resolve_mac_from_arp(selected_host.ping_host)
+            if selected_host.ping_host
+            else None
+        )
+        if not mac:
+            return _ResolvedWolRequest(
+                ok=False,
+                error=(
+                    f"❌ Host <code>{html.escape(selected_host.name)}</code> has no "
+                    "usable MAC address configured.\nSet its <code>mac</code> in "
+                    "<code>MANAGED_HOSTS_JSON</code> or ensure its IP exists in ARP."
+                ),
+            )
+        return _ResolvedWolRequest(
+            ok=True,
+            mac=mac,
+            ping_host=selected_host.ping_host or None,
+            broadcast_ips=_get_wol_broadcast_targets(selected_host),
+            wol_port=selected_host.wol_port,
+            host=selected_host,
+        )
+
+    default_ip, default_mac = _legacy_defaults()
+    if not requested:
+        ping_host = default_ip or None
+        mac = default_mac or (_resolve_mac_from_arp(default_ip) if default_ip else None)
+        if not mac:
+            return _ResolvedWolRequest(
+                ok=False,
+                error="Usage: /wol <mac|ip>\n"
+                "Or configure MANAGED_HOSTS_JSON and optionally DEFAULT_MANAGED_HOST.",
+            )
+        return _ResolvedWolRequest(
+            ok=True,
+            mac=mac,
+            ping_host=ping_host,
+            broadcast_ips=_get_wol_broadcast_targets(None),
+            wol_port=config.WOL_PORT,
+        )
+
+    if _looks_like_mac(requested):
+        return _ResolvedWolRequest(
+            ok=True,
+            mac=_normalize_mac(requested) or requested,
+            ping_host=default_ip or None,
+            broadcast_ips=_get_wol_broadcast_targets(None),
+            wol_port=config.WOL_PORT,
+        )
+
+    if _looks_like_ipv4(requested):
+        mac = (
+            default_mac
+            if default_ip and requested == default_ip and default_mac
+            else None
+        )
+        if not mac:
+            mac = _resolve_mac_from_arp(requested)
+        if not mac:
+            return _ResolvedWolRequest(
+                ok=False,
+                error=(
+                    f"❌ Could not resolve MAC for IP {requested}.\n"
+                    "Set WOL_TARGET_MAC for this host, or make sure the host exists "
+                    "in the ARP cache."
+                ),
+            )
+        return _ResolvedWolRequest(
+            ok=True,
+            mac=mac,
+            ping_host=requested,
+            broadcast_ips=_get_wol_broadcast_targets(None),
+            wol_port=config.WOL_PORT,
+        )
+
+    return _ResolvedWolRequest(ok=False, error="❌ Invalid MAC or IPv4 address format.")
+
+
+def _resolve_shutdown_request(target: str) -> _ResolvedShutdownRequest:
+    requested = target.strip()
+    selected_host = _select_managed_host(requested)
+    if selected_host is not None:
+        if not selected_host.ssh_target or not selected_host.shutdown_command:
+            return _ResolvedShutdownRequest(
+                ok=False,
+                error=(
+                    f"❌ Host <code>{html.escape(selected_host.name)}</code> is missing "
+                    "<code>ssh_target</code> or <code>shutdown_command</code>."
+                ),
+            )
+        if not selected_host.ping_host:
+            return _ResolvedShutdownRequest(
+                ok=False,
+                error=(
+                    f"❌ Host <code>{html.escape(selected_host.name)}</code> is missing "
+                    "<code>ping_host</code> for shutdown verification."
+                ),
+            )
+        return _ResolvedShutdownRequest(
+            ok=True,
+            ping_host=selected_host.ping_host,
+            ssh_target=selected_host.ssh_target,
+            ssh_port=selected_host.ssh_port,
+            shutdown_command=selected_host.shutdown_command,
+            host=selected_host,
+        )
+
+    if requested and not _looks_like_ipv4(requested):
+        return _ResolvedShutdownRequest(
+            ok=False,
+            error=(
+                "❌ Unknown host/device name.\nUse a managed host name, alias, or an "
+                "IPv4 ping host."
+            ),
+        )
+
+    ping_host = requested or config.WOL_TARGET_IP
+    if not config.WOL_SSH_TARGET or not config.WOL_SHUTDOWN_REMOTE_CMD:
+        return _ResolvedShutdownRequest(
+            ok=False,
+            error="❌ WOL shutdown is not configured. Set MANAGED_HOSTS_JSON for a host "
+            "or set legacy WOL_SSH_TARGET and WOL_SHUTDOWN_REMOTE_CMD.",
+        )
+    if not ping_host:
+        return _ResolvedShutdownRequest(
+            ok=False,
+            error="❌ No ping host configured. Set a host ping IP in MANAGED_HOSTS_JSON, "
+            "set WOL_TARGET_IP, or pass an IPv4 host to /wolshutdown.",
+        )
+    return _ResolvedShutdownRequest(
+        ok=True,
+        ping_host=ping_host,
+        ssh_target=config.WOL_SSH_TARGET,
+        ssh_port=config.WOL_SSH_PORT,
+        shutdown_command=config.WOL_SHUTDOWN_REMOTE_CMD,
+    )
+
+
+def _select_managed_host(target: str) -> ManagedHost | None:
+    requested = (target or "").strip()
+    if requested:
+        return config.get_managed_host(requested)
+    return config.default_managed_host()
+
+
+def _legacy_defaults() -> tuple[str, str | None]:
+    default_ip = (config.WOL_TARGET_IP or "").strip()
+    default_mac = _normalize_mac(config.WOL_TARGET_MAC)
+    return default_ip, default_mac
 
 
 def _resolve_mac_from_arp(ip: str) -> str | None:
@@ -255,9 +493,38 @@ def _resolve_mac_from_arp(ip: str) -> str | None:
     return None
 
 
-def _send_wol_packet(mac: str) -> None:
-    """Construct and send a WOL Magic Packet (UDP broadcast)."""
-    # Clean MAC to 12 hex digits
+def _normalize_mac(mac: str) -> str | None:
+    clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac or "")
+    if len(clean_mac) != 12:
+        return None
+    return ":".join(clean_mac[i : i + 2] for i in range(0, 12, 2)).lower()
+
+
+def _looks_like_mac(value: str) -> bool:
+    return bool(re.fullmatch(r"([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", value.strip()))
+
+
+def _looks_like_ipv4(value: str) -> bool:
+    if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", value.strip()):
+        return False
+    return all(0 <= int(part) <= 255 for part in value.split("."))
+
+
+def _get_wol_broadcast_targets(host: ManagedHost | None) -> list[str]:
+    targets: list[str] = []
+    configured = ""
+    if host is not None:
+        configured = (host.wol_broadcast_ip or "").strip()
+    if not configured:
+        configured = (config.WOL_BROADCAST_IP or "").strip()
+    if configured:
+        targets.append(configured)
+    targets.append("255.255.255.255")
+    return list(dict.fromkeys(targets))
+
+
+def _send_wol_packet(mac: str, *, broadcast_ips: list[str], port: int) -> None:
+    """Construct and send a WOL Magic Packet."""
     clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac)
     if len(clean_mac) != 12:
         raise ValueError("Invalid MAC address length")
@@ -265,5 +532,71 @@ def _send_wol_packet(mac: str) -> None:
     data = bytes.fromhex("ff" * 6 + clean_mac * 16)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        # Send to standard WOL port 9
-        s.sendto(data, ("255.255.255.255", 9))
+        for broadcast_ip in broadcast_ips:
+            s.sendto(data, (broadcast_ip, port))
+
+
+def _build_shutdown_ssh_command(resolved: _ResolvedShutdownRequest) -> list[str]:
+    return [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-p",
+        str(resolved.ssh_port),
+        resolved.ssh_target,
+        resolved.shutdown_command,
+    ]
+
+
+def _schedule_power_state_watch(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    chat_id: int,
+    host: str,
+    online: bool,
+) -> None:
+    async def _watch() -> None:
+        timeout_s = max(1.0, config.WOL_VERIFY_TIMEOUT_S)
+        interval_s = max(1.0, config.WOL_VERIFY_INTERVAL_S)
+        start = time.monotonic()
+        target_state = "online" if online else "offline"
+        while (time.monotonic() - start) < timeout_s:
+            is_online = await _ping_once(host)
+            if is_online == online:
+                elapsed = int(time.monotonic() - start)
+                emoji = "🟢" if online else "⚫"
+                verb = "powered up" if online else "powered off"
+                await context.application.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"{emoji} Host <code>{html.escape(host)}</code> appears to have "
+                        f"{verb} after {elapsed}s."
+                    ),
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            await asyncio.sleep(interval_s)
+
+        await context.application.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "⚠️ Timed out waiting for <code>"
+                f"{html.escape(host)}</code> to become {target_state}."
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+
+    app = getattr(context, "application", None)
+    if app is not None and hasattr(app, "create_task"):
+        app.create_task(_watch())
+    else:
+        asyncio.create_task(_watch())
+
+
+async def _ping_once(host: str) -> bool:
+    rc, _, _ = await cli.run_cmd(["ping", "-c", "1", "-W", "1", host], timeout=3)
+    return rc == 0

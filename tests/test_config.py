@@ -1,4 +1,5 @@
 import os
+import json
 from unittest import mock
 from tele_home_supervisor import config
 
@@ -14,9 +15,32 @@ def test_settings_defaults():
         assert settings.QBT_HOST == "qbittorrent"
         assert settings.QBT_PORT == 8080
         assert settings.QBT_TIMEOUT_S == 8.0
+        assert settings.WOL_TARGET_IP == ""
+        assert settings.WOL_TARGET_MAC == ""
+        assert settings.WOL_PORT == 9
+        assert settings.WOL_SSH_TARGET == ""
+        assert settings.WOL_SSH_PORT == 22
+        assert settings.WOL_SHUTDOWN_REMOTE_CMD == ""
+        assert settings.WOL_VERIFY_TIMEOUT_S == 180.0
+        assert settings.WOL_VERIFY_INTERVAL_S == 5.0
+        assert settings.DEFAULT_MANAGED_HOST == ""
+        assert settings.MANAGED_HOSTS == []
 
 
 def test_settings_custom():
+    managed_hosts = [
+        {
+            "name": "gaming-pc",
+            "ping_host": "192.168.1.10",
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "wol_broadcast_ip": "192.168.1.255",
+            "wol_port": 7,
+            "ssh_target": "pc-user@192.168.1.10",
+            "ssh_port": 2222,
+            "shutdown_command": "sudo poweroff",
+            "aliases": ["pc", "gaming"],
+        }
+    ]
     env = {
         "BOT_TOKEN": "123:ABC",
         "OWNER_ID": "999",
@@ -26,6 +50,10 @@ def test_settings_custom():
         "SHOW_WAN": "true",
         "QBT_PORT": "9090",
         "QBT_TIMEOUT_S": "12.5",
+        "MANAGED_HOSTS_JSON": json.dumps(managed_hosts),
+        "DEFAULT_MANAGED_HOST": "gaming-pc",
+        "WOL_VERIFY_TIMEOUT_S": "90",
+        "WOL_VERIFY_INTERVAL_S": "2",
     }
     with mock.patch.dict(os.environ, env, clear=True):
         settings = config._read_settings()
@@ -37,3 +65,37 @@ def test_settings_custom():
         assert settings.SHOW_WAN is True
         assert settings.QBT_PORT == 9090
         assert settings.QBT_TIMEOUT_S == 12.5
+        assert settings.DEFAULT_MANAGED_HOST == "gaming-pc"
+        assert len(settings.MANAGED_HOSTS) == 1
+        host = settings.MANAGED_HOSTS[0]
+        assert host.name == "gaming-pc"
+        assert host.ping_host == "192.168.1.10"
+        assert host.mac == "aa:bb:cc:dd:ee:ff"
+        assert host.wol_broadcast_ip == "192.168.1.255"
+        assert host.wol_port == 7
+        assert host.ssh_target == "pc-user@192.168.1.10"
+        assert host.ssh_port == 2222
+        assert host.shutdown_command == "sudo poweroff"
+        assert host.aliases == ("pc", "gaming")
+        assert settings.WOL_VERIFY_TIMEOUT_S == 90.0
+        assert settings.WOL_VERIFY_INTERVAL_S == 2.0
+
+
+def test_settings_legacy_wol_populates_default_managed_host():
+    env = {
+        "WOL_TARGET_IP": "192.168.1.10",
+        "WOL_TARGET_MAC": "aa:bb:cc:dd:ee:ff",
+        "WOL_BROADCAST_IP": "192.168.1.255",
+        "WOL_PORT": "9",
+        "WOL_SSH_TARGET": "pc-user@192.168.1.10",
+        "WOL_SSH_PORT": "22",
+        "WOL_SHUTDOWN_REMOTE_CMD": "sudo poweroff",
+    }
+    with mock.patch.dict(os.environ, env, clear=True):
+        settings = config._read_settings()
+        assert settings.DEFAULT_MANAGED_HOST == "default"
+        assert len(settings.MANAGED_HOSTS) == 1
+        host = settings.MANAGED_HOSTS[0]
+        assert host.name == "default"
+        assert host.ping_host == "192.168.1.10"
+        assert host.mac == "aa:bb:cc:dd:ee:ff"

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Set
 
+from .managed_host import ManagedHost
+
 
 @dataclass
 class Settings:
@@ -29,6 +31,17 @@ class Settings:
     BOT_AUTO_DELETE_MEDIA_HOURS: float
     ALERT_PING_LAN_TARGETS: List[str]
     ALERT_PING_WAN_TARGETS: List[str]
+    WOL_TARGET_IP: str
+    WOL_TARGET_MAC: str
+    WOL_BROADCAST_IP: str
+    WOL_PORT: int
+    WOL_SSH_TARGET: str
+    WOL_SSH_PORT: int
+    WOL_SHUTDOWN_REMOTE_CMD: str
+    WOL_VERIFY_TIMEOUT_S: float
+    WOL_VERIFY_INTERVAL_S: float
+    DEFAULT_MANAGED_HOST: str
+    MANAGED_HOSTS: List[ManagedHost]
 
     # TMDB
     TMDB_API_KEY: str

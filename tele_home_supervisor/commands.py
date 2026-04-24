@@ -210,9 +210,16 @@ _NETWORK_COMMANDS = (
     CommandSpec(
         "wol",
         "Network",
-        "/wol <mac|ip>",
-        "send Magic Packet Wake-on-LAN",
+        "/wol [host|mac|ip]",
+        "send Wake-on-LAN packet and watch for ping response",
         "cmd_wol",
+    ),
+    CommandSpec(
+        "wolshutdown",
+        "Network",
+        "/wolshutdown [host|ip]",
+        "run configured remote shutdown and watch for ping failure",
+        "cmd_wolshutdown",
     ),
 )
 

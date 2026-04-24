@@ -54,7 +54,7 @@ ENV TELE_HOME_SUPERVISOR_BUILD_VERSION=$BUILD_VERSION \
 
 # Runtime deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl iproute2 tzdata git ca-certificates iputils-ping iputils-tracepath procps \
+    curl iproute2 tzdata git ca-certificates iputils-ping iputils-tracepath procps openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -g ${APP_GID} app \

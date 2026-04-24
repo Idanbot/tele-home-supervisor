@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from tele_home_supervisor import config
 from tele_home_supervisor.handlers import system, docker, network
+from tele_home_supervisor.models.managed_host import ManagedHost
 
 from conftest import DummyContext, DummyUpdate
 
@@ -216,6 +217,150 @@ class TestNetworkHandlers:
         await network.cmd_wifiqr(update, context)
 
         assert "Usage" in update.message.replies[0]
+
+    @pytest.mark.asyncio
+    async def test_cmd_wol_uses_configured_default_target(self, monkeypatch) -> None:
+        async def mock_guard(update, context):
+            return True
+
+        scheduled: list[tuple[str, bool]] = []
+        packets: list[tuple[str, list[str], int]] = []
+
+        def fake_schedule(context, *, chat_id: int, host: str, online: bool) -> None:
+            scheduled.append((host, online))
+
+        def fake_send(mac: str, *, broadcast_ips: list[str], port: int) -> None:
+            packets.append((mac, broadcast_ips, port))
+
+        monkeypatch.setattr(network, "guard_sensitive", mock_guard)
+        monkeypatch.setattr(
+            config,
+            "default_managed_host",
+            lambda: ManagedHost(
+                name="gaming-pc",
+                ping_host="192.168.1.10",
+                mac="aa:bb:cc:dd:ee:ff",
+                wol_broadcast_ip="192.168.1.255",
+                wol_port=9,
+            ),
+        )
+        monkeypatch.setattr(config, "get_managed_host", lambda value: None)
+        monkeypatch.setattr(network, "_send_wol_packet", fake_send)
+        monkeypatch.setattr(network, "_schedule_power_state_watch", fake_schedule)
+
+        update = DummyUpdate(chat_id=123, user_id=123)
+        context = DummyContext(args=[])
+
+        await network.cmd_wol(update, context)
+
+        assert packets == [
+            ("aa:bb:cc:dd:ee:ff", ["192.168.1.255", "255.255.255.255"], 9)
+        ]
+        assert scheduled == [("192.168.1.10", True)]
+        assert "Sent WOL Magic Packet" in update.message.replies[-1]
+
+    @pytest.mark.asyncio
+    async def test_cmd_wol_rejects_ip_without_mac(self, monkeypatch) -> None:
+        async def mock_guard(update, context):
+            return True
+
+        monkeypatch.setattr(network, "guard_sensitive", mock_guard)
+        monkeypatch.setattr(config, "default_managed_host", lambda: None)
+        monkeypatch.setattr(config, "get_managed_host", lambda value: None)
+        monkeypatch.setattr(network, "_resolve_mac_from_arp", lambda ip: None)
+
+        update = DummyUpdate(chat_id=123, user_id=123)
+        context = DummyContext(args=["192.168.1.10"])
+
+        await network.cmd_wol(update, context)
+
+        assert "Could not resolve MAC" in update.message.replies[-1]
+
+    @pytest.mark.asyncio
+    async def test_cmd_wolshutdown_runs_ssh_and_schedules_watch(
+        self, monkeypatch
+    ) -> None:
+        async def mock_guard(update, context):
+            return True
+
+        scheduled: list[tuple[str, bool]] = []
+
+        def fake_schedule(context, *, chat_id: int, host: str, online: bool) -> None:
+            scheduled.append((host, online))
+
+        monkeypatch.setattr(network, "guard_sensitive", mock_guard)
+        monkeypatch.setattr(
+            config,
+            "default_managed_host",
+            lambda: ManagedHost(
+                name="gaming-pc",
+                ping_host="192.168.1.10",
+                ssh_target="pc-user@192.168.1.10",
+                ssh_port=22,
+                shutdown_command="sudo poweroff",
+            ),
+        )
+        monkeypatch.setattr(config, "get_managed_host", lambda value: None)
+        monkeypatch.setattr(network, "_schedule_power_state_watch", fake_schedule)
+
+        with patch(
+            "tele_home_supervisor.handlers.network.cli.run_cmd",
+            new_callable=AsyncMock,
+        ) as mock_run:
+            mock_run.return_value = (0, "", "")
+            update = DummyUpdate(chat_id=123, user_id=123)
+            context = DummyContext(args=[])
+
+            await network.cmd_wolshutdown(update, context)
+
+        assert mock_run.await_count == 1
+        assert scheduled == [("192.168.1.10", False)]
+        assert "Sent shutdown command" in update.message.replies[-1]
+
+    @pytest.mark.asyncio
+    async def test_cmd_wol_selects_named_managed_host(self, monkeypatch) -> None:
+        async def mock_guard(update, context):
+            return True
+
+        packets: list[tuple[str, list[str], int]] = []
+
+        monkeypatch.setattr(network, "guard_sensitive", mock_guard)
+        monkeypatch.setattr(config, "default_managed_host", lambda: None)
+        monkeypatch.setattr(
+            config,
+            "get_managed_host",
+            lambda value: ManagedHost(
+                name="gaming-pc",
+                ping_host="192.168.1.10",
+                mac="aa:bb:cc:dd:ee:ff",
+                wol_broadcast_ip="192.168.1.255",
+                wol_port=7,
+                aliases=("pc",),
+            )
+            if value == "pc"
+            else None,
+        )
+        monkeypatch.setattr(
+            network,
+            "_schedule_power_state_watch",
+            lambda context, *, chat_id, host, online: None,
+        )
+        monkeypatch.setattr(
+            network,
+            "_send_wol_packet",
+            lambda mac, *, broadcast_ips, port: packets.append(
+                (mac, broadcast_ips, port)
+            ),
+        )
+
+        update = DummyUpdate(chat_id=123, user_id=123)
+        context = DummyContext(args=["pc"])
+
+        await network.cmd_wol(update, context)
+
+        assert packets == [
+            ("aa:bb:cc:dd:ee:ff", ["192.168.1.255", "255.255.255.255"], 7)
+        ]
 
     @pytest.mark.asyncio
     async def test_cmd_traceroute_requires_args(self, monkeypatch) -> None:

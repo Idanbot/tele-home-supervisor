@@ -16,7 +16,7 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 ### 🖥️ System & Network
 *   **Real-time Monitoring**: Visual bars for CPU, RAM, and Disk usage (`/health`, `/diskusage`).
 *   **Network Tools**: Ping, DNS lookup, Traceroute, and Speedtest (`/speedtest`).
-*   **Wake-on-LAN**: Wake local devices using MAC or IP address (`/wol`).
+*   **Wake-on-LAN**: Wake named managed devices and track power-up/shutdown status (`/wol`, `/wolshutdown`).
 *   **Guest WiFi**: Generate QR codes for instant WiFi access (`/wifiqr`).
 *   **Utilities**: Set async reminders (`/remind`), check uptime, and view top processes.
 *   **Intel Briefing**: Daily 8 AM summary of weather, news, system health, and stoic wisdom.
@@ -70,6 +70,10 @@ BOT_AUTH_TOTP_SECRET=JBSWY3DPEHPK3PXP
 OLLAMA_HOST=http://192.168.1.100:11434
 QBT_HOST=qbittorrent
 TMDB_API_KEY=your_tmdb_api_key
+
+# Optional: Managed hosts/devices (recommended for /wol and /wolshutdown)
+DEFAULT_MANAGED_HOST=gaming-pc
+MANAGED_HOSTS_JSON=[{"name":"gaming-pc","ping_host":"192.168.1.10","mac":"AA:BB:CC:DD:EE:FF","wol_broadcast_ip":"192.168.1.255","wol_port":9,"ssh_target":"myuser@192.168.1.10","ssh_port":22,"shutdown_command":"sudo systemctl poweroff","aliases":["pc","windows"]}]
 ```
 
 ### 3. Run
@@ -106,6 +110,8 @@ docker compose up -d
 | `RATE_LIMIT_S` | `1.0` | Minimum seconds between commands (flood protection). |
 | `ALERT_PING_LAN_TARGETS` | `` | Comma-separated LAN ping targets for `/alerts` reachability checks. |
 | `ALERT_PING_WAN_TARGETS` | `` | Comma-separated WAN ping targets for `/alerts` reachability checks. |
+| `DEFAULT_MANAGED_HOST` | `` | Default managed host/device name used by `/wol` and `/wolshutdown`. |
+| `MANAGED_HOSTS_JSON` | `` | JSON array of managed host/device objects with `name`, `ping_host`, `mac`, WOL, and SSH shutdown fields. |
 | `WATCH_PATHS` | `/` | Comma-separated paths to monitor for disk usage. |
 | `SHOW_WAN` | `false` | Set to `true` to show public IP in `/health`. |
 | `LOG_LEVEL` | `DEBUG` | logging verbosity. |
@@ -125,7 +131,8 @@ docker compose up -d
 *   `/diskusage` - Visual bar charts of disk space.
 *   `/remind <min> <msg>` - Set a timer to ping you later.
 *   `/wifiqr <ssid> [pass]` - Generate WiFi login QR code.
-*   `/wol <mac|ip>` - Send Magic Packet Wake-on-LAN.
+*   `/wol [host|mac|ip]` - Send Magic Packet Wake-on-LAN.
+*   `/wolshutdown [host|ip]` - Run configured remote shutdown and verify power-off.
 *   `/ip` - Show LAN and WAN IP addresses.
 *   `/top` - Show top resource-consuming processes.
 

@@ -35,15 +35,18 @@ services:
       - QBT_PORT=${QBT_PORT}
       - QBT_USER=${QBT_USER}
       - QBT_PASS=${QBT_PASS}
-      - WATCH_PATHS=/,/srv/media
-      - SHOW_WAN=false
-      - TZ=Asia/Jerusalem
-      - LOG_LEVEL=DEBUG
+      - WATCH_PATHS=${WATCH_PATHS:-/,/srv/media}
+      - SHOW_WAN=${SHOW_WAN:-false}
+      - TZ=${TZ:-Asia/Jerusalem}
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
       - RATE_LIMIT_S=${RATE_LIMIT_S:-1.0}
       - QBT_TIMEOUT_S=${QBT_TIMEOUT_S:-8}
       - DOCKER_HOST=unix:///var/run/docker.sock
       - OLLAMA_HOST=${OLLAMA_HOST:-http://localhost:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama2}
+      - BOT_AUTO_DELETE_MEDIA_HOURS=${BOT_AUTO_DELETE_MEDIA_HOURS:-24}
+      - ALERT_PING_LAN_TARGETS=${ALERT_PING_LAN_TARGETS:-}
+      - ALERT_PING_WAN_TARGETS=${ALERT_PING_WAN_TARGETS:-}
       - TPB_BASE_URL=${TPB_BASE_URL:-https://thepiratebay.org}
       - TPB_API_BASE_URL=${TPB_API_BASE_URL:-https://apibay.org}
       - TPB_API_BASE_URLS=${TPB_API_BASE_URLS:-}
@@ -54,6 +57,17 @@ services:
       - TMDB_BASE_URL=${TMDB_BASE_URL:-https://api.themoviedb.org/3}
       - TMDB_USER_AGENT=${TMDB_USER_AGENT:-}
       - BOT_AUTH_TTL_HOURS=${BOT_AUTH_TTL_HOURS:-168}
+      - WOL_TARGET_IP=${WOL_TARGET_IP:-}
+      - WOL_TARGET_MAC=${WOL_TARGET_MAC:-}
+      - WOL_BROADCAST_IP=${WOL_BROADCAST_IP:-}
+      - WOL_PORT=${WOL_PORT:-9}
+      - WOL_SSH_TARGET=${WOL_SSH_TARGET:-}
+      - WOL_SSH_PORT=${WOL_SSH_PORT:-22}
+      - WOL_SHUTDOWN_REMOTE_CMD=${WOL_SHUTDOWN_REMOTE_CMD:-}
+      - DEFAULT_MANAGED_HOST=${DEFAULT_MANAGED_HOST:-}
+      - MANAGED_HOSTS_JSON=${MANAGED_HOSTS_JSON:-}
+      - WOL_VERIFY_TIMEOUT_S=${WOL_VERIFY_TIMEOUT_S:-180}
+      - WOL_VERIFY_INTERVAL_S=${WOL_VERIFY_INTERVAL_S:-5}
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
