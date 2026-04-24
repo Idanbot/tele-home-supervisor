@@ -332,6 +332,7 @@ class TestNetworkHandlers:
         command, env = network._build_shutdown_ssh_command(resolved)
 
         assert command[:3] == ["sshpass", "-e", "ssh"]
+        assert "LogLevel=ERROR" in command
         assert "PreferredAuthentications=password" in command
         assert "PubkeyAuthentication=no" in command
         assert command[-2:] == ["user@192.0.2.29", "sudo systemctl poweroff"]

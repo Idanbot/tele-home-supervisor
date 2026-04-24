@@ -696,6 +696,8 @@ def _build_shutdown_ssh_command(
         "-o",
         "UserKnownHostsFile=/dev/null",
         "-o",
+        "LogLevel=ERROR",
+        "-o",
         "ConnectTimeout=10",
         "-p",
         str(resolved.ssh_port),
