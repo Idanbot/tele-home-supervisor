@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import io
 import logging
-import html
 import os
 import re
-import textwrap
 import time
 
 import qrcode
-
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from .. import cli, config, services, utils, view
+from .. import cli, config, services, view
 from ..models.managed_host import ManagedHost
 from .common import (
     get_state,
@@ -27,33 +25,6 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
-
-_WOL_HELPER_SCRIPT = textwrap.dedent(
-    """
-    import re
-    import socket
-    import sys
-
-    mac = sys.argv[1]
-    ports = sorted({int(part) for part in sys.argv[2].split(",") if part})
-    broadcast_ips = [arg for arg in sys.argv[3:] if arg]
-
-    clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac)
-    if len(clean_mac) != 12:
-        raise SystemExit("Invalid MAC address length")
-
-    data = bytes.fromhex("ff" * 6 + clean_mac * 16)
-    sent = 0
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        for ip in broadcast_ips:
-            for port in ports:
-                sock.sendto(data, (ip, port))
-                sent += 1
-
-    print(f"sent={sent} targets={len(broadcast_ips)} ports={ports}")
-    """
-).strip()
 
 
 async def cmd_wifiqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -593,7 +564,7 @@ def _legacy_defaults() -> tuple[str, str | None]:
 def _resolve_mac_from_arp(ip: str) -> str | None:
     """Try to find MAC address for a given IP in the system ARP cache."""
     try:
-        with open("/proc/net/arp", "r") as f:
+        with open("/proc/net/arp") as f:
             for line in f.readlines()[1:]:
                 parts = line.split()
                 if len(parts) >= 4 and parts[0] == ip:
@@ -637,46 +608,35 @@ def _get_wol_broadcast_targets(host: ManagedHost | None) -> list[str]:
 
 
 async def _send_wol_packet(mac: str, *, broadcast_ips: list[str], port: int) -> None:
-    """Send WOL via a one-off helper container on the host network."""
-    await asyncio.to_thread(
-        _run_wol_helper_container, mac, broadcast_ips=broadcast_ips, port=port
-    )
+    """Send Magic Packet Wake-on-LAN directly using Python sockets.
 
+    This replaces the one-off Docker container helper to reduce latency
+    and remove dependency on the host Docker daemon for WOL.
+    """
 
-def _build_wol_helper_command(
-    mac: str, *, broadcast_ips: list[str], port: int
-) -> list[str]:
-    ports = ",".join(str(p) for p in sorted({port, 7, 9}))
-    return ["python", "-c", _WOL_HELPER_SCRIPT, mac, ports, *broadcast_ips]
+    def _send():
+        clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac)
+        if len(clean_mac) != 12:
+            raise ValueError("Invalid MAC address length")
 
+        data = bytes.fromhex("ff" * 6 + clean_mac * 16)
+        # Use multiple common WOL ports to increase chance of success
+        ports = sorted({port, 7, 9})
+        sent = 0
+        import socket
 
-def _run_wol_helper_container(mac: str, *, broadcast_ips: list[str], port: int) -> str:
-    helper_image = (config.WOL_HELPER_IMAGE or "").strip()
-    if not helper_image:
-        raise RuntimeError("WOL_HELPER_IMAGE is not configured")
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            for ip in broadcast_ips:
+                for p in ports:
+                    try:
+                        sock.sendto(data, (ip, p))
+                        sent += 1
+                    except Exception as e:
+                        logger.debug("Failed to send WOL to %s:%d: %s", ip, p, e)
+        return sent
 
-    command = _build_wol_helper_command(mac, broadcast_ips=broadcast_ips, port=port)
-    try:
-        output = utils.client.containers.run(
-            helper_image,
-            command=command,
-            network_mode="host",
-            remove=True,
-            detach=False,
-            stdout=True,
-            stderr=True,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"host-network WOL helper failed: {exc}") from exc
-
-    text = ""
-    if isinstance(output, (bytes, bytearray)):
-        text = output.decode().strip()
-    elif output is not None:
-        text = str(output).strip()
-    if text:
-        logger.info("WOL helper output for %s: %s", mac, text)
-    return text
+    await asyncio.to_thread(_send)
 
 
 def _resolve_host_ssh_password(host: ManagedHost) -> str:
@@ -690,11 +650,13 @@ def _resolve_host_ssh_password(host: ManagedHost) -> str:
 def _build_shutdown_ssh_command(
     resolved: _ResolvedShutdownRequest,
 ) -> tuple[list[str], dict[str, str] | None]:
+    # Use a persisted known_hosts file in the data volume
+    known_hosts_path = "/app/data/ssh_known_hosts"
     base_cmd = [
         "-o",
-        "StrictHostKeyChecking=no",
+        "StrictHostKeyChecking=accept-new",
         "-o",
-        "UserKnownHostsFile=/dev/null",
+        f"UserKnownHostsFile={known_hosts_path}",
         "-o",
         "LogLevel=ERROR",
         "-o",

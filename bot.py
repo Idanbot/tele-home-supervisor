@@ -7,6 +7,5 @@ This file keeps compatibility for the existing Dockerfile/usage which runs
 
 from tele_home_supervisor.main import run
 
-
 if __name__ == "__main__":
     run()

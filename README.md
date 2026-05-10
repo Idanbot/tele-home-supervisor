@@ -16,7 +16,7 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 ### 🖥️ System & Network
 *   **Real-time Monitoring**: Visual bars for CPU, RAM, and Disk usage (`/health`, `/diskusage`).
 *   **Network Tools**: Ping, DNS lookup, Traceroute, and Speedtest (`/speedtest`).
-*   **Wake-on-LAN**: Wake named managed devices and track power-up/shutdown status (`/wol`, `/wolshutdown`).
+*   **Wake-on-LAN**: Wake named managed devices and track power-up/status directly from the bot.
 *   **Guest WiFi**: Generate QR codes for instant WiFi access (`/wifiqr`).
 *   **Utilities**: Set async reminders (`/remind`), check uptime, and view top processes.
 *   **Intel Briefing**: Daily 8 AM summary of weather, news, system health, and stoic wisdom.
@@ -24,13 +24,13 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 *   **Audit Log**: Recent command/callback history (`/audit`).
 
 ### 🐳 Docker Management
-*   **Interactive Control**: Start, stop, and restart containers with inline buttons.
+*   **Interactive Control**: List and inspect containers directly from Telegram.
 *   **Deep Inspection**: View logs, stats (CPU/Mem/Net/Block IO), and health status.
 *   **Port Visibility**: See which ports your containers are exposing.
 
 ### 🎬 Media & Torrents
 *   **Torrent Manager**: Full qBittorrent control (Add, Pause, Delete) with completion notifications.
-*   **Discovery**: Search The Pirate Bay (`/pbsearch`) or check trending movies/shows on TMDB.
+*   **Discovery**: Search torrent providers (`/pbsearch`) or check trending movies/shows on TMDB.
 *   **Gaming**: Check Linux/Steam Deck compatibility via ProtonDB (`/protondb`) and track free game giveaways (Epic, Steam, GOG).
 
 ### 🧠 Local AI Integration
@@ -63,8 +63,9 @@ ALLOWED_CHAT_IDS=12345678,87654321
 DOCKER_GID=999
 
 # Optional: Secure Auth (for critical commands)
-# Generate a Base32 secret for Google Authenticator
-BOT_AUTH_TOTP_SECRET=JBSWY3DPEHPK3PXP
+# Generate a Base32 secret for Google Authenticator.
+# You can generate one with: python -c "import pyotp; print(pyotp.random_base32())"
+BOT_AUTH_TOTP_SECRET=<insert-base32-secret-here>
 
 # Optional: External Services
 OLLAMA_HOST=http://192.168.1.100:11434
@@ -73,7 +74,8 @@ TMDB_API_KEY=your_tmdb_api_key
 
 # Optional: Managed hosts/devices (recommended for /wol and /wolshutdown)
 DEFAULT_MANAGED_HOST=gaming-pc
-MANAGED_HOSTS_JSON=[{"name":"gaming-pc","ping_host":"192.168.1.10","mac":"AA:BB:CC:DD:EE:FF","wol_broadcast_ip":"192.168.1.255","wol_port":9,"ssh_target":"myuser@192.168.1.10","ssh_port":22,"shutdown_command":"sudo systemctl poweroff","aliases":["pc","windows"]}]
+# REPLACE MAC AND TARGETS WITH YOUR DEVICE'S REAL DATA
+MANAGED_HOSTS_JSON=[{"name":"gaming-pc","ping_host":"192.168.1.10","mac":"00:11:22:33:44:55","wol_broadcast_ip":"192.168.1.255","wol_port":9,"ssh_target":"myuser@192.168.1.10","ssh_port":22,"shutdown_command":"sudo systemctl poweroff","aliases":["pc","windows"]}]
 ```
 
 ### 3. Run
@@ -107,7 +109,7 @@ docker compose up -d
 ### Customization
 | Variable | Default | Description |
 |:---|:---:|:---|
-| `RATE_LIMIT_S` | `1.0` | Minimum seconds between commands (flood protection). |
+| `RATE_LIMIT_S` | `1.0` | Minimum seconds between commands per user/command. |
 | `ALERT_PING_LAN_TARGETS` | `` | Comma-separated LAN ping targets for `/alerts` reachability checks. |
 | `ALERT_PING_WAN_TARGETS` | `` | Comma-separated WAN ping targets for `/alerts` reachability checks. |
 | `DEFAULT_MANAGED_HOST` | `` | Default managed host/device name used by `/wol` and `/wolshutdown`. |
@@ -115,54 +117,123 @@ docker compose up -d
 | `WATCH_PATHS` | `/` | Comma-separated paths to monitor for disk usage. |
 | `SHOW_WAN` | `false` | Set to `true` to show public IP in `/health`. |
 | `LOG_LEVEL` | `DEBUG` | logging verbosity. |
+| `LOG_FORMAT` | `text` | set to `json` for structured logging. |
 
 ---
 
-## 📚 Command Reference
+## 📚 Commands
 
-### 🛠 Info
-*   `/auth <code>` - Authorize sensitive commands for 7 days.
-*   `/check_auth` - Check current auth status and time remaining.
-*   `/auth_file` - List all active auth grants with start/end dates.
-*   `/version` - Show bot version and build info.
+### Info
 
-### 🖥 System
-*   `/health` - Comprehensive system dashboard (CPU, RAM, Disk, Load).
-*   `/diskusage` - Visual bar charts of disk space.
-*   `/remind <min> <msg>` - Set a timer to ping you later.
-*   `/wifiqr <ssid> [pass]` - Generate WiFi login QR code.
-*   `/wol [host|mac|ip]` - Send Magic Packet Wake-on-LAN.
-*   `/wolshutdown [host|ip]` - Run configured remote shutdown and verify power-off.
-*   `/ip` - Show LAN and WAN IP addresses.
-*   `/top` - Show top resource-consuming processes.
+| Command | Description |
+| :--- | :--- |
+| `/start` | show help |
+| `/help` | this menu |
+| `/whoami` | show chat and user info |
+| `/auth &lt;code&gt;` | authorize sensitive commands for 7 days |
+| `/check_auth` | check auth status and time remaining |
+| `/auth_file` | show all authenticated user IDs and expiry from file |
+| `/ban &lt;user_id&gt;` | owner-only persistent block for a user ID |
+| `/unban &lt;user_id&gt;` | owner-only remove a user ID from persistent blocks |
+| `/banlist` | owner-only view aggregated blocked user IDs |
+| `/version` | bot version and build info |
+| `/metrics` | command metrics summary |
+| `/audit [n]` | show recent audit entries (or /audit clear) |
+| `/debug [command]` | recent errors/debug info |
 
-### 🔔 Alerts & Briefing
-*   `/intel_briefing` - Fetch latest intel briefing on-demand.
-*   `/intel_settings` - Configure which modules appear in briefing.
-*   `/alerts` - Manage alert rules and status.
-*   `/audit [n]` - Show recent audit entries (or `/audit clear`).
+### System
 
-### 🐳 Docker
-*   `/docker` - Interactive container list (Start/Stop/Restart).
-*   `/dlogs <name>` - Fetch container logs (as file or text).
-*   `/dstatsrich` - Detailed container metrics (I/O, PIDs).
-*   `/dinspect <name>` - View raw container configuration.
+| Command | Description |
+| :--- | :--- |
+| `/ip` | private LAN IP |
+| `/health` | CPU/RAM/disk/load/uptime (and WAN if enabled) |
+| `/uptime` | system uptime |
+| `/temp` | CPU temperature (reads /host_thermal/temp) |
+| `/top` | top CPU processes |
+| `/diskusage` | visual disk usage bars |
+| `/remind &lt;minutes&gt; &lt;msg&gt;` | set a reminder timer |
+| `/cleanup` | delete all tracked media messages now |
 
-### 📥 Torrents
-*   `/tstatus` - Real-time download progress with control buttons.
-*   `/tadd <magnet>` - Remote download starter.
-*   `/pbsearch <query>` - Search The Pirate Bay.
-*   `/subscribe` - Get notified when downloads finish.
+### Docker
 
-### 🤖 AI (Ollama)
-*   `/ask <prompt>` - Query your local LLM.
-*   `/ollamapull <model>` - Download new models to your server.
-*   `/ollamastatus` - Track model download progress.
+| Command | Description |
+| :--- | :--- |
+| `/docker` | list containers, status, ports |
+| `/dinspect &lt;container&gt;` | inspect container (JSON, file if large) |
+| `/dockerstats` | CPU/MEM per running container |
+| `/dstatsrich` | detailed Docker stats (net/block IO) |
+| `/dlogs &lt;container&gt; [page] [--since &lt;time&gt;] [--file]` | container logs (default sends file; use page for pagination) |
+| `/dhealth &lt;container&gt;` | container health check |
 
-### 🎮 Media & Games
-*   `/protondb <game>` - Check Linux gaming compatibility.
-*   `/movies` / `/shows` - See what's trending.
-*   `/epicgames` - Check this week's free games.
+### Network
+
+| Command | Description |
+| :--- | :--- |
+| `/ping &lt;ip&gt; [count]` | ping an IP or hostname |
+| `/ports` | listening ports (inside container) |
+| `/dns &lt;name&gt;` | DNS lookup |
+| `/traceroute &lt;host&gt; [max_hops]` | trace network route |
+| `/speedtest [MB]` | quick download speed test |
+| `/wifiqr &lt;ssid&gt; [password]` | generate WiFi QR code |
+| `/wol [host|mac|ip]` | send Wake-on-LAN packet and watch for ping response |
+| `/wolshutdown [host|ip]` | run configured remote shutdown and watch for ping failure |
+
+### Torrents
+
+| Command | Description |
+| :--- | :--- |
+| `/tadd &lt;torrent&gt; [save_path]` | add torrent (magnet/URL) |
+| `/tstatus` | show torrent status |
+| `/tstop &lt;torrent&gt;` | pause torrent(s) by name |
+| `/tstart &lt;torrent&gt;` | resume torrent(s) by name |
+| `/tdelete &lt;torrent&gt; yes` | delete torrent(s) and files |
+| `/tclean yes` | remove torrents with missing files |
+| `/subscribe [on|off|status]` | torrent completion notifications |
+| `/pbtop [category]` | top Pirate Bay torrents (audio, video, apps, games, porn, other) |
+| `/pbsearch &lt;query&gt;` | search Pirate Bay torrents |
+| `/pbprovider [provider]` | show or set forced torrent provider |
+| `/pbtoggle &lt;provider&gt;` | toggle torrent provider on/off |
+
+### Notifications
+
+| Command | Description |
+| :--- | :--- |
+| `/alerts` | alert rules and status |
+| `/mute_gameoffers` | toggle Game Offers daily notifications (8 PM) |
+| `/mute_hackernews` | toggle Hacker News daily digest (8 AM) |
+| `/gameoffers` | show combined game offers (Epic/Steam/GOG/Humble) |
+| `/epicgames` | check current Epic Games free games |
+| `/hackernews [n]` | show top N Hacker News stories (default: 5) |
+| `/steamfree [n]` | show current Steam free-to-keep games |
+| `/gogfree` | show current GOG free games |
+| `/humblefree` | show current Humble Bundle free games |
+| `/intel_settings` | Intel Briefing module settings |
+| `/intel_briefing` | fetch Intel Briefing on demand |
+
+### Media
+
+| Command | Description |
+| :--- | :--- |
+| `/movies` | TMDB trending movies |
+| `/shows` | TMDB trending shows |
+| `/incinema` | TMDB in cinemas now |
+| `/tmdb &lt;query&gt;` | TMDB search (movies + shows) |
+| `/protondb &lt;game&gt;` | ProtonDB Linux/Steam Deck compatibility |
+
+### AI
+
+| Command | Description |
+| :--- | :--- |
+| `/ask &lt;question&gt;` | ask a question, flags: --temp|-t 0.4 --top-k|-k 40 --top-p|-p 0.9 --num-predict|-n 640 |
+| `/askreset` | reset custom AI generation parameters |
+| `/ollamahost &lt;http://host:port&gt;` | set Ollama host target |
+| `/ollamamodel &lt;model&gt;` | set Ollama model |
+| `/ollamareset` | reset Ollama host/model overrides |
+| `/ollamashow` | show current Ollama host/model |
+| `/ollamalist` | list available Ollama models |
+| `/ollamapull &lt;model&gt;` | download an Ollama model |
+| `/ollamastatus` | show current Ollama download status |
+| `/ollamacancel` | cancel current Ollama download |
 
 ---
 
@@ -172,7 +243,7 @@ We use [`uv`](https://github.com/astral-sh/uv) for lightning-fast dependency man
 
 ```bash
 # 1. Install dependencies
-uv sync
+uv sync --all-extras --dev
 
 # 2. Run tests
 uv run pytest

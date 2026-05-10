@@ -1,8 +1,8 @@
 """Tests for ProtonDB module."""
 
-from tele_home_supervisor import protondb
-
 from conftest import DummyResponse
+
+from tele_home_supervisor import protondb
 
 
 def test_format_tier_known_tiers() -> None:

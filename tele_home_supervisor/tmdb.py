@@ -5,11 +5,23 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import requests
+import httpx
 
 from . import config
 
 logger = logging.getLogger(__name__)
+
+_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(12.0),
+            transport=httpx.AsyncHTTPTransport(retries=2),
+        )
+    return _CLIENT
 
 
 def _ensure_api_key() -> None:
@@ -17,7 +29,7 @@ def _ensure_api_key() -> None:
         raise RuntimeError("TMDB_API_KEY is not configured")
 
 
-def _fetch(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+async def _fetch(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     _ensure_api_key()
     url = f"{config.settings.TMDB_BASE_URL}{path}"
     payload = {"api_key": config.settings.TMDB_API_KEY, "language": "en-US"}
@@ -27,37 +39,38 @@ def _fetch(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         "User-Agent": config.settings.TMDB_USER_AGENT,
         "Accept": "application/json",
     }
-    resp = requests.get(url, params=payload, headers=headers, timeout=12)
-    if not resp.ok:
+    client = _get_client()
+    resp = await client.get(url, params=payload, headers=headers)
+    if not resp.is_success:
         snippet = resp.text[:500].replace("\n", " ")
         raise RuntimeError(f"TMDB HTTP {resp.status_code}: {snippet}")
     return resp.json()
 
 
-def trending_movies(page: int = 1) -> dict[str, Any]:
-    return _fetch("/trending/movie/day", {"page": page})
+async def trending_movies(page: int = 1) -> dict[str, Any]:
+    return await _fetch("/trending/movie/day", {"page": page})
 
 
-def trending_shows(page: int = 1) -> dict[str, Any]:
-    return _fetch("/trending/tv/day", {"page": page})
+async def trending_shows(page: int = 1) -> dict[str, Any]:
+    return await _fetch("/trending/tv/day", {"page": page})
 
 
-def in_cinema(page: int = 1) -> dict[str, Any]:
-    return _fetch("/movie/now_playing", {"page": page})
+async def in_cinema(page: int = 1) -> dict[str, Any]:
+    return await _fetch("/movie/now_playing", {"page": page})
 
 
-def search_multi(query: str, page: int = 1) -> dict[str, Any]:
-    return _fetch(
+async def search_multi(query: str, page: int = 1) -> dict[str, Any]:
+    return await _fetch(
         "/search/multi", {"query": query, "page": page, "include_adult": False}
     )
 
 
-def movie_details(movie_id: int) -> dict[str, Any]:
-    return _fetch(f"/movie/{movie_id}")
+async def movie_details(movie_id: int) -> dict[str, Any]:
+    return await _fetch(f"/movie/{movie_id}")
 
 
-def tv_details(tv_id: int) -> dict[str, Any]:
-    return _fetch(f"/tv/{tv_id}")
+async def tv_details(tv_id: int) -> dict[str, Any]:
+    return await _fetch(f"/tv/{tv_id}")
 
 
 def extract_items(

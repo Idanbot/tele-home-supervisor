@@ -3,11 +3,10 @@
 import time
 
 import pytest
+from conftest import DummyContext, DummyUpdate
 
 from tele_home_supervisor.handlers import audit
 from tele_home_supervisor.handlers.common import get_state
-
-from conftest import DummyContext, DummyUpdate
 
 
 class TestCmdAudit:

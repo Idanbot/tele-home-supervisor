@@ -10,10 +10,10 @@ import time
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-from .. import services, tmdb, view, protondb
+from .. import protondb, services, tmdb, view
 from ..state import BotState
-from .common import get_state, tracked_reply_photo
 from .cb_helpers import safe_edit_message_text
+from .common import get_state, tracked_reply_photo
 
 logger = logging.getLogger(__name__)
 
@@ -362,20 +362,13 @@ async def handle_games_callback(query, context, game_type: str) -> None:
     await query.message.reply_text(f"🔄 Fetching {game_type} free games...")
 
     if game_type == "epic":
-        message, image_urls = await asyncio.to_thread(
-            scheduled_fetchers.fetch_epic_free_games
-        )
+        message, image_urls = await scheduled_fetchers.fetch_epic_free_games()
     elif game_type == "steam":
-        message = await asyncio.to_thread(scheduled_fetchers.fetch_steam_free_games, 5)
-        image_urls = []
+        message, image_urls = await scheduled_fetchers.fetch_steam_free_games(5)
     elif game_type == "gog":
-        message, image_urls = await asyncio.to_thread(
-            scheduled_fetchers.fetch_gog_free_games
-        )
+        message, image_urls = await scheduled_fetchers.fetch_gog_free_games()
     elif game_type == "humble":
-        message, image_urls = await asyncio.to_thread(
-            scheduled_fetchers.fetch_humble_free_games
-        )
+        message, image_urls = await scheduled_fetchers.fetch_humble_free_games()
     else:
         await query.message.reply_text("❓ Unknown game store")
         return

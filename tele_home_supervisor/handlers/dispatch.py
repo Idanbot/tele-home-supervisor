@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-from .common import rate_limit
 from . import (
-    meta,
-    system,
-    docker,
-    network,
-    torrents,
-    notifications,
     ai,
-    media,
     alerts,
     audit,
+    docker,
+    media,
+    meta,
+    network,
+    notifications,
+    system,
+    torrents,
 )
-
+from .common import rate_limit
 
 # Meta
 cmd_start = rate_limit(meta.cmd_start, name="start")

@@ -9,8 +9,8 @@ from telegram.constants import ParseMode
 
 from .. import services, view
 from ..state import BotState
+from .cb_helpers import build_pagination_row, safe_edit_message_text
 from .common import get_state
-from .cb_helpers import safe_edit_message_text, build_pagination_row
 
 TORRENT_PAGE_SIZE = 6
 

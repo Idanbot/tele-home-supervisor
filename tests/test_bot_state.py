@@ -5,8 +5,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from tele_home_supervisor.models.bot_state import BotState
 from tele_home_supervisor.models.audit import AuditEntry
+from tele_home_supervisor.models.bot_state import BotState
 
 
 class TestBotStateAuth:

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from .. import scheduled as scheduled_fetchers
 from .. import intel
+from .. import scheduled as scheduled_fetchers
 from ..state import BOT_STATE_KEY, BotState
 from .common import guard, tracked_reply_photo
 
@@ -68,9 +67,7 @@ async def cmd_gameoffers_now(
     msg = await update.message.reply_text("🔄 Fetching game offers...")
 
     try:
-        combined, image_url = await asyncio.to_thread(
-            scheduled_fetchers.build_combined_game_offers, 5
-        )
+        combined, image_url = await scheduled_fetchers.build_combined_game_offers(5)
         if image_url:
             try:
                 await msg.delete()
@@ -135,7 +132,7 @@ async def cmd_hackernews_now(
     )
 
     try:
-        result = await asyncio.to_thread(scheduled_fetchers.fetch_hackernews_top, limit)
+        result = await scheduled_fetchers.fetch_hackernews_top(limit)
         await msg.edit_text(
             result, parse_mode=ParseMode.HTML, disable_web_page_preview=True
         )
@@ -162,9 +159,7 @@ async def cmd_steamfree_now(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     msg = await update.message.reply_text("🔄 Fetching Steam free-to-keep games...")
 
     try:
-        message, image_urls = await asyncio.to_thread(
-            scheduled_fetchers.fetch_steam_free_games, limit
-        )
+        message, image_urls = await scheduled_fetchers.fetch_steam_free_games(limit)
         if image_urls:
             await msg.delete()
             state: BotState = context.application.bot_data.setdefault(
@@ -193,9 +188,7 @@ async def cmd_epicgames_now(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     msg = await update.message.reply_text("🔄 Fetching Epic Games free games...")
 
     try:
-        message, image_urls = await asyncio.to_thread(
-            scheduled_fetchers.fetch_epic_free_games
-        )
+        message, image_urls = await scheduled_fetchers.fetch_epic_free_games()
 
         # Try to send with image first, fallback to text-only if image fails
         if image_urls:
@@ -247,9 +240,7 @@ async def cmd_gogfree_now(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     msg = await update.message.reply_text("🔄 Fetching GOG free games...")
 
     try:
-        message, image_urls = await asyncio.to_thread(
-            scheduled_fetchers.fetch_gog_free_games
-        )
+        message, image_urls = await scheduled_fetchers.fetch_gog_free_games()
 
         # Delete the "fetching" message
         await msg.delete()
@@ -286,9 +277,7 @@ async def cmd_humblefree_now(
     msg = await update.message.reply_text("🔄 Fetching Humble Bundle free games...")
 
     try:
-        message, image_urls = await asyncio.to_thread(
-            scheduled_fetchers.fetch_humble_free_games
-        )
+        message, image_urls = await scheduled_fetchers.fetch_humble_free_games()
 
         # Delete the "fetching" message
         await msg.delete()

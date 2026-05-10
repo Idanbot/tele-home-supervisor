@@ -2,23 +2,24 @@
 
 This module provides fallback alternatives when PirateBay is unavailable.
 Each source has its own parsing logic, user-agent spoofing, and magnet extraction.
-Uses cloudscraper for Cloudflare-protected sites.
+Standardized on httpx for asynchronous requests.
 """
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import os
-import random
 import re
+import secrets
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from typing import Callable
+from collections.abc import Callable
 from urllib.parse import quote, unquote
 
-import requests
+import httpx
 
 try:
     import cloudscraper
@@ -35,8 +36,8 @@ _SEARCH_CACHE_TTL_S = 300  # 5 minutes
 _SEARCH_CACHE_MAX = 50
 
 # Cache: query -> (timestamp, results)
-_search_cache: OrderedDict[str, tuple[float, list["TorrentResult"]]] = OrderedDict()
-_top_cache: OrderedDict[str, tuple[float, list["TorrentResult"]]] = OrderedDict()
+_search_cache: OrderedDict[str, tuple[float, list[TorrentResult]]] = OrderedDict()
+_top_cache: OrderedDict[str, tuple[float, list[TorrentResult]]] = OrderedDict()
 
 # Provider state management
 _forced_provider: str | None = None  # Force a specific provider (by name)
@@ -44,10 +45,22 @@ _disabled_providers: set[str] = set()  # Disabled provider names
 _last_used_provider: str | None = None  # Track which provider was used last
 _provider_failures: dict[str, str] = {}  # Track last failure message per provider
 
+_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            transport=httpx.AsyncHTTPTransport(retries=2),
+        )
+    return _CLIENT
+
 
 def _cache_get(
-    cache: OrderedDict[str, tuple[float, list["TorrentResult"]]], key: str
-) -> list["TorrentResult"] | None:
+    cache: OrderedDict[str, tuple[float, list[TorrentResult]]], key: str
+) -> list[TorrentResult] | None:
     """Get item from cache if not expired."""
     entry = cache.get(key)
     if not entry:
@@ -62,9 +75,9 @@ def _cache_get(
 
 
 def _cache_set(
-    cache: OrderedDict[str, tuple[float, list["TorrentResult"]]],
+    cache: OrderedDict[str, tuple[float, list[TorrentResult]]],
     key: str,
-    results: list["TorrentResult"],
+    results: list[TorrentResult],
 ) -> None:
     """Store results in cache with current timestamp."""
     now = time.monotonic()
@@ -179,7 +192,7 @@ TRACKERS = [
 
 def _get_random_user_agent() -> str:
     """Return a random user agent for request spoofing."""
-    return random.choice(USER_AGENTS)  # nosec B311 — not used for security/crypto
+    return secrets.choice(USER_AGENTS)
 
 
 def _build_browser_headers(referer: str | None = None) -> dict[str, str]:
@@ -210,54 +223,45 @@ def _build_magnet(info_hash: str, name: str) -> str:
     return f"magnet:?xt=urn:btih:{info_hash}&dn={dn}{trackers}"
 
 
-def _get_cloudscraper_session() -> "cloudscraper.CloudScraper | None":
-    """Create a cloudscraper session for bypassing Cloudflare."""
-    if not CLOUDSCRAPER_AVAILABLE:
-        logger.debug("cloudscraper not available")
-        return None
-    try:
-        scraper = cloudscraper.create_scraper(
-            browser={
-                "browser": "chrome",
-                "platform": "windows",
-                "desktop": True,
-            },
-            delay=5,
-        )
-        return scraper
-    except Exception as exc:
-        logger.debug("Failed to create cloudscraper session: %s", exc)
-        return None
-
-
-def _fetch_with_cloudscraper(
+async def _fetch_with_cloudscraper(
     url: str,
     referer: str | None = None,
     timeout: int = 20,
 ) -> str | None:
     """Fetch a URL using cloudscraper to bypass Cloudflare.
 
+    Uses asyncio.to_thread as cloudscraper is synchronous.
     Returns HTML content or None if failed.
     """
-    scraper = _get_cloudscraper_session()
-    if not scraper:
+    if not CLOUDSCRAPER_AVAILABLE:
         return None
 
-    headers = _build_browser_headers(referer)
-    try:
-        resp = scraper.get(url, headers=headers, timeout=timeout)
-        resp.raise_for_status()
+    def _sync_fetch():
+        try:
+            scraper = cloudscraper.create_scraper(
+                browser={
+                    "browser": "chrome",
+                    "platform": "windows",
+                    "desktop": True,
+                },
+                delay=5,
+            )
+            headers = _build_browser_headers(referer)
+            resp = scraper.get(url, headers=headers, timeout=timeout)
+            resp.raise_for_status()
 
-        # Check if still blocked
-        text = resp.text
-        if "just a moment" in text.lower() or "cf-chl" in text.lower():
-            logger.debug("cloudscraper: still blocked by Cloudflare for %s", url)
+            # Check if still blocked
+            text = resp.text
+            if "just a moment" in text.lower() or "cf-chl" in text.lower():
+                logger.debug("cloudscraper: still blocked by Cloudflare for %s", url)
+                return None
+
+            return text
+        except Exception as exc:
+            logger.debug("cloudscraper fetch failed for %s: %s", url, exc)
             return None
 
-        return text
-    except Exception as exc:
-        logger.debug("cloudscraper fetch failed for %s: %s", url, exc)
-        return None
+    return await asyncio.to_thread(_sync_fetch)
 
 
 class TorrentResult:
@@ -298,14 +302,14 @@ class TorrentSource(ABC):
     timeout: int = 15
 
     @abstractmethod
-    def search(
+    async def search(
         self, query: str, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
         """Search for torrents."""
         pass
 
     @abstractmethod
-    def top(
+    async def top(
         self, category: str | None = None, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
         """Get top/trending torrents."""
@@ -313,16 +317,11 @@ class TorrentSource(ABC):
 
 
 class BitSearchSource(TorrentSource):
-    """BitSearch.to torrent source.
-
-    A meta-search engine that aggregates from multiple sources.
-    Provides HTML-based search with direct magnet links.
-    """
+    """BitSearch.to torrent source."""
 
     name = "BitSearch"
     base_url = os.environ.get("BITSEARCH_BASE_URL", "https://bitsearch.to")
 
-    # Regex patterns for parsing HTML
     _MAGNET_RE = re.compile(r'href="(magnet:\?[^"]+)"', re.IGNORECASE)
     _SEEDERS_RE = re.compile(
         r'text-green-600">\s*<i[^>]*></i>\s*'
@@ -336,44 +335,31 @@ class BitSearchSource(TorrentSource):
         r"<span>leechers</span>",
         re.IGNORECASE | re.DOTALL,
     )
-    _CARD_RE = re.compile(
-        r'<li class="card search-result[^"]*"[^>]*>(.*?)</li>',
-        re.IGNORECASE | re.DOTALL,
-    )
 
-    def _fetch(self, url: str) -> str:
-        """Fetch HTML with browser-like headers."""
+    async def _fetch(self, url: str) -> str:
         headers = _build_browser_headers(self.base_url)
-        resp = requests.get(url, headers=headers, timeout=self.timeout)
+        client = _get_client()
+        resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.text
 
     def _extract_name_from_magnet(self, magnet: str) -> str:
-        """Extract torrent name from magnet link's dn parameter."""
         match = re.search(r"dn=([^&]+)", magnet)
         if match:
             name = unquote(match.group(1))
-            # Remove [Bitsearch.to] prefix if present
             name = re.sub(r"^\[Bitsearch\.to\]\s*", "", name, flags=re.IGNORECASE)
             return name
         return "Unknown"
 
     def _parse_results(self, html_text: str) -> list[TorrentResult]:
-        """Parse search results from HTML."""
         results: list[TorrentResult] = []
-
-        # Find all magnet links and their positions
         magnets = list(self._MAGNET_RE.finditer(html_text))
         seeders_matches = list(self._SEEDERS_RE.finditer(html_text))
         leechers_matches = list(self._LEECHERS_RE.finditer(html_text))
 
-        # Each result appears twice in the HTML (desktop/mobile), so take every other
         seen_hashes: set[str] = set()
-
         for magnet_match in magnets:
             magnet = html.unescape(magnet_match.group(1))
-
-            # Extract info hash to deduplicate
             hash_match = re.search(r"btih:([a-fA-F0-9]+)", magnet)
             if not hash_match:
                 continue
@@ -381,15 +367,10 @@ class BitSearchSource(TorrentSource):
             if info_hash in seen_hashes:
                 continue
             seen_hashes.add(info_hash)
-
             name = self._extract_name_from_magnet(magnet)
-
-            # Find corresponding seeders/leechers by position
             pos = magnet_match.start()
             seeders = 0
             leechers = 0
-
-            # Find the closest seeder/leecher after this magnet
             for sm in seeders_matches:
                 if sm.start() > pos:
                     try:
@@ -397,7 +378,6 @@ class BitSearchSource(TorrentSource):
                     except ValueError:
                         pass
                     break
-
             for lm in leechers_matches:
                 if lm.start() > pos:
                     try:
@@ -405,7 +385,6 @@ class BitSearchSource(TorrentSource):
                     except ValueError:
                         pass
                     break
-
             results.append(
                 TorrentResult(
                     name=name,
@@ -415,41 +394,29 @@ class BitSearchSource(TorrentSource):
                     source=self.name,
                 )
             )
-
         return results
 
-    def search(
+    async def search(
         self, query: str, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
-        """Search BitSearch.to for torrents."""
         q = (query or "").strip()
         if not q:
             return []
-
         url = f"{self.base_url}/search?q={quote(q)}&page=1&sort=seeders"
         try:
-            html_text = self._fetch(url)
+            html_text = await self._fetch(url)
             results = self._parse_results(html_text)
             results = sorted(results, key=lambda r: r.seeders, reverse=True)[:10]
-            if results:
-                logger.debug("bitsearch search results: %s", len(results))
-                return results
+            return results
         except Exception as exc:
             logger.debug("bitsearch search failed: %s", exc)
             if debug_sink:
                 debug_sink("bitsearch search failed", str(exc))
-
         return []
 
-    def top(
+    async def top(
         self, category: str | None = None, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
-        """Get trending torrents from BitSearch.
-
-        BitSearch doesn't have a dedicated top page, so we search for
-        common trending terms based on category.
-        """
-        # Map categories to search terms
         category_terms = {
             "movies": "1080p",
             "video": "1080p",
@@ -460,53 +427,44 @@ class BitSearchSource(TorrentSource):
             "audio": "MP3 320",
             "games": "PC game",
             "apps": "software",
-            None: "2024",  # Default to recent content
+            None: "2024",
         }
         term = category_terms.get(category, category_terms[None])
-        return self.search(term, debug_sink)
+        return await self.search(term, debug_sink)
 
 
 class EZTVSource(TorrentSource):
-    """EZTV.re torrent source for TV shows.
-
-    EZTV provides a JSON API for searching TV shows by IMDB ID or keywords.
-    """
+    """EZTV.re torrent source for TV shows."""
 
     name = "EZTV"
     base_url = os.environ.get("EZTV_BASE_URL", "https://eztv.re")
 
-    def _fetch_json(self, url: str) -> dict:
-        """Fetch JSON from EZTV API."""
+    async def _fetch_json(self, url: str) -> dict:
         headers = {
             "User-Agent": _get_random_user_agent(),
             "Accept": "application/json",
         }
-        resp = requests.get(url, headers=headers, timeout=self.timeout)
+        client = _get_client()
+        resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.json()
 
     def _parse_results(self, data: dict) -> list[TorrentResult]:
-        """Parse EZTV API response."""
         results: list[TorrentResult] = []
         torrents = data.get("torrents", [])
-
         for item in torrents:
             if not isinstance(item, dict):
                 continue
-
             name = str(item.get("title") or item.get("filename") or "").strip()
             magnet = str(item.get("magnet_url") or "").strip()
-
             if not name or not magnet:
                 continue
-
             try:
                 seeders = int(item.get("seeds") or 0)
                 leechers = int(item.get("peers") or 0)
             except ValueError:
                 seeders = 0
                 leechers = 0
-
             size = None
             size_bytes = item.get("size_bytes")
             if size_bytes:
@@ -517,8 +475,7 @@ class EZTVSource(TorrentSource):
                     else:
                         size = f"{size_mb:.1f} MB"
                 except ValueError, TypeError:
-                    logger.error("invalid size_bytes: %s", size_bytes)
-
+                    pass
             results.append(
                 TorrentResult(
                     name=name,
@@ -529,103 +486,74 @@ class EZTVSource(TorrentSource):
                     size=size,
                 )
             )
-
         return results
 
-    def search(
+    async def search(
         self, query: str, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
-        """Search EZTV for TV shows.
-
-        Note: EZTV search is limited - it works best with IMDB IDs.
-        For general searches, results may be limited.
-        """
         q = (query or "").strip()
         if not q:
             return []
-
-        # Check if query is an IMDB ID
         imdb_match = re.match(r"^tt\d+$", q, re.IGNORECASE)
-
         if imdb_match:
             url = f"{self.base_url}/api/get-torrents?imdb_id={q}&limit=20"
         else:
-            # EZTV doesn't have a keyword search API, so we skip
-            # Could implement page scraping in the future
             return []
-
         try:
-            data = self._fetch_json(url)
+            data = await self._fetch_json(url)
             results = self._parse_results(data)
             results = sorted(results, key=lambda r: r.seeders, reverse=True)[:10]
-            if results:
-                logger.debug("eztv search results: %s", len(results))
-                return results
+            return results
         except Exception as exc:
             logger.debug("eztv search failed: %s", exc)
             if debug_sink:
                 debug_sink("eztv search failed", str(exc))
-
         return []
 
-    def top(
+    async def top(
         self, category: str | None = None, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
-        """Get latest torrents from EZTV."""
-        # EZTV only has TV content, so category is ignored
         url = f"{self.base_url}/api/get-torrents?limit=20"
-
         try:
-            data = self._fetch_json(url)
+            data = await self._fetch_json(url)
             results = self._parse_results(data)
             results = sorted(results, key=lambda r: r.seeders, reverse=True)[:10]
-            if results:
-                logger.debug("eztv top results: %s", len(results))
-                return results
+            return results
         except Exception as exc:
             logger.debug("eztv top failed: %s", exc)
             if debug_sink:
                 debug_sink("eztv top failed", str(exc))
-
         return []
 
 
 class X1337Source(TorrentSource):
-    """1337x.to torrent source.
-
-    Uses cloudscraper to bypass Cloudflare protection.
-    """
+    """1337x.to torrent source."""
 
     name = "1337x"
-    enabled = CLOUDSCRAPER_AVAILABLE  # Enable if cloudscraper is installed
+    enabled = CLOUDSCRAPER_AVAILABLE
     base_url = os.environ.get("X1337_BASE_URL", "https://1337x.to")
 
-    # Regex patterns for parsing
     _ROW_RE = re.compile(r"<tr[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
     _NAME_RE = re.compile(r'/torrent/\d+/([^/"]+)/', re.IGNORECASE)
     _SEEDS_RE = re.compile(r'<td class="seeds">(\d+)</td>', re.IGNORECASE)
     _LEECHES_RE = re.compile(r'<td class="leeches">(\d+)</td>', re.IGNORECASE)
     _DETAIL_LINK_RE = re.compile(r'<a href="(/torrent/[^"]+)"', re.IGNORECASE)
 
-    def _fetch(self, url: str) -> str:
-        """Fetch HTML using cloudscraper to bypass Cloudflare."""
-        # Try cloudscraper first
-        html_text = _fetch_with_cloudscraper(
+    async def _fetch(self, url: str) -> str:
+        html_text = await _fetch_with_cloudscraper(
             url, referer=self.base_url, timeout=self.timeout
         )
         if html_text:
             return html_text
-
-        # Fallback to regular requests (may fail on Cloudflare)
         headers = _build_browser_headers(self.base_url)
-        resp = requests.get(url, headers=headers, timeout=self.timeout)
+        client = _get_client()
+        resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.text
 
-    def _get_magnet_from_detail_page(self, detail_url: str) -> str | None:
-        """Fetch the magnet link from a torrent detail page."""
+    async def _get_magnet_from_detail_page(self, detail_url: str) -> str | None:
         try:
-            html_text = self._fetch(detail_url)
+            html_text = await self._fetch(detail_url)
             magnet_match = re.search(r'href="(magnet:\?[^"]+)"', html_text)
             if magnet_match:
                 return html.unescape(magnet_match.group(1))
@@ -634,28 +562,22 @@ class X1337Source(TorrentSource):
         return None
 
     def _parse_search_results(self, html_text: str) -> list[dict]:
-        """Parse search results (without magnets yet)."""
         results: list[dict] = []
-
         for row in self._ROW_RE.findall(html_text):
             detail_match = self._DETAIL_LINK_RE.search(row)
             seeds_match = self._SEEDS_RE.search(row)
             leeches_match = self._LEECHES_RE.search(row)
-
             if not detail_match:
                 continue
-
             detail_path = detail_match.group(1)
             name_match = self._NAME_RE.search(detail_path)
             name = unquote(name_match.group(1)).replace("-", " ") if name_match else ""
-
             try:
                 seeders = int(seeds_match.group(1)) if seeds_match else 0
                 leechers = int(leeches_match.group(1)) if leeches_match else 0
             except ValueError:
                 seeders = 0
                 leechers = 0
-
             results.append(
                 {
                     "name": name,
@@ -664,36 +586,28 @@ class X1337Source(TorrentSource):
                     "leechers": leechers,
                 }
             )
-
         return results
 
-    def search(
+    async def search(
         self, query: str, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
-        """Search 1337x for torrents."""
         if not self.enabled:
             return []
-
         q = (query or "").strip()
         if not q:
             return []
-
         url = f"{self.base_url}/search/{quote(q)}/1/"
         try:
-            html_text = self._fetch(url)
-
-            # Check for Cloudflare block
+            html_text = await self._fetch(url)
             if "just a moment" in html_text.lower() or "cf-chl" in html_text.lower():
                 raise RuntimeError("1337x blocked by Cloudflare")
-
             partial_results = self._parse_search_results(html_text)
             partial_results = sorted(
                 partial_results, key=lambda r: r["seeders"], reverse=True
             )[:10]
-
             results: list[TorrentResult] = []
             for item in partial_results:
-                magnet = self._get_magnet_from_detail_page(item["detail_url"])
+                magnet = await self._get_magnet_from_detail_page(item["detail_url"])
                 if magnet:
                     results.append(
                         TorrentResult(
@@ -704,26 +618,18 @@ class X1337Source(TorrentSource):
                             source=self.name,
                         )
                     )
-
-            if results:
-                logger.debug("1337x search results: %s", len(results))
-                return results
-
+            return results
         except Exception as exc:
             logger.debug("1337x search failed: %s", exc)
             if debug_sink:
                 debug_sink("1337x search failed", str(exc))
-
         return []
 
-    def top(
+    async def top(
         self, category: str | None = None, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
-        """Get trending torrents from 1337x."""
         if not self.enabled:
             return []
-
-        # 1337x top categories
         category_paths = {
             "movies": "/top-100-movies",
             "video": "/top-100-movies",
@@ -737,18 +643,14 @@ class X1337Source(TorrentSource):
         }
         path = category_paths.get(category, category_paths[None])
         url = f"{self.base_url}{path}"
-
         try:
-            html_text = self._fetch(url)
-
+            html_text = await self._fetch(url)
             if "just a moment" in html_text.lower() or "cf-chl" in html_text.lower():
                 raise RuntimeError("1337x blocked by Cloudflare")
-
             partial_results = self._parse_search_results(html_text)[:10]
-
             results: list[TorrentResult] = []
             for item in partial_results:
-                magnet = self._get_magnet_from_detail_page(item["detail_url"])
+                magnet = await self._get_magnet_from_detail_page(item["detail_url"])
                 if magnet:
                     results.append(
                         TorrentResult(
@@ -759,30 +661,21 @@ class X1337Source(TorrentSource):
                             source=self.name,
                         )
                     )
-
-            if results:
-                logger.debug("1337x top results: %s", len(results))
-                return results
-
+            return results
         except Exception as exc:
             logger.debug("1337x top failed: %s", exc)
             if debug_sink:
                 debug_sink("1337x top failed", str(exc))
-
         return []
 
 
 class LimeTorrentsSource(TorrentSource):
-    """LimeTorrents torrent source.
-
-    Uses cloudscraper to bypass Cloudflare protection.
-    """
+    """LimeTorrents torrent source."""
 
     name = "LimeTorrents"
     enabled = CLOUDSCRAPER_AVAILABLE
     base_url = os.environ.get("LIMETORRENTS_BASE_URL", "https://www.limetorrents.lol")
 
-    # Regex patterns for parsing
     _ROW_RE = re.compile(
         r'<tr[^>]*class="[^"]*"[^>]*>(.*?)</tr>',
         re.IGNORECASE | re.DOTALL,
@@ -801,48 +694,37 @@ class LimeTorrentsSource(TorrentSource):
     )
     _HASH_RE = re.compile(r"/([a-fA-F0-9]{40})\.torrent", re.IGNORECASE)
 
-    def _fetch(self, url: str) -> str:
-        """Fetch HTML using cloudscraper to bypass Cloudflare."""
-        html_text = _fetch_with_cloudscraper(
+    async def _fetch(self, url: str) -> str:
+        html_text = await _fetch_with_cloudscraper(
             url, referer=self.base_url, timeout=self.timeout
         )
         if html_text:
             return html_text
-
         headers = _build_browser_headers(self.base_url)
-        resp = requests.get(url, headers=headers, timeout=self.timeout)
+        client = _get_client()
+        resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.text
 
     def _parse_results(self, html_text: str) -> list[TorrentResult]:
-        """Parse search/top results from HTML."""
         results: list[TorrentResult] = []
-
-        # Find table rows with torrent info
         for row in self._ROW_RE.findall(html_text):
             name_match = self._NAME_LINK_RE.search(row)
             seeds_match = self._SEEDS_RE.search(row)
             leeches_match = self._LEECHES_RE.search(row)
-
             if not name_match:
                 continue
-
             name = html.unescape(name_match.group(2).strip())
-
-            # Extract info hash from torrent link
             hash_match = self._HASH_RE.search(row)
             if not hash_match:
                 continue
-
             info_hash = hash_match.group(1).upper()
-
             try:
                 seeders = int(seeds_match.group(1)) if seeds_match else 0
                 leechers = int(leeches_match.group(1)) if leeches_match else 0
             except ValueError:
                 seeders = 0
                 leechers = 0
-
             magnet = _build_magnet(info_hash, name)
             results.append(
                 TorrentResult(
@@ -853,50 +735,35 @@ class LimeTorrentsSource(TorrentSource):
                     source=self.name,
                 )
             )
-
         return results
 
-    def search(
+    async def search(
         self, query: str, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
-        """Search LimeTorrents."""
         if not self.enabled:
             return []
-
         q = (query or "").strip()
         if not q:
             return []
-
         url = f"{self.base_url}/search/all/{quote(q)}/"
-
         try:
-            html_text = self._fetch(url)
-
+            html_text = await self._fetch(url)
             if "just a moment" in html_text.lower() or "cf-chl" in html_text.lower():
                 raise RuntimeError("LimeTorrents blocked by Cloudflare")
-
             results = self._parse_results(html_text)
             results = sorted(results, key=lambda r: r.seeders, reverse=True)[:10]
-
-            if results:
-                logger.debug("limetorrents search results: %s", len(results))
-                return results
-
+            return results
         except Exception as exc:
             logger.debug("limetorrents search failed: %s", exc)
             if debug_sink:
                 debug_sink("limetorrents search failed", str(exc))
-
         return []
 
-    def top(
+    async def top(
         self, category: str | None = None, debug_sink: Callable | None = None
     ) -> list[TorrentResult]:
-        """Get top torrents from LimeTorrents."""
         if not self.enabled:
             return []
-
-        # LimeTorrents category paths
         category_paths = {
             "movies": "/browse-torrents/Movies/",
             "video": "/browse-torrents/Movies/",
@@ -911,29 +778,20 @@ class LimeTorrentsSource(TorrentSource):
         }
         path = category_paths.get(category, category_paths[None])
         url = f"{self.base_url}{path}"
-
         try:
-            html_text = self._fetch(url)
-
+            html_text = await self._fetch(url)
             if "just a moment" in html_text.lower() or "cf-chl" in html_text.lower():
                 raise RuntimeError("LimeTorrents blocked by Cloudflare")
-
             results = self._parse_results(html_text)
             results = sorted(results, key=lambda r: r.seeders, reverse=True)[:10]
-
-            if results:
-                logger.debug("limetorrents top results: %s", len(results))
-                return results
-
+            return results
         except Exception as exc:
             logger.debug("limetorrents top failed: %s", exc)
             if debug_sink:
                 debug_sink("limetorrents top failed", str(exc))
-
         return []
 
 
-# Registry of all available sources in priority order
 SOURCES: list[TorrentSource] = [
     BitSearchSource(),
     EZTVSource(),
@@ -943,55 +801,30 @@ SOURCES: list[TorrentSource] = [
 
 
 def get_enabled_sources() -> list[TorrentSource]:
-    """Get list of enabled torrent sources, respecting forced/disabled settings."""
     global _forced_provider
-
-    # If a provider is forced, return only that provider if available
     if _forced_provider:
         for source in SOURCES:
             if source.name == _forced_provider:
                 if source.enabled and source.name not in _disabled_providers:
                     return [source]
-                # If forced provider is not available, fall through to all
                 break
-
-    # Return all enabled sources that aren't disabled
     return [s for s in SOURCES if s.enabled and s.name not in _disabled_providers]
 
 
-def fallback_search(
+async def fallback_search(
     query: str, debug_sink: Callable | None = None
 ) -> list[TorrentResult]:
-    """Search across all fallback sources until results are found.
-
-    Results are cached for 5 minutes to reduce external requests.
-    """
     global _last_used_provider, _provider_failures
     cache_key = query.strip().lower()
-
-    # Check cache first
     cached = _cache_get(_search_cache, cache_key)
     if cached is not None:
-        logger.debug(
-            "fallback search cache hit for %r (%d results)", query, len(cached)
-        )
-        if debug_sink:
-            debug_sink("cache hit", f"found {len(cached)} cached results")
         return cached
-
     for source in get_enabled_sources():
         try:
-            results = source.search(query, debug_sink)
+            results = await source.search(query, debug_sink)
             if results:
-                logger.info(
-                    "fallback search found %d results from %s",
-                    len(results),
-                    source.name,
-                )
-                # Track which provider was used
                 _last_used_provider = source.name
                 _provider_failures.pop(source.name, None)
-                # Cache the results
                 _cache_set(_search_cache, cache_key, results)
                 return results
         except Exception as exc:
@@ -999,45 +832,24 @@ def fallback_search(
             _provider_failures[source.name] = str(exc)
             if debug_sink:
                 debug_sink(f"fallback {source.name} failed", str(exc))
-            continue
-
     _last_used_provider = None
     return []
 
 
-def fallback_top(
+async def fallback_top(
     category: str | None = None, debug_sink: Callable | None = None
 ) -> list[TorrentResult]:
-    """Get top torrents from fallback sources.
-
-    Results are cached for 5 minutes to reduce external requests.
-    """
     global _last_used_provider, _provider_failures
     cache_key = f"top:{category or 'all'}"
-
-    # Check cache first
     cached = _cache_get(_top_cache, cache_key)
     if cached is not None:
-        logger.debug(
-            "fallback top cache hit for %r (%d results)", category, len(cached)
-        )
-        if debug_sink:
-            debug_sink("cache hit", f"found {len(cached)} cached results")
         return cached
-
     for source in get_enabled_sources():
         try:
-            results = source.top(category, debug_sink)
+            results = await source.top(category, debug_sink)
             if results:
-                logger.info(
-                    "fallback top found %d results from %s",
-                    len(results),
-                    source.name,
-                )
-                # Track which provider was used
                 _last_used_provider = source.name
                 _provider_failures.pop(source.name, None)
-                # Cache the results
                 _cache_set(_top_cache, cache_key, results)
                 return results
         except Exception as exc:
@@ -1045,7 +857,5 @@ def fallback_top(
             _provider_failures[source.name] = str(exc)
             if debug_sink:
                 debug_sink(f"fallback {source.name} failed", str(exc))
-            continue
-
     _last_used_provider = None
     return []

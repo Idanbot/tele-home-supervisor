@@ -6,9 +6,8 @@ import time
 
 import pytest
 
-from tele_home_supervisor.models.bot_state import BotState
 from tele_home_supervisor.models import persistence
-
+from tele_home_supervisor.models.bot_state import BotState
 
 # ---------------------------------------------------------------------------
 # BotState tracking

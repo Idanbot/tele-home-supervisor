@@ -33,7 +33,7 @@ class DummyMessage:
         self.photos: list[tuple[str, str]] = []  # (photo_url, caption)
         self._edit_text_calls: list[str] = []
 
-    async def reply_text(self, text: str, **_: Any) -> "DummyMessage":
+    async def reply_text(self, text: str, **_: Any) -> DummyMessage:
         self.replies.append(text)
         return self
 

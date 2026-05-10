@@ -1,13 +1,13 @@
 """Tests for handler commands - system, docker, network."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from tele_home_supervisor import config
-from tele_home_supervisor.handlers import system, docker, network
-from tele_home_supervisor.models.managed_host import ManagedHost
-
+import pytest
 from conftest import DummyContext, DummyUpdate
+
+from tele_home_supervisor import config
+from tele_home_supervisor.handlers import docker, network, system
+from tele_home_supervisor.models.managed_host import ManagedHost
 
 
 class TestSystemHandlers:

@@ -20,7 +20,7 @@ from ..alerting import (
     parse_threshold,
 )
 from ..state import BotState
-from .common import guard_sensitive, get_state, set_audit_target, tracked_reply_photo
+from .common import get_state, guard_sensitive, set_audit_target, tracked_reply_photo
 
 logger = logging.getLogger(__name__)
 

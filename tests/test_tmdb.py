@@ -1,6 +1,6 @@
-from tele_home_supervisor import tmdb
-
 from conftest import DummyResponse
+
+from tele_home_supervisor import tmdb
 
 
 def test_tmdb_extract_items_filters_and_limits() -> None:

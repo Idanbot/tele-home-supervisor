@@ -12,11 +12,13 @@ import logging
 import os
 import tempfile
 import time
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .. import config
 from .alerts import AlertRule, AlertState
+from .audit import AuditEntry
 from .auth import AuthGrantRecord
 
 if TYPE_CHECKING:
@@ -26,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def serialize(state: BotState) -> dict:
-    """Build a JSON-safe dict from *state*."""
+    """Build a JSON-safe dict from *state* (excluding high-frequency caches)."""
     return {
         "gameoffers_muted": list(state.gameoffers_muted),
         "hackernews_muted": list(state.hackernews_muted),
@@ -60,6 +62,9 @@ def serialize(state: BotState) -> dict:
         "blocked_ids": sorted(state.blocked_ids),
         "auth_failures": _serialize_auth_failures(state),
         "media_messages": state.media_messages,
+        "reminders": state.reminders,
+        "last_game_offers_run": state.last_game_offers_run,
+        "last_intel_briefing_run": state.last_intel_briefing_run,
     }
 
 
@@ -74,7 +79,7 @@ def save(state: BotState, path: Path) -> None:
 
 
 def load(state: BotState, path: Path) -> None:
-    """Populate *state* from *path*.  No-op when the file is missing."""
+    """Populate *state* from *path*. No-op when the file is missing."""
     try:
         if not path.exists():
             return
@@ -103,10 +108,95 @@ def load(state: BotState, path: Path) -> None:
         _deserialize_auth_grants(state, data.get("auth_grants") or [])
         _deserialize_auth_failures(state, data.get("auth_failures") or [])
         state.media_messages = _load_media_messages(data.get("media_messages") or [])
+        state.reminders = data.get("reminders") or []
+
+        state.last_game_offers_run = float(data.get("last_game_offers_run") or 0.0)
+        state.last_intel_briefing_run = float(
+            data.get("last_intel_briefing_run") or 0.0
+        )
+
+        # Legacy fallback for high-frequency caches if they were in the main file
+        if "audit_log" in data:
+            _deserialize_audit_log(state, data["audit_log"])
+        if "magnet_cache" in data:
+            _deserialize_magnet_cache(state, data["magnet_cache"])
 
         logger.info("Loaded bot state from %s", path)
     except Exception:
         logger.exception("Failed to load bot state")
+
+
+# ── Audit Log ───────────────────────────────────────────────────────
+
+
+def save_audit(state: BotState, path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(_serialize_audit_log(state), indent=2)
+        _atomic_write_text(path, payload)
+    except Exception:
+        logger.exception("Failed to save audit log")
+
+
+def load_audit(state: BotState, path: Path) -> None:
+    try:
+        if not path.exists():
+            return
+        data = json.loads(path.read_text())
+        _deserialize_audit_log(state, data)
+    except Exception:
+        logger.exception("Failed to load audit log")
+
+
+def _serialize_audit_log(state: BotState) -> dict:
+    return {
+        str(chat_id): [entry.__dict__ for entry in entries]
+        for chat_id, entries in state.audit_log.items()
+    }
+
+
+def _deserialize_audit_log(state: BotState, data: dict) -> None:
+    state.audit_log = {}
+    for chat_id_str, entries_raw in data.items():
+        try:
+            chat_id = int(chat_id_str)
+            entries = deque(maxlen=200)
+            for e in entries_raw:
+                entries.append(AuditEntry(**e))
+            state.audit_log[chat_id] = entries
+        except TypeError, ValueError:
+            continue
+
+
+# ── Magnet Cache ─────────────────────────────────────────────────────
+
+
+def save_magnets(state: BotState, path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(list(state.magnet_cache.items()), indent=2)
+        _atomic_write_text(path, payload)
+    except Exception:
+        logger.exception("Failed to save magnet cache")
+
+
+def load_magnets(state: BotState, path: Path) -> None:
+    try:
+        if not path.exists():
+            return
+        data = json.loads(path.read_text())
+        _deserialize_magnet_cache(state, data)
+    except Exception:
+        logger.exception("Failed to load magnet cache")
+
+
+def _deserialize_magnet_cache(state: BotState, data: list) -> None:
+    from collections import OrderedDict
+
+    state.magnet_cache = OrderedDict()
+    for item in data:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            state.magnet_cache[item[0]] = item[1]
 
 
 # ── Auth grants ─────────────────────────────────────────────────────
@@ -179,15 +269,17 @@ def _serialize_auth_failures(state: BotState) -> list[dict]:
     user_ids = set(state.auth_failures) | set(state.auth_cooldowns)
     for uid in sorted(user_ids):
         attempts = int(state.auth_failures.get(uid, 0))
+        backoff_level = int(state.auth_backoff_level.get(uid, 0))
         cooldown_until = state.auth_cooldowns.get(uid)
         if cooldown_until is not None and cooldown_until <= now:
             cooldown_until = None
-        if attempts <= 0 and cooldown_until is None:
+        if attempts <= 0 and backoff_level <= 0 and cooldown_until is None:
             continue
         items.append(
             {
                 "user_id": uid,
                 "attempts": attempts,
+                "backoff_level": backoff_level,
                 "cooldown_until": cooldown_until,
             }
         )
@@ -197,17 +289,21 @@ def _serialize_auth_failures(state: BotState) -> list[dict]:
 def _deserialize_auth_failures(state: BotState, items: list) -> None:
     now = time.time()
     state.auth_failures = {}
+    state.auth_backoff_level = {}
     state.auth_cooldowns = {}
     for item in items:
         if not isinstance(item, dict):
             continue
         uid = _coerce_int(item.get("user_id"))
         attempts = _coerce_int(item.get("attempts", 0))
+        backoff_level = _coerce_int(item.get("backoff_level", 0))
         cooldown_until = item.get("cooldown_until")
         if uid is None:
             continue
         if attempts is not None and attempts > 0:
             state.auth_failures[uid] = attempts
+        if backoff_level is not None and backoff_level > 0:
+            state.auth_backoff_level[uid] = backoff_level
         try:
             cooldown_value = (
                 float(cooldown_until) if cooldown_until is not None else None
@@ -245,6 +341,11 @@ def _atomic_write_text(path: Path, payload: str) -> None:
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+            # Restrict permissions to owner only (0600)
+            try:
+                os.fchmod(handle.fileno(), 0o600)
+            except OSError:
+                pass  # May not be supported on all filesystems
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())

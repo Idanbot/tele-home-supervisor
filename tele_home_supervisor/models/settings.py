@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Set
 
 from .managed_host import ManagedHost
 
@@ -14,11 +13,11 @@ class Settings:
 
     BOT_TOKEN: str | None
     OWNER_ID: int | None
-    ALLOWED_CHAT_IDS: Set[int]
-    BLOCKED_IDS: Set[int]
+    ALLOWED_CHAT_IDS: set[int]
+    BLOCKED_IDS: set[int]
     RATE_LIMIT_S: float
     SHOW_WAN: bool
-    WATCH_PATHS: List[str]
+    WATCH_PATHS: list[str]
     QBT_HOST: str
     QBT_PORT: int
     QBT_USER: str
@@ -29,8 +28,8 @@ class Settings:
     BOT_AUTH_TOTP_SECRET: str | None
     BOT_AUTH_TTL_HOURS: float
     BOT_AUTO_DELETE_MEDIA_HOURS: float
-    ALERT_PING_LAN_TARGETS: List[str]
-    ALERT_PING_WAN_TARGETS: List[str]
+    ALERT_PING_LAN_TARGETS: list[str]
+    ALERT_PING_WAN_TARGETS: list[str]
     WOL_TARGET_IP: str
     WOL_TARGET_MAC: str
     WOL_BROADCAST_IP: str
@@ -43,7 +42,7 @@ class Settings:
     WOL_VERIFY_TIMEOUT_S: float
     WOL_VERIFY_INTERVAL_S: float
     DEFAULT_MANAGED_HOST: str
-    MANAGED_HOSTS: List[ManagedHost]
+    MANAGED_HOSTS: list[ManagedHost]
 
     # TMDB
     TMDB_API_KEY: str
@@ -53,7 +52,7 @@ class Settings:
     # PirateBay / TPB
     TPB_BASE_URL: str
     TPB_API_BASE_URL: str
-    TPB_API_BASE_URLS: List[str]
+    TPB_API_BASE_URLS: list[str]
     TPB_USER_AGENT: str
     TPB_COOKIE: str
     TPB_REFERER: str

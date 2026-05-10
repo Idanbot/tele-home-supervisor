@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
 from tele_home_supervisor import utils
 
 

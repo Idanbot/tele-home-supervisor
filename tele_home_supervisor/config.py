@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Set, List
+from functools import lru_cache
 
 from .models.managed_host import ManagedHost
 from .models.settings import Settings
@@ -13,19 +13,7 @@ from .models.settings import Settings
 logger = logging.getLogger(__name__)
 
 
-def _split_ints(s: str) -> Set[int]:
-    """Parse comma-separated string into a set of integers.
-
-    Args:
-        s: Comma-separated string of integers (e.g., "123,456,789")
-
-    Returns:
-        Set of parsed integers. Invalid entries are silently skipped.
-
-    Example:
-        >>> _split_ints("123,456,invalid,789")
-        {123, 456, 789}
-    """
+def _split_ints(s: str) -> set[int]:
     out = set()
     for part in (s or "").split(","):
         p = part.strip()
@@ -41,24 +29,11 @@ def _read_optional_int(name: str) -> int | None:
     return int(value) if value.isdigit() else None
 
 
-def _split_paths(s: str) -> List[str]:
-    """Parse comma-separated string into a list of filesystem paths.
-
-    Args:
-        s: Comma-separated string of paths. Defaults to "/,/srv/media" if empty.
-
-    Returns:
-        List of non-empty path strings.
-
-    Example:
-        >>> _split_paths("/home,/var/log")
-        ['/home', '/var/log']
-    """
+def _split_paths(s: str) -> list[str]:
     return [p.strip() for p in (s or "/,/srv/media").split(",") if p.strip()]
 
 
-def _split_csv(s: str) -> List[str]:
-    """Parse comma-separated string into a list of values."""
+def _split_csv(s: str) -> list[str]:
     return [p.strip() for p in (s or "").split(",") if p.strip()]
 
 
@@ -199,16 +174,9 @@ def _legacy_wol_host() -> ManagedHost | None:
     )
 
 
-def _read_settings() -> Settings:
-    """Read all configuration from environment variables.
-
-    Returns:
-        Settings object with all configuration values.
-
-    Note:
-        Invalid numeric values fall back to sensible defaults.
-        Boolean values accept: 1/true/yes (case-insensitive) as True.
-    """
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Read configuration from environment variables (memoized)."""
     token = os.environ.get("BOT_TOKEN") or None
     owner_id = _read_optional_int("OWNER_ID")
     allowed = _split_ints(os.environ.get("ALLOWED_CHAT_IDS", ""))
@@ -227,8 +195,18 @@ def _read_settings() -> Settings:
         qbt_port = int(qbt_port_raw) if qbt_port_raw else 8080
     except Exception:
         qbt_port = 8080
-    qbt_user = os.environ.get("QBT_USER") or "admin"
-    qbt_pass = os.environ.get("QBT_PASS") or "adminadmin"
+
+    qbt_user = os.environ.get("QBT_USER")
+    qbt_pass = os.environ.get("QBT_PASS")
+
+    # Warn about default qBittorrent credentials if they are being used by omission
+    if qbt_user is None:
+        logger.debug("QBT_USER not set, using default 'admin'")
+        qbt_user = "admin"
+    if qbt_pass is None:
+        logger.debug("QBT_PASS not set, using default 'adminadmin'")
+        qbt_pass = "adminadmin"  # noqa: S105 # nosec B105
+
     try:
         qbt_timeout = float(os.environ.get("QBT_TIMEOUT_S", "8") or "8")
     except Exception:
@@ -257,9 +235,9 @@ def _read_settings() -> Settings:
         host.name == legacy_host.name for host in managed_hosts
     ):
         managed_hosts.append(legacy_host)
-    default_managed_host = (os.environ.get("DEFAULT_MANAGED_HOST") or "").strip()
-    if not default_managed_host and len(managed_hosts) == 1:
-        default_managed_host = managed_hosts[0].name
+    default_managed_host_name = (os.environ.get("DEFAULT_MANAGED_HOST") or "").strip()
+    if not default_managed_host_name and len(managed_hosts) == 1:
+        default_managed_host_name = managed_hosts[0].name
     wol_verify_timeout_s = _read_optional_float("WOL_VERIFY_TIMEOUT_S", 180.0)
     wol_verify_interval_s = _read_optional_float("WOL_VERIFY_INTERVAL_S", 5.0)
 
@@ -325,7 +303,7 @@ def _read_settings() -> Settings:
         else "",
         WOL_VERIFY_TIMEOUT_S=wol_verify_timeout_s,
         WOL_VERIFY_INTERVAL_S=wol_verify_interval_s,
-        DEFAULT_MANAGED_HOST=default_managed_host,
+        DEFAULT_MANAGED_HOST=default_managed_host_name,
         MANAGED_HOSTS=managed_hosts,
         TMDB_API_KEY=tmdb_api_key,
         TMDB_BASE_URL=tmdb_base_url,
@@ -339,29 +317,31 @@ def _read_settings() -> Settings:
     )
 
 
-settings = _read_settings()
-
-
 def validate_settings() -> None:
-    """Validate critical configuration and log warnings for issues.
-
-    This function checks BOT_TOKEN and ALLOWED_CHAT_IDS, logging appropriate
-    error/warning messages if they are not configured correctly.
-    """
-    if settings.BOT_TOKEN is None:
+    """Validate critical configuration and log warnings for issues."""
+    s = get_settings()
+    if s.BOT_TOKEN is None:
         logger.error("BOT_TOKEN environment variable is not set")
-    if not settings.ALLOWED_CHAT_IDS:
+    if not s.ALLOWED_CHAT_IDS:
         logger.warning(
             "ALLOWED_CHAT_IDS is empty; guarded commands will be unauthorized."
         )
-    if settings.BOT_AUTH_TOTP_SECRET is None:
+    if s.BOT_AUTH_TOTP_SECRET is None:
         logger.warning("BOT_AUTH_TOTP_SECRET is not set; /auth will be unavailable.")
-    if settings.DEFAULT_MANAGED_HOST and not any(
-        host.matches(settings.DEFAULT_MANAGED_HOST) for host in settings.MANAGED_HOSTS
+
+    # High severity check for default QBT credentials
+    if s.QBT_USER == "admin" and s.QBT_PASS == "adminadmin":  # noqa: S105 # nosec B105
+        logger.warning(
+            "CRITICAL SECURITY: Bot is using default qBittorrent credentials (admin/adminadmin). "
+            "Please set QBT_USER and QBT_PASS environment variables."
+        )
+
+    if s.DEFAULT_MANAGED_HOST and not any(
+        host.matches(s.DEFAULT_MANAGED_HOST) for host in s.MANAGED_HOSTS
     ):
         logger.warning(
             "DEFAULT_MANAGED_HOST=%s does not match any configured MANAGED_HOSTS entry.",
-            settings.DEFAULT_MANAGED_HOST,
+            s.DEFAULT_MANAGED_HOST,
         )
 
 
@@ -370,7 +350,8 @@ def get_managed_host(name_or_alias: str) -> ManagedHost | None:
     needle = (name_or_alias or "").strip()
     if not needle:
         return None
-    for host in settings.MANAGED_HOSTS:
+    s = get_settings()
+    for host in s.MANAGED_HOSTS:
         if host.matches(needle):
             return host
     return None
@@ -378,43 +359,51 @@ def get_managed_host(name_or_alias: str) -> ManagedHost | None:
 
 def default_managed_host() -> ManagedHost | None:
     """Return the configured default managed host, if any."""
-    if settings.DEFAULT_MANAGED_HOST:
-        host = get_managed_host(settings.DEFAULT_MANAGED_HOST)
+    s = get_settings()
+    if s.DEFAULT_MANAGED_HOST:
+        host = get_managed_host(s.DEFAULT_MANAGED_HOST)
         if host is not None:
             return host
-    if len(settings.MANAGED_HOSTS) == 1:
-        return settings.MANAGED_HOSTS[0]
+    if len(s.MANAGED_HOSTS) == 1:
+        return s.MANAGED_HOSTS[0]
     return None
 
 
-# Exported constants
-TOKEN: str | None = settings.BOT_TOKEN
-OWNER_ID: int | None = settings.OWNER_ID
-ALLOWED: set[int] = settings.ALLOWED_CHAT_IDS
-BLOCKED_IDS: set[int] = settings.BLOCKED_IDS
-RATE_LIMIT_S: float = settings.RATE_LIMIT_S
-SHOW_WAN: bool = settings.SHOW_WAN
-WATCH_PATHS: list[str] = settings.WATCH_PATHS
-OLLAMA_HOST: str = settings.OLLAMA_HOST
-OLLAMA_MODEL: str = settings.OLLAMA_MODEL
-QBT_TIMEOUT_S: float = settings.QBT_TIMEOUT_S
-BOT_AUTH_TOTP_SECRET: str | None = settings.BOT_AUTH_TOTP_SECRET
-BOT_AUTH_TTL_HOURS: float = settings.BOT_AUTH_TTL_HOURS
-BOT_AUTO_DELETE_MEDIA_HOURS: float = settings.BOT_AUTO_DELETE_MEDIA_HOURS
-ALERT_PING_LAN_TARGETS: list[str] = settings.ALERT_PING_LAN_TARGETS
-ALERT_PING_WAN_TARGETS: list[str] = settings.ALERT_PING_WAN_TARGETS
-WOL_TARGET_IP: str = settings.WOL_TARGET_IP
-WOL_TARGET_MAC: str = settings.WOL_TARGET_MAC
-WOL_BROADCAST_IP: str = settings.WOL_BROADCAST_IP
-WOL_PORT: int = settings.WOL_PORT
-WOL_HELPER_IMAGE: str = settings.WOL_HELPER_IMAGE
-WOL_SSH_TARGET: str = settings.WOL_SSH_TARGET
-WOL_SSH_PORT: int = settings.WOL_SSH_PORT
-WOL_SSH_PASSWORD: str = settings.WOL_SSH_PASSWORD
-WOL_SHUTDOWN_REMOTE_CMD: str = settings.WOL_SHUTDOWN_REMOTE_CMD
-WOL_VERIFY_TIMEOUT_S: float = settings.WOL_VERIFY_TIMEOUT_S
-WOL_VERIFY_INTERVAL_S: float = settings.WOL_VERIFY_INTERVAL_S
-DEFAULT_MANAGED_HOST: str = settings.DEFAULT_MANAGED_HOST
-MANAGED_HOSTS: list[ManagedHost] = settings.MANAGED_HOSTS
+# Support legacy module-level attribute access by proxying to get_settings()
+class _SettingsProxy:
+    def __getattr__(self, name):
+        return getattr(get_settings(), name)
 
-validate_settings()
+
+settings = _SettingsProxy()
+
+# Exported constants as properties/proxies to keep backward compatibility
+# while allowing late initialization.
+TOKEN = settings.BOT_TOKEN
+OWNER_ID = settings.OWNER_ID
+ALLOWED = settings.ALLOWED_CHAT_IDS
+BLOCKED_IDS = settings.BLOCKED_IDS
+RATE_LIMIT_S = settings.RATE_LIMIT_S
+SHOW_WAN = settings.SHOW_WAN
+WATCH_PATHS = settings.WATCH_PATHS
+OLLAMA_HOST = settings.OLLAMA_HOST
+OLLAMA_MODEL = settings.OLLAMA_MODEL
+QBT_TIMEOUT_S = settings.QBT_TIMEOUT_S
+BOT_AUTH_TOTP_SECRET = settings.BOT_AUTH_TOTP_SECRET
+BOT_AUTH_TTL_HOURS = settings.BOT_AUTH_TTL_HOURS
+BOT_AUTO_DELETE_MEDIA_HOURS = settings.BOT_AUTO_DELETE_MEDIA_HOURS
+ALERT_PING_LAN_TARGETS = settings.ALERT_PING_LAN_TARGETS
+ALERT_PING_WAN_TARGETS = settings.ALERT_PING_WAN_TARGETS
+WOL_TARGET_IP = settings.WOL_TARGET_IP
+WOL_TARGET_MAC = settings.WOL_TARGET_MAC
+WOL_BROADCAST_IP = settings.WOL_BROADCAST_IP
+WOL_PORT = settings.WOL_PORT
+WOL_HELPER_IMAGE = settings.WOL_HELPER_IMAGE
+WOL_SSH_TARGET = settings.WOL_SSH_TARGET
+WOL_SSH_PORT = settings.WOL_SSH_PORT
+WOL_SSH_PASSWORD = settings.WOL_SSH_PASSWORD
+WOL_SHUTDOWN_REMOTE_CMD = settings.WOL_SHUTDOWN_REMOTE_CMD
+WOL_VERIFY_TIMEOUT_S = settings.WOL_VERIFY_TIMEOUT_S
+WOL_VERIFY_INTERVAL_S = settings.WOL_VERIFY_INTERVAL_S
+DEFAULT_MANAGED_HOST = settings.DEFAULT_MANAGED_HOST
+MANAGED_HOSTS = settings.MANAGED_HOSTS

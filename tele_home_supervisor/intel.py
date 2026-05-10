@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import html
 import asyncio
+import html
 import logging
 from datetime import datetime
 from typing import Any
-
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from zoneinfo import ZoneInfo
+
+import httpx
 
 from . import scheduled as scheduled_fetchers
 from . import utils
@@ -27,16 +25,19 @@ INTEL_MODULES = [
     ("quote", "🏛️ Stoic Quote"),
 ]
 
-_WEATHER_TIMEOUT = (3.5, 12.0)
-_FETCH_RETRY = Retry(
-    total=2,
-    connect=2,
-    read=2,
-    status=2,
-    backoff_factor=0.8,
-    status_forcelist=(429, 500, 502, 503, 504),
-    allowed_methods=frozenset({"GET"}),
-)
+_WEATHER_TIMEOUT = httpx.Timeout(12.0, connect=3.5)
+
+_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = httpx.AsyncClient(
+            timeout=_WEATHER_TIMEOUT,
+            transport=httpx.AsyncHTTPTransport(retries=2),
+        )
+    return _CLIENT
 
 
 def get_greeting(name: str = "Idan") -> str:
@@ -56,7 +57,7 @@ def get_greeting(name: str = "Idan") -> str:
     return f"☀️ <b>Good {period}, {name}!</b>"
 
 
-def get_weather() -> str:
+async def get_weather() -> str:
     """Weather module using Open-Meteo with resilient fallback fetches."""
     locations = [
         {"name": "Haifa", "lat": 32.7940, "lon": 34.9896},
@@ -64,7 +65,7 @@ def get_weather() -> str:
         {"name": "Tel Aviv", "lat": 32.0853, "lon": 34.7818},
     ]
     lines = ["🌡️ <b>Weather in Israel</b>"]
-    data, failures = _fetch_weather_payloads(locations)
+    data, failures = await _fetch_weather_payloads(locations)
 
     if not data:
         failure = failures[0] if failures else RuntimeError("unknown weather failure")
@@ -75,7 +76,7 @@ def get_weather() -> str:
         return "\n".join(lines)
 
     try:
-        for loc, payload in zip(locations, data):
+        for loc, payload in zip(locations, data, strict=False):
             if payload is None:
                 lines.append(f"• <b>{loc['name']}</b>: unavailable")
                 continue
@@ -99,12 +100,10 @@ def get_weather() -> str:
     return "\n".join(lines)
 
 
-def get_news() -> str:
+async def get_news() -> str:
     """News Module - Top 5 Hacker News."""
     try:
-        # Reuse existing fetcher with limit 5
-        result = scheduled_fetchers.fetch_hackernews_top(limit=5)
-        # Remove the header if it exists to fit in the intel format
+        result = await scheduled_fetchers.fetch_hackernews_top(limit=5)
         if "Hacker News - Top Stories" in result:
             result = result.split("\n", 1)[1].strip()
         return f"📰 <b>Top Stories</b>\n{result}"
@@ -113,15 +112,16 @@ def get_news() -> str:
         return f"📰 <b>Top Stories</b>\n❌ News unavailable: {html.escape(str(e))}"
 
 
-def get_stoic_quote() -> str:
+async def get_stoic_quote() -> str:
     """Quote Module - 1 Stoic Quote with retry."""
     url = "https://stoic-quotes.com/api/quote"
     data = None
     last_error = None
+    client = _get_client()
 
     for attempt in range(2):
         try:
-            response = requests.get(url, timeout=_WEATHER_TIMEOUT)
+            response = await client.get(url)
             response.raise_for_status()
             data = response.json()
             break
@@ -130,7 +130,6 @@ def get_stoic_quote() -> str:
             logger.warning("Stoic quote fetch attempt %d failed: %s", attempt + 1, e)
 
     if not data:
-        logger.exception("Failed to fetch stoic quote after retries")
         return f"🏛️ <b>Stoic Wisdom</b>\n❌ Wisdom unavailable today: {html.escape(str(last_error))}"
 
     quote = data.get("text", "No quote found")
@@ -152,7 +151,6 @@ async def get_system_health() -> str:
             f"• <b>Load:</b> {data['load']}",
         ]
 
-        # Add primary disk usage (usually first one)
         if data.get("disks"):
             lines.append(f"• <b>Disk:</b> {data['disks'][0]}")
 
@@ -170,25 +168,22 @@ async def build_intel_briefing(
     if chat_id is not None and state is not None:
         disabled = state.disabled_intel_modules.get(chat_id, set())
 
-    loop = asyncio.get_running_loop()
-
     tasks = []
 
-    # We define the order here
     if "greeting" not in disabled:
         tasks.append(asyncio.to_thread(get_greeting, "Idan"))
 
     if "weather" not in disabled:
-        tasks.append(loop.run_in_executor(None, get_weather))
+        tasks.append(get_weather())
 
     if "news" not in disabled:
-        tasks.append(loop.run_in_executor(None, get_news))
+        tasks.append(get_news())
 
     if "system" not in disabled:
         tasks.append(get_system_health())
 
     if "quote" not in disabled:
-        tasks.append(loop.run_in_executor(None, get_stoic_quote))
+        tasks.append(get_stoic_quote())
 
     if not tasks:
         return (
@@ -201,14 +196,14 @@ async def build_intel_briefing(
     return "\n\n".join(results)
 
 
-def _fetch_weather_payloads(
+async def _fetch_weather_payloads(
     locations: list[dict[str, float | str]],
 ) -> tuple[list[dict[str, Any] | None], list[Exception]]:
     """Fetch weather for all locations, falling back to per-location requests."""
     failures: list[Exception] = []
 
     try:
-        batch_data = _weather_request(locations)
+        batch_data = await _weather_request(locations)
         if len(batch_data) == len(locations):
             return batch_data, failures
         logger.warning(
@@ -223,7 +218,8 @@ def _fetch_weather_payloads(
     payloads: list[dict[str, Any] | None] = []
     for loc in locations:
         try:
-            payloads.append(_weather_request([loc])[0])
+            res = await _weather_request([loc])
+            payloads.append(res[0])
         except Exception as exc:
             logger.warning("Weather fetch failed for %s: %s", loc["name"], exc)
             failures.append(exc)
@@ -231,10 +227,12 @@ def _fetch_weather_payloads(
     return payloads, failures
 
 
-def _weather_request(locations: list[dict[str, float | str]]) -> list[dict[str, Any]]:
+async def _weather_request(
+    locations: list[dict[str, float | str]],
+) -> list[dict[str, Any]]:
     url = _build_weather_url(locations)
-    session = _build_retry_session()
-    response = session.get(url, timeout=_WEATHER_TIMEOUT)
+    client = _get_client()
+    response = await client.get(url)
     response.raise_for_status()
     data = response.json()
     if isinstance(data, list):
@@ -252,14 +250,6 @@ def _build_weather_url(locations: list[dict[str, float | str]]) -> str:
         "daily=temperature_2m_max,temperature_2m_min,precipitation_sum&"
         "forecast_days=1&timezone=auto"
     )
-
-
-def _build_retry_session() -> requests.Session:
-    session = requests.Session()
-    adapter = HTTPAdapter(max_retries=_FETCH_RETRY)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
 
 
 def _format_fetch_error(exc: Exception) -> str:

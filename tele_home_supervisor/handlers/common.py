@@ -7,11 +7,12 @@ import html
 import logging
 import secrets
 import time
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from telegram.constants import ParseMode
 
-from .. import config
+from .. import config, messages
 from ..models.audit import AuditEntry
 from ..state import BOT_STATE_KEY, BotState, DebugRecorder
 
@@ -22,14 +23,16 @@ if TYPE_CHECKING:
     from telegram.ext import ContextTypes
 
 
-# Global rate limit (seconds) for all commands.
-_last_command_ts = 0.0
-# We use a simple timestamp check. Since we are in asyncio,
-# strictly speaking race conditions are only possible at await points.
-# A simple float comparison is atomic enough for this use case.
+# _last_command_ts removed in favor of per-user/per-command tracking in BotState.
 _AUTH_FLAG_KEY = "_auth_ok"
 _AUDIT_TARGET_KEY = "_audit_target"
-_OWNER_ONLY_MSG = "⛔ Owner only."
+_OWNER_ONLY_MSG = messages.MSG_OWNER_ONLY
+MAX_ARG_LEN = 512
+
+
+def sanitize_args(args: list[str]) -> list[str]:
+    """Truncate arguments to MAX_ARG_LEN to prevent oversized payloads/logs."""
+    return [a[:MAX_ARG_LEN] for a in args]
 
 
 def auth_ttl_seconds() -> float:
@@ -210,7 +213,7 @@ async def record_error(
     await reply(f"❌ Error: {html.escape(str(exc))}", parse_mode=ParseMode.HTML)
 
 
-def allowed(update: "Update", state: BotState | None = None) -> bool:
+def allowed(update: Update, state: BotState | None = None) -> bool:
     """Check if the update sender is authorized to use the bot.
 
     Args:
@@ -239,19 +242,8 @@ def allowed(update: "Update", state: BotState | None = None) -> bool:
     return chat_id == user_id and user_id in config.ALLOWED
 
 
-async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
-    """Guard function to check authorization before executing commands.
-
-    Args:
-        update: Telegram Update object
-        context: Telegram context object
-
-    Returns:
-        True if authorized, False otherwise. Sends unauthorized message on failure.
-
-    Note:
-        This is the primary authorization mechanism for all guarded commands.
-    """
+async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Guard function to check authorization before executing commands."""
     app = getattr(context, "application", None)
     state = get_state(app) if app is not None else None
     user = getattr(update, "effective_user", None)
@@ -259,17 +251,26 @@ async def guard(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
     if is_blocked_user_id(user_id, state):
         _set_auth_flag(context, False)
         return False
+
+    # Sanitize arguments here to protect all guarded commands
+    if context.args:
+        context.args = sanitize_args(context.args)
+
     if allowed(update, state):
         _set_auth_flag(context, True)
         return True
     if update and update.effective_chat:
-        await update.effective_chat.send_message("⛔ Not authorized")
+        await update.effective_chat.send_message(messages.MSG_NOT_AUTHORIZED)
     _set_auth_flag(context, False)
     return False
 
 
-async def guard_owner(update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> bool:
+async def guard_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Allow only the configured owner to continue."""
+    # Sanitize arguments here too
+    if context.args:
+        context.args = sanitize_args(context.args)
+
     app = getattr(context, "application", None)
     state = get_state(app) if app is not None else None
     user = getattr(update, "effective_user", None)
@@ -310,11 +311,12 @@ def _auth_valid(state: BotState, user_id: int) -> bool:
     return True
 
 
-async def guard_sensitive(
-    update: "Update", context: "ContextTypes.DEFAULT_TYPE"
-) -> bool:
+async def guard_sensitive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not await guard(update, context):
         return False
+
+    # (guard already sanitized args)
+
     if not config.BOT_AUTH_TOTP_SECRET:
         if update and update.effective_chat:
             await update.effective_chat.send_message(
@@ -331,52 +333,51 @@ async def guard_sensitive(
         return True
     if update and update.effective_chat:
         await update.effective_chat.send_message(
-            "🔒 Please authenticate with /auth <secret> (valid for 7 days by default)."
+            messages.MSG_AUTH_REQUIRED,
+            parse_mode=ParseMode.HTML,
         )
     _set_auth_flag(context, False)
     return False
 
 
 def rate_limit(func: Callable, name: str | None = None) -> Callable:
-    """Decorator to enforce global rate limiting on command handlers.
+    """Decorator to enforce per-user/per-command rate limiting on command handlers.
 
     Args:
         func: The async command handler function to wrap
 
     Returns:
         Wrapped function that enforces rate limiting based on config.RATE_LIMIT_S
-
-    Note:
-        Uses a global timestamp check. Rate limit applies across all commands.
-        If rate limit is exceeded, sends a message to the user with wait time.
     """
 
     command_name = name or func.__name__.removeprefix("cmd_")
 
     @functools.wraps(func)
     async def wrapper(
-        update: "Update", context: "ContextTypes.DEFAULT_TYPE", *args, **kwargs
+        update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
     ):
-        global _last_command_ts
+        state = get_state(context.application)
+        chat_id = update.effective_chat.id if update and update.effective_chat else 0
+
         now = time.monotonic()
-        elapsed = now - _last_command_ts
+        last_ts = state.get_last_command_ts(chat_id, command_name)
+        elapsed = now - last_ts
 
         if elapsed < config.RATE_LIMIT_S:
             try:
                 if update and getattr(update, "effective_message", None):
                     await update.effective_message.reply_text(
-                        f"⏱ Rate limit: please wait {config.RATE_LIMIT_S - elapsed:.1f}s",
+                        messages.MSG_RATE_LIMIT.format(config.RATE_LIMIT_S - elapsed),
                     )
             except Exception as e:
                 logger.debug("rate-limit notice failed to send: %s", e)
             try:
-                state = get_state(context.application)
                 state.record_rate_limited(command_name)
             except Exception as e:
                 logger.debug("metrics rate-limit record failed: %s", e)
             return
 
-        _last_command_ts = now
+        state.set_last_command_ts(chat_id, command_name, now)
         chat_data = getattr(context, "chat_data", None)
         if chat_data is not None:
             chat_data.pop(_AUDIT_TARGET_KEY, None)
@@ -442,7 +443,7 @@ def _format_suggestions(names: list[str]) -> str:
 
 
 async def reply_usage_with_suggestions(
-    update: "Update",
+    update: Update,
     usage_html: str,
     names: list[str] | None = None,
 ) -> None:

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 class TextStreamProvider(Protocol):
     """Minimal interface for providers that stream text generation."""
 
-    async def generate_stream(self, prompt: str) -> AsyncGenerator[str, None]:
+    async def generate_stream(self, prompt: str) -> AsyncGenerator[str]:
         """Yield partial response chunks for *prompt*."""
 
 
@@ -60,7 +61,7 @@ class OllamaClient:
             "num_ctx": 4000,
         }
 
-    async def generate_stream(self, prompt: str) -> AsyncGenerator[str, None]:
+    async def generate_stream(self, prompt: str) -> AsyncGenerator[str]:
         """Stream response from Ollama."""
         url = f"{self.base_url}/api/generate"
         payload = {

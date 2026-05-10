@@ -41,6 +41,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      - name: Syntax Check (Compile)
+        run: |
+          set -o pipefail
+          uv run python -m compileall tele_home_supervisor 2>&1 \
+            | tee compile.log
+
       - name: Ruff Check (Lint)
         run: |
           set -o pipefail
@@ -57,6 +63,18 @@ jobs:
           uv run bandit -r tele_home_supervisor -x tests \
             --severity-level medium \
             --confidence-level medium 2>&1 | tee bandit.log
+
+      - name: YAML Lint
+        run: |
+          set -o pipefail
+          uv run pre-commit run yamllint --all-files 2>&1 \
+            | tee yamllint.log
+
+      - name: Actionlint
+        run: |
+          set -o pipefail
+          uv run pre-commit run actionlint --all-files 2>&1 \
+            | tee actionlint.log
 
       # Trivy Scan (Filesystem)
       # Using specific version tag for stability
@@ -97,6 +115,8 @@ jobs:
             ruff.log
             ruff-format.log
             bandit.log
+            yamllint.log
+            actionlint.log
             trivy-fs.txt
           if-no-files-found: ignore
 
@@ -122,7 +142,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
-      - name: Run Pytest
+      - name: Run Pytest (with Coverage)
         run: |
           set -o pipefail
           uv run pytest 2>&1 | tee pytest.log

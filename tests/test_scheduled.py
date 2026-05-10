@@ -1,6 +1,6 @@
 """Tests for scheduled fetchers."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from tele_home_supervisor import scheduled
 

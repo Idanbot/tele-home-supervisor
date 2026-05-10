@@ -6,17 +6,16 @@ Provides an async `run_cmd` wrapper and `get_docker_cmd`.
 from __future__ import annotations
 
 import asyncio
-import shutil
 import logging
 import os
-from typing import Optional, Tuple
+import shutil
 
 logger = logging.getLogger(__name__)
 
 
 async def run_cmd(
     cmd: list[str], timeout: int = 10, env: dict[str, str] | None = None
-) -> Tuple[int, str, str]:
+) -> tuple[int, str, str]:
     """Run a command asynchronously and return (returncode, stdout, stderr).
 
     Args:
@@ -50,7 +49,7 @@ async def run_cmd(
                 stdout.decode().strip(),
                 stderr.decode().strip(),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 process.kill()
             except ProcessLookupError:
@@ -65,7 +64,7 @@ async def run_cmd(
         return 1, "", str(e)
 
 
-def get_docker_cmd() -> Optional[str]:
+def get_docker_cmd() -> str | None:
     """Return a path to the docker binary or None if not found.
 
     Searches for the Docker CLI in common locations, then falls back to PATH.

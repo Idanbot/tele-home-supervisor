@@ -13,20 +13,10 @@ import logging
 
 from telegram.constants import ParseMode
 
-from .common import allowed, get_state, is_blocked_user_id
-from . import notifications
 from . import alerts as alerts_handler
 
 # Sub-module handlers
-from . import cb_docker, cb_torrents, cb_media
-
-# Shared helpers (used by the router and also re-exported)
-from .cb_helpers import (  # noqa: F401 – re-exported
-    safe_edit_message_text as _safe_edit_message_text,
-    run_audit_action as _run_audit_action,
-    build_pagination_row as _build_pagination_row,
-    parse_page as _parse_page,
-)
+from . import cb_docker, cb_media, cb_torrents, notifications
 
 # ---------------------------------------------------------------------------
 # Re-exports for backward compatibility – other modules import these names
@@ -36,12 +26,28 @@ from .cb_docker import (  # noqa: F401
     DOCKER_PAGE_SIZE,
     LOG_PAGE_SIZE,
     LOG_PAGE_STEP,
-    build_docker_keyboard,
-    build_dlogs_selection_keyboard,
-    normalize_docker_page,
     _get_log_lines,
-    _render_logs_page,
     _parse_log_page_payload,
+    _render_logs_page,
+    build_dlogs_selection_keyboard,
+    build_docker_keyboard,
+    normalize_docker_page,
+)
+from .cb_helpers import (
+    parse_page as _parse_page,
+)
+from .cb_helpers import (
+    run_audit_action as _run_audit_action,
+)
+
+# Shared helpers (used by the router and also re-exported)
+from .cb_helpers import (  # noqa: F401 – re-exported
+    safe_edit_message_text as _safe_edit_message_text,
+)
+from .cb_media import (  # noqa: F401
+    build_free_games_keyboard,
+    build_protondb_keyboard,
+    build_tmdb_keyboard,
 )
 from .cb_torrents import (  # noqa: F401
     TORRENT_PAGE_SIZE,
@@ -49,11 +55,7 @@ from .cb_torrents import (  # noqa: F401
     normalize_torrent_page,
     paginate_torrents,
 )
-from .cb_media import (  # noqa: F401
-    build_tmdb_keyboard,
-    build_protondb_keyboard,
-    build_free_games_keyboard,
-)
+from .common import allowed, get_state, guard_sensitive, is_blocked_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +106,8 @@ async def handle_callback_query(update, context) -> None:
     try:
         # --- Alerts ----------------------------------------------------------
         if data.startswith("alerts:"):
+            if not await guard_sensitive(update, context):
+                return
             payload = _parse_alerts_payload(data)
             if payload:
                 action, rule_id = payload
@@ -147,6 +151,8 @@ async def handle_callback_query(update, context) -> None:
                     ),
                 )
         elif data.startswith("dlogs:file:"):
+            if not await guard_sensitive(update, context):
+                return
             payload = cb_docker._parse_log_page_payload(data, "dlogs:file:")
             if payload:
                 container, _, since = payload
@@ -234,6 +240,8 @@ async def handle_callback_query(update, context) -> None:
 
         # --- Torrents --------------------------------------------------------
         elif data.startswith("tstop:"):
+            if not await guard_sensitive(update, context):
+                return
             torrent_hash = data[6:]
             await _run_audit_action(
                 update,
@@ -243,6 +251,8 @@ async def handle_callback_query(update, context) -> None:
                 cb_torrents.handle_torrent_stop(query, context, torrent_hash),
             )
         elif data.startswith("tstart:"):
+            if not await guard_sensitive(update, context):
+                return
             torrent_hash = data[7:]
             await _run_audit_action(
                 update,
@@ -261,6 +271,8 @@ async def handle_callback_query(update, context) -> None:
                 cb_torrents.handle_torrent_info(query, context, torrent_hash),
             )
         elif data.startswith("tdelete:"):
+            if not await guard_sensitive(update, context):
+                return
             torrent_hash = data[8:]
             await _run_audit_action(
                 update,
@@ -327,6 +339,8 @@ async def handle_callback_query(update, context) -> None:
                 cb_media.handle_piratebay_select(query, context, key),
             )
         elif data.startswith("pbadd:"):
+            if not await guard_sensitive(update, context):
+                return
             key = data[len("pbadd:") :]
             await _run_audit_action(
                 update,

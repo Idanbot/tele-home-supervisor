@@ -1,13 +1,13 @@
 """Tests for notification handlers."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
+from conftest import DummyContext, DummyUpdate
 
 from tele_home_supervisor import config
 from tele_home_supervisor.handlers import notifications
 from tele_home_supervisor.handlers.common import get_state
-
-from conftest import DummyContext, DummyUpdate
 
 
 class TestMuteCommands:

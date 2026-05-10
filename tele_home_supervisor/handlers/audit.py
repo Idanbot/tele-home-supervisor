@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 
 from .. import view
 from ..state import BotState
-from .common import guard_sensitive, get_state, tracked_reply_photo
+from .common import get_state, guard_sensitive, tracked_reply_photo
 
 
 def _format_entry(entry) -> str:

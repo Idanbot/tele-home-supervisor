@@ -7,12 +7,12 @@ Presentation logic is handled by the view layer.
 from __future__ import annotations
 
 import asyncio
-import re
 import logging
 import os
 import platform
-import socket
+import re
 import shutil
+import socket
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # docker client (shared)
-client: "DockerClient" = docker.from_env()
+client: DockerClient = docker.from_env()
 
 
 def fmt_bytes(n: int) -> str:
@@ -78,7 +78,7 @@ async def get_primary_ip() -> str:
     try:
 
         def _get_ip():
-            for iface, addrs in psutil.net_if_addrs().items():
+            for _iface, addrs in psutil.net_if_addrs().items():
                 for a in addrs:
                     if a.family == socket.AF_INET and not a.address.startswith("127."):
                         return a.address
@@ -154,7 +154,7 @@ async def get_cpu_temp() -> str:
             try:
                 if not os.path.exists(p):
                     continue
-                with open(p, "r") as f:
+                with open(p) as f:
                     raw = f.read().strip()
                 if not raw:
                     continue

@@ -1,9 +1,10 @@
+import time
+
 import pytest
 
 from tele_home_supervisor.handlers import callbacks, docker
 from tele_home_supervisor.handlers.common import get_state
 from tele_home_supervisor.models.cache import CacheEntry
-import time
 
 
 class DummyMessage:

@@ -13,8 +13,8 @@ from pathlib import Path
 from .. import services
 from . import persistence
 from .alerts import AlertRule, AlertState
-from .auth import AuthGrantRecord
 from .audit import AuditEntry
+from .auth import AuthGrantRecord
 from .cache import CacheEntry, LogCacheEntry
 from .debug import DebugEntry, DebugRecorder
 from .metrics import CommandMetrics
@@ -73,6 +73,7 @@ class BotState:
     blocked_ids: set[int] = field(default_factory=set)
     # Failed /auth counters and cooldowns.
     auth_failures: dict[int, int] = field(default_factory=dict)
+    auth_backoff_level: dict[int, int] = field(default_factory=dict)
     auth_cooldowns: dict[int, float] = field(default_factory=dict)
 
     command_metrics: dict[str, CommandMetrics] = field(default_factory=dict)
@@ -91,9 +92,29 @@ class BotState:
     # Media message tracking for auto-delete [(chat_id, message_id, timestamp)]
     media_messages: list[list] = field(default_factory=list)
 
+    # Persisted reminders [(id, chat_id, text, target_time)]
+    reminders: list[dict] = field(default_factory=list)
+
+    # In-memory rate limiting (chat_id, command_name) -> timestamp
+    _last_command_ts: dict[tuple[int, str], float] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    # Persistence of last run times for scheduled tasks
+    last_game_offers_run: float = 0.0
+    last_intel_briefing_run: float = 0.0
+
+    # Heartbeat for container health checks
+    last_heartbeat: float = field(default_factory=time.time)
+
     _state_file: Path = field(default_factory=lambda: Path("/app/data/bot_state.json"))
+    _audit_file: Path = field(default_factory=lambda: Path("/app/data/audit_log.json"))
+    _magnet_file: Path = field(
+        default_factory=lambda: Path("/app/data/magnet_cache.json")
+    )
     _debug_recorder: DebugRecorder | None = field(default=None, init=False, repr=False)
     _state_loaded: bool = field(default=False, init=False, repr=False)
+    _last_save: dict[str, float] = field(default_factory=dict, init=False, repr=False)
 
     async def refresh_containers(self) -> set[str]:
         """Refresh the cache of Docker container names."""
@@ -291,6 +312,7 @@ class BotState:
         key = secrets.token_urlsafe(8)
         self.magnet_cache[key] = (time.monotonic(), name, magnet, seeders, leechers)
         self._prune_magnets()
+        self.save_magnets()
         return key
 
     def get_magnet(self, key: str) -> tuple[str, str, int, int] | None:
@@ -305,6 +327,7 @@ class BotState:
         ts, name, magnet, seeders, leechers = entry
         if (time.monotonic() - ts) > _MAGNET_CACHE_TTL_S:
             self.magnet_cache.pop(key, None)
+            self.save_magnets()
             return None
         return name, magnet, seeders, leechers
 
@@ -446,6 +469,7 @@ class BotState:
             entry.chat_id, deque(maxlen=_AUDIT_MAX_PER_CHAT)
         )
         queue.append(entry)
+        self.save_audit()
 
     def get_audit_entries(self, chat_id: int, limit: int) -> list[AuditEntry]:
         queue = self.audit_log.get(chat_id)
@@ -523,12 +547,13 @@ class BotState:
         *,
         now: float | None = None,
         max_failures: int = 5,
-        cooldown_s: float = 3600.0,
+        base_cooldown_s: float = 3600.0,
     ) -> tuple[int, float | None]:
         """Track a failed /auth attempt and return (attempts, cooldown_until)."""
         current = now if now is not None else time.time()
         cooldown_until = self.auth_cooldowns.get(user_id)
         if cooldown_until and cooldown_until <= current:
+            # Cooldown expired, but we keep backoff_level until success
             self.auth_cooldowns.pop(user_id, None)
             cooldown_until = None
         if cooldown_until and cooldown_until > current:
@@ -536,8 +561,14 @@ class BotState:
 
         attempts = self.auth_failures.get(user_id, 0) + 1
         if attempts >= max_failures:
+            level = self.auth_backoff_level.get(user_id, 0)
+            # Exponential backoff: base * 2^level
+            multiplier = 2**level
+            cooldown_s = base_cooldown_s * multiplier
             cooldown_until = current + cooldown_s
+
             self.auth_failures[user_id] = 0
+            self.auth_backoff_level[user_id] = level + 1
             self.auth_cooldowns[user_id] = cooldown_until
         else:
             self.auth_failures[user_id] = attempts
@@ -547,8 +578,13 @@ class BotState:
     def clear_auth_failures(self, user_id: int, *, save: bool = True) -> None:
         """Clear failed auth counters and cooldown for a user."""
         removed_attempts = self.auth_failures.pop(user_id, None)
+        removed_backoff = self.auth_backoff_level.pop(user_id, None)
         removed_cooldown = self.auth_cooldowns.pop(user_id, None)
-        if save and (removed_attempts is not None or removed_cooldown is not None):
+        if save and (
+            removed_attempts is not None
+            or removed_backoff is not None
+            or removed_cooldown is not None
+        ):
             self.save()
 
     def auth_cooldown_until(
@@ -668,17 +704,80 @@ class BotState:
 
     # ── Persistence ──────────────────────────────────────────────────
 
-    def save(self) -> None:
-        """Persist current state to disk."""
-        persistence.save(self, self._state_file)
-
-    # Keep the old private name around so any in-tree callers that
-    # haven't been updated yet still work.
-    _save_state = save
-
     def load_state(self) -> None:
-        """Load persisted state from disk.  Only loads once per instance."""
+        """Load persisted state from disk. Only loads once per instance."""
         if self._state_loaded:
             return
         self._state_loaded = True
         persistence.load(self, self._state_file)
+        persistence.load_audit(self, self._audit_file)
+        persistence.load_magnets(self, self._magnet_file)
+
+    def save(self, force: bool = False) -> None:
+        """Save basic state to disk with throttling."""
+        if not force and (time.time() - self._last_save.get("state", 0) < 1.0):
+            return
+        persistence.save(self, self._state_file)
+        self._last_save["state"] = time.time()
+
+    def save_audit(self, force: bool = False) -> None:
+        """Save audit log to disk with throttling."""
+        if not force and (time.time() - self._last_save.get("audit", 0) < 1.0):
+            return
+        persistence.save_audit(self, self._audit_file)
+        self._last_save["audit"] = time.time()
+
+    def save_magnets(self, force: bool = False) -> None:
+        """Save magnet cache to disk with throttling."""
+        if not force and (time.time() - self._last_save.get("magnets", 0) < 1.0):
+            return
+        persistence.save_magnets(self, self._magnet_file)
+        self._last_save["magnets"] = time.time()
+
+    # Keep the old private name for compatibility
+    _save_state = save
+
+    def get_last_command_ts(self, chat_id: int, command_name: str) -> float:
+        return self._last_command_ts.get((chat_id, command_name), 0.0)
+
+    def set_last_command_ts(self, chat_id: int, command_name: str, ts: float) -> None:
+        self._last_command_ts[(chat_id, command_name)] = ts
+
+    def add_reminder(self, chat_id: int, text: str, target_time: float) -> str:
+        reminder_id = secrets.token_hex(4)
+        self.reminders.append(
+            {
+                "id": reminder_id,
+                "chat_id": chat_id,
+                "text": text,
+                "target_time": target_time,
+            }
+        )
+        self.save()
+        return reminder_id
+
+    def get_reminders(self, chat_id: int) -> list[dict]:
+        return [r for r in self.reminders if r["chat_id"] == chat_id]
+
+    def remove_reminder(self, chat_id: int, reminder_id: str) -> bool:
+        initial_len = len(self.reminders)
+        self.reminders = [
+            r
+            for r in self.reminders
+            if not (r["chat_id"] == chat_id and r["id"] == reminder_id)
+        ]
+        if len(self.reminders) != initial_len:
+            self.save()
+            return True
+        return False
+
+    def pop_due_reminders(self) -> list[dict]:
+        now = time.time()
+        due = [r for r in self.reminders if r["target_time"] <= now]
+        if due:
+            self.reminders = [r for r in self.reminders if r["target_time"] > now]
+            self.save()
+        return due
+
+    def update_heartbeat(self) -> None:
+        self.last_heartbeat = time.time()

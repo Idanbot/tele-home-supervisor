@@ -5,9 +5,10 @@ from __future__ import annotations
 import html
 import logging
 import re
-from typing import Iterable
+from collections.abc import Iterable
+from urllib.parse import quote
 
-import requests
+import httpx
 
 from . import config
 
@@ -55,9 +56,18 @@ _TRACKERS = [
     "udp://tracker.opentrackr.org:1337/announce",
     "udp://open.stealth.si:80/announce",
 ]
-_NO_RESULTS_RE = re.compile(
-    r"no results returned|no matches found|no results", re.IGNORECASE
-)
+
+_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(12.0),
+            transport=httpx.AsyncHTTPTransport(retries=2),
+        )
+    return _CLIENT
 
 
 def category_help() -> str:
@@ -87,7 +97,7 @@ def resolve_top_mode(value: str | None) -> str | None:
     return TOP_MODES.get(token)
 
 
-def _fetch(url: str) -> str:
+async def _fetch(url: str) -> str:
     logger.debug("piratebay fetch html: %s", url)
     headers = {
         "User-Agent": config.settings.TPB_USER_AGENT,
@@ -101,12 +111,13 @@ def _fetch(url: str) -> str:
         headers["Referer"] = config.settings.TPB_REFERER
     if config.settings.TPB_COOKIE:
         headers["Cookie"] = config.settings.TPB_COOKIE
-    resp = requests.get(url, headers=headers, timeout=12)
+    client = _get_client()
+    resp = await client.get(url, headers=headers)
     resp.raise_for_status()
     return resp.text
 
 
-def _fetch_json(url: str) -> list[dict[str, object]]:
+async def _fetch_json(url: str) -> list[dict[str, object]]:
     logger.debug("piratebay fetch json: %s", url)
     headers = {
         "User-Agent": config.settings.TPB_USER_AGENT,
@@ -115,8 +126,9 @@ def _fetch_json(url: str) -> list[dict[str, object]]:
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
-    resp = requests.get(url, headers=headers, timeout=12)
-    if not resp.ok:
+    client = _get_client()
+    resp = await client.get(url, headers=headers)
+    if not resp.is_success:
         snippet = resp.text[:500].replace("\n", " ")
         raise RuntimeError(f"Pirate Bay API {resp.status_code} for {url}: {snippet}")
     try:
@@ -184,8 +196,8 @@ def _top_n(
 
 
 def _magnet_from_hash(info_hash: str, name: str) -> str:
-    dn = requests.utils.quote(name, safe="")
-    trackers = "".join(f"&tr={requests.utils.quote(t, safe='')}" for t in _TRACKERS)
+    dn = quote(name, safe="")
+    trackers = "".join(f"&tr={quote(t, safe='')}" for t in _TRACKERS)
     return f"magnet:?xt=urn:btih:{info_hash}&dn={dn}{trackers}"
 
 
@@ -214,13 +226,13 @@ def _api_to_results(items: list[dict[str, object]]) -> list[dict[str, object]]:
     return results
 
 
-def _api_top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
+async def _api_top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     cat = resolve_category(category) or 0
     for base in _api_base_candidates():
         url = f"{base}/precompiled/data_top100_{cat}.json"
         try:
-            items = _fetch_json(url)
-        except (requests.RequestException, RuntimeError, ValueError) as exc:
+            items = await _fetch_json(url)
+        except Exception as exc:
             logger.debug("piratebay api top failed for %s: %s", base, exc)
             if debug_sink:
                 debug_sink(f"piratebay api top failed for {base}", str(exc))
@@ -231,7 +243,7 @@ def _api_top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     return []
 
 
-def _api_search(
+async def _api_search(
     query: str, category: str | None = None, debug_sink=None
 ) -> list[dict[str, object]]:
     q = (query or "").strip()
@@ -239,10 +251,10 @@ def _api_search(
         return []
     cat = resolve_category(category) or 0
     for base in _api_base_candidates():
-        url = f"{base}/q.php?q={requests.utils.quote(q)}&cat={cat}"
+        url = f"{base}/q.php?q={quote(q)}&cat={cat}"
         try:
-            items = _fetch_json(url)
-        except (requests.RequestException, RuntimeError, ValueError) as exc:
+            items = await _fetch_json(url)
+        except Exception as exc:
             logger.debug("piratebay api search failed for %s: %s", base, exc)
             if debug_sink:
                 debug_sink(f"piratebay api search failed for {base}", str(exc))
@@ -253,7 +265,7 @@ def _api_search(
     return []
 
 
-def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
+async def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     from tele_home_supervisor import torrentsources
 
     top_mode = resolve_top_mode(category)
@@ -268,13 +280,13 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
         else:
             url = f"{config.settings.TPB_BASE_URL}/top/{cat}"
     try:
-        html_text = _fetch(url)
+        html_text = await _fetch(url)
         _ensure_not_blocked(html_text)
         results = _top_n(_parse_rows(html_text), 10)
         if results:
             torrentsources._last_used_provider = "PirateBay"
             return results
-    except (requests.RequestException, RuntimeError, ValueError) as exc:
+    except Exception as exc:
         logger.debug("piratebay top html failed: %s", exc)
         if debug_sink:
             debug_sink("piratebay top html failed", str(exc))
@@ -282,9 +294,9 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     # Try API for non-48h modes
     if top_mode != "top48h":
         if top_mode == "top100":
-            results = _api_top(None, debug_sink)
+            results = await _api_top(None, debug_sink)
         else:
-            results = _api_top(category, debug_sink)
+            results = await _api_top(category, debug_sink)
         if results:
             torrentsources._last_used_provider = "PirateBay API"
             return results
@@ -292,7 +304,7 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     # Try fallback sources when PirateBay fails
     logger.debug("piratebay top api empty; trying fallback sources")
 
-    fallback_results = torrentsources.fallback_top(category, debug_sink)
+    fallback_results = await torrentsources.fallback_top(category, debug_sink)
     if fallback_results:
         logger.debug("fallback top results: %s", len(fallback_results))
         return [r.to_dict() for r in fallback_results]
@@ -301,16 +313,16 @@ def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     return []  # All sources failed - return empty, don't raise
 
 
-def search(query: str, debug_sink=None) -> list[dict[str, object]]:
+async def search(query: str, debug_sink=None) -> list[dict[str, object]]:
     from tele_home_supervisor import torrentsources
 
     q = (query or "").strip()
     if not q:
         return []
-    q_escaped = requests.utils.quote(q, safe="")
+    q_escaped = quote(q, safe="")
     url = f"{config.settings.TPB_BASE_URL}/search/{q_escaped}/0/99/0"
     try:
-        html_text = _fetch(url)
+        html_text = await _fetch(url)
         _ensure_not_blocked(html_text)
         results = _top_n(_parse_rows(html_text), 10)
         if results:
@@ -327,7 +339,7 @@ def search(query: str, debug_sink=None) -> list[dict[str, object]]:
         if debug_sink:
             debug_sink("piratebay search html failed", str(exc))
 
-    results = _api_search(q, debug_sink=debug_sink)
+    results = await _api_search(q, debug_sink=debug_sink)
     if results:
         logger.debug("piratebay search api results: %s", len(results))
         torrentsources._last_used_provider = "PirateBay API"
@@ -335,7 +347,7 @@ def search(query: str, debug_sink=None) -> list[dict[str, object]]:
     logger.debug("piratebay search api empty; trying fallback sources")
 
     # Try fallback sources when PirateBay fails
-    fallback_results = torrentsources.fallback_search(q, debug_sink)
+    fallback_results = await torrentsources.fallback_search(q, debug_sink)
     if fallback_results:
         logger.debug("fallback search results: %s", len(fallback_results))
         return [r.to_dict() for r in fallback_results]

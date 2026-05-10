@@ -5,15 +5,16 @@ Also provides a combined game offers builder for daily digests.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import time
-from datetime import datetime, timezone
-from threading import Lock
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import quote_plus
 
-import requests
+import httpx
 
 from .models.scheduled_cache import ScheduledCacheEntry
 
@@ -23,9 +24,20 @@ _GAME_OFFERS_TTL_S = 24 * 60 * 60
 _CACHE_BASE_BACKOFF_S = 15 * 60
 _CACHE_MAX_BACKOFF_S = 6 * 60 * 60
 
-
-_cache_lock = Lock()
+_cache_lock = asyncio.Lock()
 _cache: dict[str, ScheduledCacheEntry] = {}
+
+_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            transport=httpx.AsyncHTTPTransport(retries=2),
+        )
+    return _CLIENT
 
 
 def _is_error_value(value: object | None) -> bool:
@@ -36,13 +48,13 @@ def _is_error_value(value: object | None) -> bool:
     return isinstance(msg, str) and msg.strip().startswith("❌")
 
 
-def _cached_fetch(
+async def _cached_fetch(
     key: str,
     ttl_s: float,
-    fetcher: Callable[[], object],
-) -> object:
+    fetcher: Callable[[], Any],
+) -> Any:
     now = time.monotonic()
-    with _cache_lock:
+    async with _cache_lock:
         entry = _cache.get(key)
         if entry and entry.value is not None and (now - entry.fetched_at) < ttl_s:
             return entry.value
@@ -51,11 +63,16 @@ def _cached_fetch(
 
     value: object | None = None
     try:
-        value = fetcher()
+        # Check if fetcher is async
+        if asyncio.iscoroutinefunction(fetcher):
+            value = await fetcher()
+        else:
+            value = fetcher()
+
         if _is_error_value(value):
             raise RuntimeError("fetch returned error value")
     except Exception as exc:
-        with _cache_lock:
+        async with _cache_lock:
             entry = _cache.get(key)
             error_count = (entry.error_count if entry else 0) + 1
             backoff = min(
@@ -81,7 +98,7 @@ def _cached_fetch(
             return value
         raise
 
-    with _cache_lock:
+    async with _cache_lock:
         _cache[key] = ScheduledCacheEntry(value=value, fetched_at=now)
     return value
 
@@ -157,28 +174,25 @@ def _find_upcoming_free_offer(
 def _fmt_dt(dt: datetime | None) -> str:
     if not dt:
         return "unknown"
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return dt.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def fetch_epic_free_games() -> tuple[str, list[str]]:
-    return _cached_fetch(
+async def fetch_epic_free_games() -> tuple[str, list[str]]:
+    return await _cached_fetch(
         "epic",
         _GAME_OFFERS_TTL_S,
         _fetch_epic_free_games_uncached,
     )
 
 
-def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
-    """Fetch current free games from Epic Games Store.
-
-    Returns tuple of (formatted HTML message, list of image URLs).
-    """
+async def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
+    """Fetch current free games from Epic Games Store."""
     try:
-        # Epic Games free games API endpoint
         url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions"
         params = {"locale": "en-US", "country": "US", "allowCountries": "US"}
 
-        response = requests.get(url, params=params, timeout=10)
+        client = _get_client()
+        response = await client.get(url, params=params)
         response.raise_for_status()
         data = response.json()
 
@@ -191,7 +205,7 @@ def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
 
         free_games: list[dict[str, Any]] = []
         upcoming_games: list[dict[str, Any]] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for game in games:
             is_active, active_start, active_end = _is_active_free_offer(game, now)
             if not is_active:
@@ -208,25 +222,17 @@ def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
 
             title = game.get("title", "Unknown")
             description = game.get("description", "")
-            # Limit description length
             if len(description) > 150:
                 description = description[:147] + "..."
 
-            # Extract image URL - prefer wide/landscape images
             image_url = None
             key_images = game.get("keyImages", [])
             for img in key_images:
                 img_type = img.get("type", "")
-                # Prefer these image types in order
-                if img_type in (
-                    "DieselStoreFrontWide",
-                    "OfferImageWide",
-                    "Thumbnail",
-                ):
+                if img_type in ("DieselStoreFrontWide", "OfferImageWide", "Thumbnail"):
                     image_url = img.get("url")
                     break
 
-            # Fallback to first available image
             if not image_url and key_images:
                 image_url = key_images[0].get("url")
 
@@ -240,14 +246,12 @@ def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
                 }
             )
 
-        # Show only currently active freebies (Epic typically has one active at a time)
         if not free_games:
             return ("🎮 <b>Epic Games</b>\n\nNo free games available right now.", [])
 
         free_games = free_games[:1]
 
         if upcoming_games:
-            # Sort by start date and take the next one
             upcoming_games = [g for g in upcoming_games if g.get("start")]
             upcoming_games.sort(key=lambda g: g["start"])
             next_up = upcoming_games[:1]
@@ -296,28 +300,19 @@ def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
         lines.append('<a href="https://store.epicgames.com/free-games">View Store</a>')
         return ("\n".join(lines), image_urls)
 
-    except requests.RequestException as e:
+    except Exception as e:
         logger.exception("Failed to fetch Epic Games free games")
         return (f"❌ Failed to fetch Epic Games: {html.escape(str(e))}", [])
-    except Exception as e:
-        logger.exception("Error processing Epic Games data")
-        return (f"❌ Error processing Epic Games data: {html.escape(str(e))}", [])
 
 
-def fetch_hackernews_top(limit: int = 10) -> str:
-    """Fetch top stories from Hacker News with retry logic.
-
-    Args:
-        limit: Number of top stories to fetch (default: 10)
-
-    Returns formatted HTML message or error string.
-    """
+async def fetch_hackernews_top(limit: int = 10) -> str:
+    """Fetch top stories from Hacker News."""
+    client = _get_client()
     last_error = None
     for attempt in range(2):
         try:
-            # Fetch top story IDs
             top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
-            response = requests.get(top_url, timeout=10)
+            response = await client.get(top_url)
             response.raise_for_status()
             story_ids = response.json()[:limit]
 
@@ -327,7 +322,7 @@ def fetch_hackernews_top(limit: int = 10) -> str:
                     f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
                 )
                 try:
-                    story_response = requests.get(story_url, timeout=10)
+                    story_response = await client.get(story_url)
                     story_response.raise_for_status()
                     story_data = story_response.json()
                     if story_data:
@@ -342,8 +337,7 @@ def fetch_hackernews_top(limit: int = 10) -> str:
                                 "comments": story_data.get("descendants", 0),
                             }
                         )
-                except requests.RequestException:
-                    # Individual story failure shouldn't kill the whole fetch
+                except Exception:
                     logger.warning("Failed to fetch HN story %s", story_id)
                     continue
 
@@ -364,34 +358,30 @@ def fetch_hackernews_top(limit: int = 10) -> str:
 
             return "\n".join(lines)
 
-        except (requests.RequestException, Exception) as e:
+        except Exception as e:
             last_error = e
             logger.warning("HN fetch attempt %d failed: %s", attempt + 1, e)
             if attempt == 0:
-                time.sleep(5)
+                await asyncio.sleep(5)
 
     logger.exception("Failed to fetch Hacker News stories after retries")
     return f"❌ Failed to fetch Hacker News: {html.escape(str(last_error))}"
 
 
-def fetch_steam_free_games(limit: int = 5) -> tuple[str, list[str]]:
-    return _cached_fetch(
+async def fetch_steam_free_games(limit: int = 5) -> tuple[str, list[str]]:
+    return await _cached_fetch(
         f"steam:{limit}",
         _GAME_OFFERS_TTL_S,
         lambda: _fetch_steam_free_games_uncached(limit),
     )
 
 
-def _fetch_steam_free_games_uncached(limit: int) -> tuple[str, list[str]]:
-    """Fetch currently free-to-keep Steam games (filtering for 100% discount).
-
-    Returns tuple of (formatted HTML message, list of image URLs). Dates are not
-    provided by the endpoint; show 'unknown' availability.
-    """
-
+async def _fetch_steam_free_games_uncached(limit: int) -> tuple[str, list[str]]:
+    """Fetch currently free-to-keep Steam games."""
     try:
         url = "https://store.steampowered.com/api/featuredcategories"
-        resp = requests.get(url, timeout=10)
+        client = _get_client()
+        resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
 
@@ -404,9 +394,7 @@ def _fetch_steam_free_games_uncached(limit: int) -> tuple[str, list[str]]:
             final = price.get("final", price.get("final_price", 0)) or 0
             discount = price.get("discount_percent") or item.get("discount_percent")
 
-            # Free-to-keep if price drops to zero from a positive initial price
             if initial > 0 and final == 0 and (discount is None or discount >= 100):
-                # Try to extract an image URL if present
                 image = None
                 for key in (
                     "small_capsule_image",
@@ -458,29 +446,22 @@ def _fetch_steam_free_games_uncached(limit: int) -> tuple[str, list[str]]:
 
         return ("\n".join(lines), image_urls[:1])
 
-    except requests.RequestException as e:
+    except Exception as e:
         logger.exception("Failed to fetch Steam free games")
         return (f"❌ Failed to fetch Steam freebies: {html.escape(str(e))}", [])
-    except Exception as e:
-        logger.exception("Error processing Steam free games data")
-        return (f"❌ Error processing Steam freebies: {html.escape(str(e))}", [])
 
 
-def fetch_gog_free_games() -> tuple[str, list[str]]:
-    return _cached_fetch(
+async def fetch_gog_free_games() -> tuple[str, list[str]]:
+    return await _cached_fetch(
         "gog",
         _GAME_OFFERS_TTL_S,
         _fetch_gog_free_games_uncached,
     )
 
 
-def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
-    """Fetch current GOG giveaway games.
-
-    Returns tuple of (formatted HTML message, list of image URLs).
-    """
+async def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
+    """Fetch current GOG giveaway games."""
     try:
-        # GOG giveaway endpoint - checks for active giveaways
         url = "https://www.gog.com/games/ajax/filtered"
         params = {
             "mediaType": "game",
@@ -493,7 +474,8 @@ def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
             "Accept": "application/json",
         }
 
-        response = requests.get(url, params=params, headers=headers, timeout=15)
+        client = _get_client()
+        response = await client.get(url, params=params, headers=headers)
         response.raise_for_status()
         data = response.json()
 
@@ -501,7 +483,6 @@ def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
         free_games: list[dict[str, Any]] = []
 
         for product in products:
-            # Check if it's actually free (price is 0 or has a giveaway)
             price = product.get("price", {})
             is_free = price.get("isFree", False) or price.get("finalAmount") == "0.00"
 
@@ -509,8 +490,6 @@ def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
                 title = product.get("title", "Unknown")
                 slug = product.get("slug", "")
                 image = product.get("image", "")
-
-                # Build full image URL if relative
                 if image and not image.startswith("http"):
                     image = f"https:{image}"
 
@@ -526,9 +505,7 @@ def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
         if not free_games:
             return ("🎮 <b>GOG</b>\n\nNo free games available right now.", [])
 
-        # Limit to first 3 games
         free_games = free_games[:3]
-
         lines = ["🎮 <b>GOG - Free Games</b>\n"]
         image_urls: list[str] = []
 
@@ -546,29 +523,22 @@ def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
         )
         return ("\n".join(lines), image_urls[:1])
 
-    except requests.RequestException as e:
+    except Exception as e:
         logger.exception("Failed to fetch GOG free games")
         return (f"❌ Failed to fetch GOG games: {html.escape(str(e))}", [])
-    except Exception as e:
-        logger.exception("Error processing GOG data")
-        return (f"❌ Error processing GOG data: {html.escape(str(e))}", [])
 
 
-def fetch_humble_free_games() -> tuple[str, list[str]]:
-    return _cached_fetch(
+async def fetch_humble_free_games() -> tuple[str, list[str]]:
+    return await _cached_fetch(
         "humble",
         _GAME_OFFERS_TTL_S,
         _fetch_humble_free_games_uncached,
     )
 
 
-def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
-    """Fetch current Humble Bundle free games/giveaways.
-
-    Returns tuple of (formatted HTML message, list of image URLs).
-    """
+async def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
+    """Fetch current Humble Bundle free games/giveaways."""
     try:
-        # Humble Bundle storefront API for free content
         url = "https://www.humblebundle.com/store/api/search"
         params = {
             "sort": "discount",
@@ -578,7 +548,6 @@ def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
             "page_size": 100,
             "page": 0,
         }
-        # Use browser-like headers; Humble often blocks generic clients
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -590,20 +559,15 @@ def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
             "X-Requested-With": "XMLHttpRequest",
         }
 
-        session = requests.Session()
-        session.headers.update(headers)
-        response = session.get(url, params=params, timeout=15)
+        client = _get_client()
+        response = await client.get(url, params=params, headers=headers)
         if response.status_code == 403:
-            # Retry once with alternate UA (some edges are picky)
-            session.headers.update(
-                {
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 Chrome/122.0 Safari/537.36"
-                    )
-                }
+            # Retry once with alternate UA
+            headers["User-Agent"] = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/122.0 Safari/537.36"
             )
-            response = session.get(url, params=params, timeout=15)
+            response = await client.get(url, params=params, headers=headers)
         response.raise_for_status()
         data = response.json()
 
@@ -611,19 +575,14 @@ def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
         free_games: list[dict[str, Any]] = []
 
         for item in results:
-            # Check for 100% discount or free items
             current_price = item.get("current_price", {})
             price_amount = current_price.get("amount", 1)
-
-            # Also check for giveaway flag
             is_giveaway = item.get("is_giveaway", False)
 
             if price_amount == 0 or is_giveaway:
                 title = item.get("human_name", "Unknown")
                 slug = item.get("human_url", "")
                 icon = item.get("icon", "")
-
-                # Build full image URL
                 if icon and not icon.startswith("http"):
                     icon = f"https://hb.imgix.net{icon}"
 
@@ -639,20 +598,18 @@ def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
                     }
                 )
 
-        # Also check the main page for featured freebies
         if not free_games:
-            # Try fetching the main page for giveaways
             giveaway_url = "https://www.humblebundle.com/store/api/lookup"
             giveaway_params = {"products[]": "mosaic"}
             try:
-                gw_resp = session.get(
+                gw_resp = await client.get(
                     giveaway_url,
                     params=giveaway_params,
-                    timeout=10,
+                    headers=headers,
                 )
                 if gw_resp.status_code == 200:
                     gw_data = gw_resp.json()
-                    for key, item in gw_data.items():
+                    for _key, item in gw_data.items():
                         if isinstance(item, dict):
                             price = item.get("current_price", {}).get("amount", 1)
                             if price == 0:
@@ -667,14 +624,9 @@ def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
                 logger.warning(f"Humble Bundle fallback API failed: {fallback_error}")
 
         if not free_games:
-            return (
-                "🎮 <b>Humble Bundle</b>\n\nNo free games available right now.",
-                [],
-            )
+            return ("🎮 <b>Humble Bundle</b>\n\nNo free games available right now.", [])
 
-        # Limit to first 3 games
         free_games = free_games[:3]
-
         lines = ["🎮 <b>Humble Bundle - Free Games</b>\n"]
         image_urls: list[str] = []
 
@@ -692,21 +644,18 @@ def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
         )
         return ("\n".join(lines), image_urls[:1])
 
-    except requests.RequestException as e:
+    except Exception as e:
         logger.exception("Failed to fetch Humble Bundle free games")
         return (f"❌ Failed to fetch Humble Bundle: {html.escape(str(e))}", [])
-    except Exception as e:
-        logger.exception("Error processing Humble Bundle data")
-        return (f"❌ Error processing Humble Bundle: {html.escape(str(e))}", [])
 
 
-def build_combined_game_offers(limit_steam: int = 5) -> tuple[str, str | None]:
+async def build_combined_game_offers(limit_steam: int = 5) -> tuple[str, str | None]:
     """Combine Epic, Steam, GOG, and Humble offers into one HTML message."""
     sections: list[str] = []
     epic_image: str | None = None
 
     try:
-        epic_msg, epic_images = fetch_epic_free_games()
+        epic_msg, epic_images = await fetch_epic_free_games()
         if epic_msg:
             sections.append(epic_msg)
         if epic_images:
@@ -715,21 +664,21 @@ def build_combined_game_offers(limit_steam: int = 5) -> tuple[str, str | None]:
         logger.exception("Failed to include Epic section")
 
     try:
-        steam_msg, _ = fetch_steam_free_games(limit_steam)
+        steam_msg, _ = await fetch_steam_free_games(limit_steam)
         if steam_msg:
             sections.append(steam_msg)
     except Exception:
         logger.exception("Failed to include Steam section")
 
     try:
-        gog_msg, _ = fetch_gog_free_games()
+        gog_msg, _ = await fetch_gog_free_games()
         if gog_msg:
             sections.append(gog_msg)
     except Exception:
         logger.exception("Failed to include GOG section")
 
     try:
-        humble_msg, _ = fetch_humble_free_games()
+        humble_msg, _ = await fetch_humble_free_games()
         if humble_msg:
             sections.append(humble_msg)
     except Exception:
@@ -738,5 +687,4 @@ def build_combined_game_offers(limit_steam: int = 5) -> tuple[str, str | None]:
     if not sections:
         return ("🎮 <b>Game Offers</b>\n\nNo current free offers found.", None)
 
-    # Join sections with a clear separator
     return ("\n\n".join(sections), epic_image)

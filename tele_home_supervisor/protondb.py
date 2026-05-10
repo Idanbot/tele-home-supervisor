@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import logging
-import os
-import time
 from typing import Any, TypedDict
 from urllib.parse import quote
 
-import requests
+import httpx
 
 __all__ = [
     "search_steam_games",
@@ -22,13 +20,23 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(12.0),
+            transport=httpx.AsyncHTTPTransport(retries=2),
+        )
+    return _CLIENT
+
+
 _USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
-_TIMEOUT = int(os.environ.get("PROTONDB_TIMEOUT", "12"))
-_MAX_RETRIES = int(os.environ.get("PROTONDB_MAX_RETRIES", "2"))
-_RETRY_DELAY = float(os.environ.get("PROTONDB_RETRY_DELAY", "0.5"))
 
 
 class SteamGame(TypedDict, total=False):
@@ -62,41 +70,7 @@ class SteamAppDetails(TypedDict, total=False):
     genres: list[dict[str, str]]
 
 
-def _request_with_retry(
-    url: str,
-    headers: dict[str, str],
-    params: dict[str, str] | None = None,
-    max_retries: int = _MAX_RETRIES,
-) -> requests.Response:
-    """Make HTTP GET request with retry logic for transient failures."""
-    last_error: Exception | None = None
-    for attempt in range(max_retries + 1):
-        try:
-            resp = requests.get(url, headers=headers, params=params, timeout=_TIMEOUT)
-            # Retry on 5xx errors
-            if resp.status_code >= 500 and attempt < max_retries:
-                time.sleep(_RETRY_DELAY * (attempt + 1))
-                continue
-            return resp
-        except requests.exceptions.Timeout as e:
-            last_error = e
-            if attempt < max_retries:
-                time.sleep(_RETRY_DELAY * (attempt + 1))
-                continue
-            raise
-        except requests.exceptions.ConnectionError as e:
-            last_error = e
-            if attempt < max_retries:
-                time.sleep(_RETRY_DELAY * (attempt + 1))
-                continue
-            raise
-    # Should not reach here, but just in case
-    if last_error:
-        raise last_error
-    raise RuntimeError("Request failed after retries")
-
-
-def search_steam_games(query: str) -> list[SteamGame]:
+async def search_steam_games(query: str) -> list[SteamGame]:
     """Search Steam games by name.
 
     Args:
@@ -104,55 +78,51 @@ def search_steam_games(query: str) -> list[SteamGame]:
 
     Returns:
         List of games with appid, name, icon, logo.
-
-    Raises:
-        RuntimeError: If Steam search API returns an error.
     """
     url = f"https://steamcommunity.com/actions/SearchApps/{quote(query)}"
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    client = _get_client()
     try:
-        resp = _request_with_retry(url, headers)
-        if resp.ok:
+        resp = await client.get(url, headers=headers)
+        if resp.is_success:
             data = resp.json()
             if isinstance(data, list):
                 return data[:10]
         else:
             logger.debug("Steam search failed: HTTP %d", resp.status_code)
-    except (requests.exceptions.RequestException, ValueError) as exc:
+    except Exception as exc:
         logger.debug("Steam community search failed: %s", exc)
-    return _search_steam_store(query)
+    return await _search_steam_store(query)
 
 
-def _search_steam_store(query: str) -> list[SteamGame]:
+async def _search_steam_store(query: str) -> list[SteamGame]:
     """Fallback search via Steam Store API."""
     url = "https://store.steampowered.com/api/storesearch"
-    # Removed category1=998 (Deck Verified) to find all games
     params = {"term": query, "l": "english", "cc": "us"}
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    client = _get_client()
     data = None
     try:
-        resp = _request_with_retry(url, headers, params=params)
-        if resp.ok:
+        resp = await client.get(url, headers=headers, params=params)
+        if resp.is_success:
             data = resp.json()
         else:
             logger.debug("Steam store search failed: HTTP %d", resp.status_code)
-    except (requests.exceptions.RequestException, ValueError) as exc:
+    except Exception as exc:
         logger.debug("Steam store search failed: %s", exc)
 
     items = data.get("items") if isinstance(data, dict) else None
     if not items:
         try:
-            resp = _request_with_retry(
-                url, headers, params={"term": query, "l": "english", "cc": "us"}
-            )
-            if resp.ok:
+            resp = await client.get(url, headers=headers, params=params)
+            if resp.is_success:
                 data = resp.json()
             else:
                 logger.debug(
                     "Steam store relaxed search failed: HTTP %d", resp.status_code
                 )
                 return []
-        except (requests.exceptions.RequestException, ValueError) as exc:
+        except Exception as exc:
             logger.debug("Steam store relaxed search failed: %s", exc)
             return []
 
@@ -177,7 +147,7 @@ def _search_steam_store(query: str) -> list[SteamGame]:
     return results
 
 
-def get_protondb_summary(appid: int | str) -> ProtonDBSummary | None:
+async def get_protondb_summary(appid: int | str) -> ProtonDBSummary | None:
     """Get ProtonDB compatibility summary for a game.
 
     Args:
@@ -188,11 +158,12 @@ def get_protondb_summary(appid: int | str) -> ProtonDBSummary | None:
     """
     url = f"https://www.protondb.com/api/v1/reports/summaries/{appid}.json"
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    client = _get_client()
     try:
-        resp = _request_with_retry(url, headers)
+        resp = await client.get(url, headers=headers)
         if resp.status_code == 404:
             return None
-        if not resp.ok:
+        if not resp.is_success:
             logger.debug("ProtonDB API error: HTTP %d", resp.status_code)
             return None
         return resp.json()
@@ -201,7 +172,7 @@ def get_protondb_summary(appid: int | str) -> ProtonDBSummary | None:
         return None
 
 
-def get_steam_app_details(appid: int | str) -> SteamAppDetails | None:
+async def get_steam_app_details(appid: int | str) -> SteamAppDetails | None:
     """Get Steam app details including images, description, metacritic.
 
     Args:
@@ -212,9 +183,10 @@ def get_steam_app_details(appid: int | str) -> SteamAppDetails | None:
     """
     url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    client = _get_client()
     try:
-        resp = _request_with_retry(url, headers)
-        if not resp.ok:
+        resp = await client.get(url, headers=headers)
+        if not resp.is_success:
             logger.debug("Steam appdetails error: HTTP %d", resp.status_code)
             return None
         data = resp.json()
@@ -227,7 +199,7 @@ def get_steam_app_details(appid: int | str) -> SteamAppDetails | None:
         return None
 
 
-def get_steam_player_count(appid: int | str) -> int | None:
+async def get_steam_player_count(appid: int | str) -> int | None:
     """Get current player count for a Steam game.
 
     Args:
@@ -238,9 +210,10 @@ def get_steam_player_count(appid: int | str) -> int | None:
     """
     url = f"https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid={appid}"
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    client = _get_client()
     try:
-        resp = _request_with_retry(url, headers)
-        if not resp.ok:
+        resp = await client.get(url, headers=headers)
+        if not resp.is_success:
             return None
         data = resp.json()
         response = data.get("response", {})

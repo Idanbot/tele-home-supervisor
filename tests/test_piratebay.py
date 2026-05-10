@@ -1,6 +1,5 @@
 from unittest.mock import MagicMock, patch
 
-
 from tele_home_supervisor import piratebay
 
 SAMPLE_HTML = """

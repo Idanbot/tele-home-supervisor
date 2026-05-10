@@ -1,12 +1,12 @@
 """Tests for media handlers (TMDB, ProtonDB)."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
+from conftest import DummyContext, DummyUpdate
 
 from tele_home_supervisor import config
 from tele_home_supervisor.handlers import media
-
-from conftest import DummyContext, DummyUpdate
 
 
 class TestTmdbHandlers:

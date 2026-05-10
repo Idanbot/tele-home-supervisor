@@ -11,7 +11,7 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-from . import piratebay, utils, tmdb, protondb
+from . import piratebay, protondb, tmdb, utils
 from . import torrent as torrent_mod
 
 # Simple in-memory cache for Steam search results
@@ -45,7 +45,15 @@ def _cache_steam_search(query: str, results: list[dict]) -> None:
 async def host_health(
     show_wan: bool = False, watch_paths: list[str] | None = None
 ) -> dict[str, Any]:
-    return await utils.host_health(watch_paths)
+    return await utils.host_health(show_wan, watch_paths)
+
+
+async def get_disk_usage_stats(watch_paths: list[str]) -> list[dict]:
+    return await utils.get_disk_usage_stats(watch_paths)
+
+
+async def ping_host(host: str, count: int = 3) -> str:
+    return await utils.ping_host(host, count)
 
 
 async def list_containers() -> list[dict[str, Any]]:
@@ -88,6 +96,14 @@ async def get_listening_ports() -> str:
     return await utils.get_listening_ports()
 
 
+async def get_cpu_temp() -> str:
+    return await utils.get_cpu_temp()
+
+
+async def get_top_processes() -> str:
+    return await utils.get_top_processes()
+
+
 async def dns_lookup(name: str) -> str:
     return await utils.dns_lookup(name)
 
@@ -101,59 +117,60 @@ async def speedtest_download(mb: int = 100) -> str:
 
 
 async def piratebay_top(
-    category: str | None, debug_sink=None
+    category: str | None = None, debug_sink=None
 ) -> list[dict[str, object]]:
-    return await asyncio.to_thread(piratebay.top, category, debug_sink)
+    return await piratebay.top(category, debug_sink)
 
 
 async def piratebay_search(query: str, debug_sink=None) -> list[dict[str, object]]:
-    return await asyncio.to_thread(piratebay.search, query, debug_sink)
+    return await piratebay.search(query, debug_sink)
 
 
 async def tmdb_trending_movies(page: int = 1) -> dict[str, object]:
-    return await asyncio.to_thread(tmdb.trending_movies, page)
+    return await tmdb.trending_movies(page)
 
 
 async def tmdb_trending_shows(page: int = 1) -> dict[str, object]:
-    return await asyncio.to_thread(tmdb.trending_shows, page)
+    return await tmdb.trending_shows(page)
 
 
 async def tmdb_in_cinema(page: int = 1) -> dict[str, object]:
-    return await asyncio.to_thread(tmdb.in_cinema, page)
+    return await tmdb.in_cinema(page)
 
 
 async def tmdb_search_multi(query: str, page: int = 1) -> dict[str, object]:
-    return await asyncio.to_thread(tmdb.search_multi, query, page)
+    return await tmdb.search_multi(query, page)
 
 
 async def tmdb_movie_details(movie_id: int) -> dict[str, object]:
-    return await asyncio.to_thread(tmdb.movie_details, movie_id)
+    return await tmdb.movie_details(movie_id)
 
 
 async def tmdb_tv_details(tv_id: int) -> dict[str, object]:
-    return await asyncio.to_thread(tmdb.tv_details, tv_id)
+    return await tmdb.tv_details(tv_id)
 
 
 async def protondb_search(query: str) -> list[dict[str, object]]:
     """Search Steam games with caching."""
     cached = _get_cached_steam_search(query)
-    if cached is not None:
+    if cached:
         return cached
-    results = await asyncio.to_thread(protondb.search_steam_games, query)
-    _cache_steam_search(query, results)
-    return results
+    # Now async
+    games = await protondb.search_steam_games(query)
+    _cache_steam_search(query, games)
+    return games
 
 
 async def protondb_summary(appid: int | str) -> dict[str, object] | None:
-    return await asyncio.to_thread(protondb.get_protondb_summary, appid)
+    return await protondb.get_protondb_summary(appid)
 
 
 async def steam_app_details(appid: int | str) -> dict[str, object] | None:
-    return await asyncio.to_thread(protondb.get_steam_app_details, appid)
+    return await protondb.get_steam_app_details(appid)
 
 
 async def steam_player_count(appid: int | str) -> int | None:
-    return await asyncio.to_thread(protondb.get_steam_player_count, appid)
+    return await protondb.get_steam_player_count(appid)
 
 
 # Torrent helpers (Sync wrappers)

@@ -5,20 +5,21 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import tempfile
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from telegram.constants import ParseMode
 from telegram.ext import Application
 
+from . import alerting, intel
+from . import scheduled as scheduled_fetchers
+from .config import settings
+from .models.torrent_snapshot import TorrentSnapshot
 from .state import BOT_STATE_KEY, BotState
 from .torrent import fmt_bytes_compact_decimal, get_manager, reset_manager
-from .models.torrent_snapshot import TorrentSnapshot
-from . import scheduled as scheduled_fetchers
-from . import intel
-from . import alerting
-from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +28,13 @@ _TASK_GAMEOFFERS = "gameoffers_scheduler"
 _TASK_INTEL_BRIEFING = "intel_briefing_scheduler"
 _TASK_ALERTS = "alerts_scheduler"
 _TASK_MEDIA_CLEANUP = "media_cleanup"
+_TASK_REMINDERS = "reminders_scheduler"
 
 _POLL_INTERVAL_S = 30.0
 _ALERT_POLL_INTERVAL_S = 60.0
 _MEDIA_CLEANUP_INTERVAL_S = 900.0  # check every 15 minutes
 _ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
+_HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "bot_heartbeat"
 
 # ---------------------------------------------------------------------------
 # Graceful shutdown coordination
@@ -70,6 +73,7 @@ async def cancel_tasks(state: BotState) -> None:
         _TASK_INTEL_BRIEFING,
         _TASK_ALERTS,
         _TASK_MEDIA_CLEANUP,
+        _TASK_REMINDERS,
     ]
     for name in task_names:
         task = state.tasks.get(name)
@@ -121,6 +125,11 @@ def ensure_started(app: Application) -> None:
     task = state.tasks.get(_TASK_MEDIA_CLEANUP)
     if not isinstance(task, asyncio.Task) or task.done():
         state.tasks[_TASK_MEDIA_CLEANUP] = asyncio.create_task(_media_cleanup_loop(app))
+
+    # Start reminders loop
+    task = state.tasks.get(_TASK_REMINDERS)
+    if not isinstance(task, asyncio.Task) or task.done():
+        state.tasks[_TASK_REMINDERS] = asyncio.create_task(_reminders_loop(app))
 
 
 def _get_state(app: Application) -> BotState:
@@ -239,6 +248,13 @@ async def _torrent_completion_loop(app: Application) -> None:
             seen_complete = current_complete
 
             state = _get_state(app)
+            state.update_heartbeat()
+            # Write a heartbeat file for Docker HEALTHCHECK
+            try:
+                _HEARTBEAT_FILE.write_text(str(time.time()), encoding="utf-8")
+            except Exception:
+                logger.debug("Failed to write heartbeat file")
+
             if new_completions and state.torrent_completion_subscribers:
                 subs = list(state.torrent_completion_subscribers)
                 for t in new_completions:
@@ -325,31 +341,35 @@ async def _game_offers_scheduler(app: Application) -> None:
 
     while not _shutdown_requested:
         try:
-            # Wait until 8 PM Israel time
-            wait_seconds = _seconds_until_time(20, 0)  # 8 PM = 20:00
+            wait_seconds = _seconds_until_time(20, 0)
             logger.info(
                 "Game Offers: waiting %.1f seconds until next run", wait_seconds
             )
             if await _interruptible_sleep(wait_seconds):
                 break
 
-            # Fetch and send
             state = _get_state(app)
-            if not settings.ALLOWED_CHAT_IDS:
-                logger.warning("No allowed chat IDs configured")
-                if await _interruptible_sleep(3600):
-                    break
+            now = time.time()
+            # Prevent double-fire if clock drift or loop wakes up early
+            # Allow 22 hour gap
+            if (now - state.last_game_offers_run) < (22 * 3600):
+                logger.info("Game Offers: already ran recently, skipping")
+                await _interruptible_sleep(300)
                 continue
 
-            combined_msg, image_url = await asyncio.to_thread(
-                scheduled_fetchers.build_combined_game_offers, 5
-            )
+            if not settings.ALLOWED_CHAT_IDS:
+                logger.warning("No allowed chat IDs configured")
+                await _interruptible_sleep(3600)
+                continue
+
+            (
+                combined_msg,
+                image_url,
+            ) = await scheduled_fetchers.build_combined_game_offers(5)
 
             for chat_id in settings.ALLOWED_CHAT_IDS:
                 if state.is_gameoffers_muted(chat_id):
-                    logger.debug("Game Offers muted for chat_id=%s", chat_id)
                     continue
-
                 try:
                     if image_url:
                         try:
@@ -379,25 +399,20 @@ async def _game_offers_scheduler(app: Application) -> None:
                             parse_mode=ParseMode.HTML,
                             disable_web_page_preview=True,
                         )
-                    logger.info(
-                        "Sent Game Offers notification to chat_id=%s",
-                        chat_id,
-                    )
                 except Exception:
                     logger.exception(
                         "Failed to send Game Offers notification to chat_id=%s", chat_id
                     )
 
-            # Wait a bit to avoid rescheduling immediately
-            if await _interruptible_sleep(120):
-                break
+            state.last_game_offers_run = now
+            state.save()
+            await _interruptible_sleep(120)
 
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Game Offers scheduler error")
-            if await _interruptible_sleep(3600):
-                break
+            await _interruptible_sleep(3600)
     logger.info("Game Offers scheduler stopped")
 
 
@@ -407,20 +422,23 @@ async def _intel_briefing_scheduler(app: Application) -> None:
 
     while not _shutdown_requested:
         try:
-            # Wait until 8 AM Israel time
-            wait_seconds = _seconds_until_time(8, 0)  # 8 AM = 08:00
+            wait_seconds = _seconds_until_time(8, 0)
             logger.info(
                 "Intel Briefing: waiting %.1f seconds until next run", wait_seconds
             )
             if await _interruptible_sleep(wait_seconds):
                 break
 
-            # Fetch and send
             state = _get_state(app)
+            now = time.time()
+            if (now - state.last_intel_briefing_run) < (22 * 3600):
+                logger.info("Intel Briefing: already ran recently, skipping")
+                await _interruptible_sleep(300)
+                continue
+
             if not settings.ALLOWED_CHAT_IDS:
                 logger.warning("No allowed chat IDs configured")
-                if await _interruptible_sleep(3600):
-                    break
+                await _interruptible_sleep(3600)
                 continue
 
             for chat_id in settings.ALLOWED_CHAT_IDS:
@@ -432,25 +450,21 @@ async def _intel_briefing_scheduler(app: Application) -> None:
                         parse_mode=ParseMode.HTML,
                         disable_web_page_preview=True,
                     )
-                    logger.info(
-                        "Sent Intel Briefing notification to chat_id=%s", chat_id
-                    )
                 except Exception:
                     logger.exception(
                         "Failed to send Intel Briefing notification to chat_id=%s",
                         chat_id,
                     )
 
-            # Wait a bit to avoid rescheduling immediately
-            if await _interruptible_sleep(120):
-                break
+            state.last_intel_briefing_run = now
+            state.save()
+            await _interruptible_sleep(120)
 
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Intel Briefing scheduler error")
-            if await _interruptible_sleep(3600):
-                break
+            await _interruptible_sleep(3600)
     logger.info("Intel Briefing scheduler stopped")
 
 
@@ -505,3 +519,31 @@ async def _media_cleanup_loop(app: Application) -> None:
             if await _interruptible_sleep(_MEDIA_CLEANUP_INTERVAL_S):
                 break
     logger.info("Media cleanup loop stopped")
+
+
+async def _reminders_loop(app: Application) -> None:
+    """Periodically check and send due reminders."""
+    logger.info("Starting reminders loop (interval=30s)")
+    while not _shutdown_requested:
+        try:
+            state = _get_state(app)
+            due = state.pop_due_reminders()
+            for r in due:
+                try:
+                    await app.bot.send_message(
+                        chat_id=r["chat_id"],
+                        text=f"⏰ <b>Reminder:</b> {html.escape(r['text'])}",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    logger.exception("Failed to send reminder to %s", r["chat_id"])
+
+            if await _interruptible_sleep(30.0):
+                break
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Reminders loop error")
+            if await _interruptible_sleep(30.0):
+                break
+    logger.info("Reminders loop stopped")

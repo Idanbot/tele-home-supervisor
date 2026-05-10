@@ -76,4 +76,7 @@ COPY --chown=app:app . .
 
 USER app
 
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import time, os; t=float(open('/tmp/bot_heartbeat').read()); exit(0 if time.time()-t < 120 else 1)" || exit 1
+
 CMD ["python", "/app/bot.py"]

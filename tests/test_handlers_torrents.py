@@ -1,8 +1,10 @@
-import pytest
 from unittest.mock import MagicMock
-from tele_home_supervisor.handlers import torrents, callbacks
-from tele_home_supervisor.handlers.common import get_state
+
+import pytest
+
 from tele_home_supervisor import services
+from tele_home_supervisor.handlers import callbacks, torrents
+from tele_home_supervisor.handlers.common import get_state
 
 
 class DummyMessage:

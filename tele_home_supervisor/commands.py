@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from .models.command_spec import CommandSpec, Group
 
-
 _INFO_COMMANDS = (
     CommandSpec("start", "Info", "/start", "show help", "cmd_start"),
     CommandSpec("help", "Info", "/help", "this menu", "cmd_help"),

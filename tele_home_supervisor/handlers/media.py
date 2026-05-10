@@ -7,8 +7,8 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from .. import services, tmdb, view
-from .callbacks import build_tmdb_keyboard, build_protondb_keyboard
-from .common import guard, get_state_and_recorder, record_error
+from .callbacks import build_protondb_keyboard, build_tmdb_keyboard
+from .common import get_state_and_recorder, guard, record_error
 
 
 async def cmd_movies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -22,10 +22,42 @@ dependencies = [
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "pytest-cov>=6.0.0",
     "ruff==0.15.1",
     "bandit>=1.9.3",
     "pre-commit>=4.0.0",
 ]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "I",   # isort
+    "UP",  # pyupgrade (Python version upgrades)
+    "S",   # flake8-bandit (security)
+]
+ignore = [
+    "E501", # line too long (handled by formatter)
+    "S101", # use of assert (common in tests)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tele_home_supervisor"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"] # allow asserts and hardcoded-looking secrets in tests
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "--cov=tele_home_supervisor --cov-report=term-missing --cov-fail-under=75"
 
 [build-system]
 requires = ["hatchling"]

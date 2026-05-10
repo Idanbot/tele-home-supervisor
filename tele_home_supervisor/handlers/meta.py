@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html
 import logging
-import re
 import time
 
 import pyotp
@@ -45,15 +44,6 @@ def _render_help() -> str:
     return "\n".join(lines).strip()
 
 
-def _escape_md_v2(text: str) -> str:
-    return re.sub(r"([\\_*[\]()~`>#+\-=\|{}.!])", r"\\\1", text)
-
-
-def _code(text: str) -> str:
-    escaped = text.replace("\\", "\\\\").replace("`", "\\`")
-    return f"`{escaped}`"
-
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
@@ -81,12 +71,14 @@ async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     try:
         info = await services.get_version_info()
-        lines = ["*Version Info*"]
+        lines = ["<b>Version Info</b>"]
 
         def add(label: str, key: str) -> None:
             val = info.get(key)
             if val:
-                lines.append(f"• {_escape_md_v2(label)}: {_code(val)}")
+                lines.append(
+                    f"• {html.escape(label)}: <code>{html.escape(str(val))}</code>"
+                )
 
         add("Build", "build")
         add("Deployed", "started")
@@ -104,10 +96,12 @@ async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         add("Host", "host")
 
         msg = "\n".join(lines)
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.exception("Version command failed")
-        await update.message.reply_text(f"❌ Error getting version info: {e}")
+        await update.message.reply_text(
+            f"❌ Error getting version info: {html.escape(str(e))}"
+        )
 
 
 async def cmd_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -382,15 +376,24 @@ async def _handle_failed_auth(
     attempts, cooldown_until = state.record_failed_auth(
         user_id,
         max_failures=_FAILED_AUTH_LIMIT,
-        cooldown_s=_FAILED_AUTH_COOLDOWN_S,
+        base_cooldown_s=_FAILED_AUTH_COOLDOWN_S,
     )
-    await _notify_owner_auth_failure(
-        update,
-        context,
-        reason=reason,
-        attempts=attempts,
-        cooldown_until=cooldown_until,
-    )
+
+    # Only notify owner when a cooldown is triggered to reduce noise/spam
+    # and rate-limit notifications for the same user.
+    if cooldown_until is not None:
+        last_notif = getattr(state, "_last_auth_notif", {}).get(user_id, 0)
+        if time.time() - last_notif > 300:  # 5 minute cooldown for notifications
+            if not hasattr(state, "_last_auth_notif"):
+                state._last_auth_notif = {}
+            state._last_auth_notif[user_id] = time.time()
+            await _notify_owner_auth_failure(
+                update,
+                context,
+                reason=reason,
+                attempts=attempts,
+                cooldown_until=cooldown_until,
+            )
     return cooldown_until
 
 
@@ -412,25 +415,24 @@ async def _notify_owner_auth_failure(
         return
 
     user = getattr(update, "effective_user", None)
-    chat = getattr(update, "effective_chat", None)
     user_id = getattr(user, "id", None)
     username = getattr(user, "username", None) or "-"
-    chat_id = getattr(chat, "id", None)
+    # Mask User ID for privacy in notification
+    masked_uid = f"{str(user_id)[:3]}...{str(user_id)[-3:]}" if user_id else "-"
     lines = [
-        "🚨 Failed /auth",
-        f"User ID: {user_id}",
-        f"Chat ID: {chat_id}",
-        f"Username: @{username}" if username != "-" else "Username: -",
-        f"Reason: {reason}",
-        f"Attempts: {min(max(attempts, 1), _FAILED_AUTH_LIMIT)}/{_FAILED_AUTH_LIMIT}",
+        "🚨 <b>Auth Cooldown Triggered</b>",
+        f"User: <code>{masked_uid}</code> (@{html.escape(username)})",
+        f"Reason: {html.escape(reason)}",
     ]
     if cooldown_until is not None:
         lines.append(
-            "Cooldown until: "
-            f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(cooldown_until))}"
+            "Locked until: "
+            f"<code>{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(cooldown_until))}</code>"
         )
     try:
-        await send_message(chat_id=owner_id, text="\n".join(lines))
+        await send_message(
+            chat_id=owner_id, text="\n".join(lines), parse_mode=ParseMode.HTML
+        )
     except Exception as exc:
         logger.warning("Failed to notify owner about failed auth: %s", exc)
 

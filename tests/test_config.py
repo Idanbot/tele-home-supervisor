@@ -1,6 +1,7 @@
-import os
 import json
+import os
 from unittest import mock
+
 from tele_home_supervisor import config
 
 

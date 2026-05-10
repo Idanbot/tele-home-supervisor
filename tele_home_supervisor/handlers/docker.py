@@ -5,21 +5,14 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from .. import services, view
-from .common import (
-    guard_sensitive,
-    get_state_and_recorder,
-    record_error,
-    reply_usage_with_suggestions,
-    set_audit_target,
-    tracked_reply_photo,
-)
 from .callbacks import (
     DOCKER_PAGE_SIZE,
     LOG_PAGE_SIZE,
@@ -28,6 +21,14 @@ from .callbacks import (
     _render_logs_page,
     build_docker_keyboard,
     normalize_docker_page,
+)
+from .common import (
+    get_state_and_recorder,
+    guard_sensitive,
+    record_error,
+    reply_usage_with_suggestions,
+    set_audit_target,
+    tracked_reply_photo,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,17 +50,24 @@ def _parse_since(value: str) -> int | None:
     try:
         parsed = datetime.fromisoformat(arg)
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         return int(parsed.timestamp())
     except ValueError:
         return None
 
 
-def _parse_dlogs_args(
-    args: list[str],
-) -> tuple[str | None, int | None, int | None, bool, bool]:
+@dataclass(frozen=True)
+class DlogsArgs:
+    container: str | None
+    page: int | None
+    since: int | None
+    as_file: bool
+    invalid_since: bool
+
+
+def _parse_dlogs_args(args: list[str]) -> DlogsArgs:
     if not args:
-        return None, None, None, False, False
+        return DlogsArgs(None, None, None, False, False)
     container = args[0]
     page = None
     since = None
@@ -93,8 +101,8 @@ def _parse_dlogs_args(
             page = max(int(arg) - 1, 0)
             idx += 1
             continue
-        return container, None, None, as_file, invalid_since
-    return container, page, since, as_file, invalid_since
+        return DlogsArgs(container, None, None, as_file, invalid_since)
+    return DlogsArgs(container, page, since, as_file, invalid_since)
 
 
 async def cmd_docker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -201,13 +209,16 @@ async def cmd_dlogs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    container_name, page, since, as_file, invalid_since = _parse_dlogs_args(
-        context.args
-    )
+    dlogs_args = _parse_dlogs_args(context.args)
+    container_name = dlogs_args.container
+    page = dlogs_args.page
+    since = dlogs_args.since
+    as_file = dlogs_args.as_file
+
     if not container_name:
         await update.message.reply_text("❌ Invalid arguments.")
         return
-    if invalid_since:
+    if dlogs_args.invalid_since:
         await update.message.reply_text("❌ Invalid --since value.")
         return
     if page is None and not as_file:

@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import httpx
 from telegram import Update
@@ -338,9 +338,9 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 
 def _parse_generation_flags(
-    args: list[str], user_data: Dict[str, Any]
-) -> Tuple[str, Dict[str, Any]]:
-    overrides: Dict[str, Any] = dict(user_data.get("ollama_params", {}))
+    args: list[str], user_data: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    overrides: dict[str, Any] = dict(user_data.get("ollama_params", {}))
     prompt_parts: list[str] = []
     i = 0
 
@@ -386,7 +386,7 @@ def _parse_generation_flags(
     return " ".join(prompt_parts).strip(), overrides
 
 
-def _resolve_ollama_target(user_data: Dict[str, Any]) -> Tuple[str, str]:
+def _resolve_ollama_target(user_data: dict[str, Any]) -> tuple[str, str]:
     host = user_data.get("ollama_host") or config.OLLAMA_HOST
     model = user_data.get("ollama_model") or config.OLLAMA_MODEL
     return str(host), str(model)
@@ -394,9 +394,9 @@ def _resolve_ollama_target(user_data: Dict[str, Any]) -> Tuple[str, str]:
 
 def _resolve_generation_target(
     *,
-    user_data: Dict[str, Any],
+    user_data: dict[str, Any],
     system_prompt: str,
-    overrides: Dict[str, Any],
+    overrides: dict[str, Any],
 ) -> GenerationTarget:
     host, model = _resolve_ollama_target(user_data)
     return GenerationTarget(
@@ -427,7 +427,7 @@ async def _ollama_busy_reply(
     return True
 
 
-def _get_ollama_pull_state(context: ContextTypes.DEFAULT_TYPE) -> Dict[str, Any] | None:
+def _get_ollama_pull_state(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
     app = getattr(context, "application", None)
     if app is None:
         return None
@@ -450,7 +450,7 @@ def _update_pull_state(app, **updates: Any) -> None:
         state[key] = value
 
 
-def _format_pull_status(state: Dict[str, Any]) -> list[str]:
+def _format_pull_status(state: dict[str, Any]) -> list[str]:
     model = state.get("model", "unknown")
     host = state.get("host", "unknown")
     status = state.get("status", "unknown")

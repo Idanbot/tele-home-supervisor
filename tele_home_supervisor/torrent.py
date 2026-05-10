@@ -20,7 +20,6 @@ from __future__ import annotations
 import html
 import logging
 import threading
-from typing import Optional
 
 try:
     import qbittorrentapi
@@ -28,7 +27,7 @@ except Exception:  # pragma: no cover - import-time fallbacks
     qbittorrentapi = None  # type: ignore
 else:  # pragma: no cover - normalize missing attrs in some qbittorrentapi builds
     if not hasattr(qbittorrentapi.Client, "_http_session"):
-        setattr(qbittorrentapi.Client, "_http_session", None)
+        qbittorrentapi.Client._http_session = None
 
 from .config import settings
 
@@ -87,11 +86,11 @@ class TorrentManager:
 
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        timeout_s: Optional[float] = None,
+        host: str | None = None,
+        port: int | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        timeout_s: float | None = None,
     ) -> None:
         self.host = host or settings.QBT_HOST
         self.port = port or settings.QBT_PORT
@@ -102,7 +101,7 @@ class TorrentManager:
         )
 
         self._base_url = f"http://{self.host}:{self.port}"
-        self.qbt_client: Optional["qbittorrentapi.Client"] = None
+        self.qbt_client: qbittorrentapi.Client | None = None
 
     def connect(self) -> bool:
         """Build the client and log in to the WebUI.

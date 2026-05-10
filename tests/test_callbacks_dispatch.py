@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import pytest
 from typing import Any
 
-from tele_home_supervisor.handlers import callbacks, cb_docker, cb_torrents, cb_media
+import pytest
+
+from tele_home_supervisor.handlers import callbacks, cb_docker, cb_media, cb_torrents
 from tele_home_supervisor.handlers.cb_helpers import (
     build_pagination_row,
     parse_page,
     safe_edit_message_text,
 )
-
 
 # ---------------------------------------------------------------------------
 # Lightweight test doubles
@@ -39,7 +39,7 @@ class _DummyMessage:
         self.replies: list[str] = []
         self.chat = type("C", (), {"id": 1})()
 
-    async def reply_text(self, text: str, **_: Any) -> "_DummyMessage":
+    async def reply_text(self, text: str, **_: Any) -> _DummyMessage:
         self.replies.append(text)
         return self
 

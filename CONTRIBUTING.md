@@ -6,7 +6,7 @@ Thank you for your interest in contributing! This document provides guidelines a
 
 ### Prerequisites
 
-- Python 3.13.x
+- Python 3.14.x
 - [uv](https://github.com/astral-sh/uv) package manager
 - Docker (for testing containerized functionality)
 - Git

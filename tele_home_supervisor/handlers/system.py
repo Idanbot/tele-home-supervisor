@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
+import time
 
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from .. import config, services
-from .. import view
+from .. import config, services, view
 from ..background import delete_media_messages
-from .common import guard_sensitive, get_state, set_audit_target, tracked_reply_photo
+from .common import get_state, guard_sensitive, set_audit_target, tracked_reply_photo
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ async def cmd_diskusage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not await guard_sensitive(update, context):
         return
 
-    stats = await services.utils.get_disk_usage_stats(config.WATCH_PATHS)
+    stats = await services.get_disk_usage_stats(config.WATCH_PATHS)
     if not stats:
         await update.message.reply_text("No disk stats available.")
         return
@@ -52,8 +51,45 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not await guard_sensitive(update, context):
         return
 
-    args = context.args
-    if not args or len(args) < 2:
+    args = [a.strip() for a in (context.args or []) if a.strip()]
+    if not args:
+        await update.message.reply_text(
+            "Usage: /remind <minutes> <message> OR /remind list | cancel <id>"
+        )
+        return
+
+    state = get_state(context.application)
+    chat_id = update.effective_chat.id
+
+    if args[0].lower() == "list":
+        reminders = state.get_reminders(chat_id)
+        if not reminders:
+            await update.message.reply_text("No active reminders.")
+            return
+        lines = ["<b>Your Reminders:</b>"]
+        for r in reminders:
+            due = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["target_time"]))
+            lines.append(
+                f"• <code>{r['id']}</code>: {html.escape(r['text'])} (due {due})"
+            )
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
+
+    if args[0].lower() == "cancel":
+        if len(args) < 2:
+            await update.message.reply_text("Usage: /remind cancel <id>")
+            return
+        reminder_id = args[1]
+        if state.remove_reminder(chat_id, reminder_id):
+            await update.message.reply_text(
+                f"✅ Reminder <code>{reminder_id}</code> cancelled.",
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await update.message.reply_text("❌ Reminder not found.")
+        return
+
+    if len(args) < 2:
         await update.message.reply_text("Usage: /remind <minutes> <message>")
         return
 
@@ -68,22 +104,19 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("Duration must be positive.")
         return
 
-    await update.message.reply_text(f"⏰ Reminder set for {minutes} minute(s).")
+    # Cap to 30 days
+    if minutes > 43200:
+        await update.message.reply_text(
+            "❌ Duration too long (max 30 days / 43200 minutes)."
+        )
+        return
 
-    async def _wait_and_remind(chat_id, delay_s, msg_text):
-        await asyncio.sleep(delay_s)
-        try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"⏰ <b>Reminder:</b> {html.escape(msg_text)}",
-                parse_mode=ParseMode.HTML,
-            )
-        except Exception as e:
-            logger.error(f"Failed to send reminder to {chat_id}: {e}")
+    target_time = time.time() + (minutes * 60)
+    reminder_id = state.add_reminder(chat_id, text, target_time)
 
-    # Use create_task on the loop or application to fire and forget
-    context.application.create_task(
-        _wait_and_remind(update.effective_chat.id, minutes * 60, text)
+    await update.message.reply_text(
+        f"⏰ Reminder set for {minutes} minute(s).\nID: <code>{reminder_id}</code>",
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -91,8 +124,6 @@ async def cmd_ip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
     lan = await services.utils.get_primary_ip()
-    # We can invoke get_wan_ip if we want, or just let the user use the health command?
-    # The original implementation showed both.
     wan = await services.utils.get_wan_ip()
 
     # Simple formatting inline since it's just two lines
@@ -142,7 +173,7 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(context.args) > 1 and context.args[1].isdigit():
         count = min(int(context.args[1]), 10)
 
-    msg = await services.utils.ping_host(host, count)
+    msg = await services.ping_host(host, count)
     # Simple formatting: wrapping in pre
     formatted = f"<b>Ping {html.escape(host)}:</b>\n<pre>{html.escape(msg)}</pre>"
     await update.message.reply_text(formatted, parse_mode=ParseMode.HTML)
@@ -151,14 +182,14 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_temp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
-    msg = await services.utils.get_cpu_temp()
+    msg = await services.get_cpu_temp()
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 
 async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard_sensitive(update, context):
         return
-    raw = await services.utils.get_top_processes()
+    raw = await services.get_top_processes()
     msg = f"<b>Top Processes:</b>\n<pre>{html.escape(raw)}</pre>"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 

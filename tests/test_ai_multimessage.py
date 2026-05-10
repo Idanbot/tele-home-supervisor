@@ -1,6 +1,7 @@
 """Integration tests for multi-message AI responses."""
 
 import asyncio
+
 import pytest
 
 from tele_home_supervisor import config

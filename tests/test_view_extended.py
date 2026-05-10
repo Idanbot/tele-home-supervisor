@@ -416,6 +416,7 @@ class TestRenderAuditChart:
 
     def test_with_audit_entry_objects(self) -> None:
         import time
+
         from tele_home_supervisor.models.audit import AuditEntry
 
         entries = [

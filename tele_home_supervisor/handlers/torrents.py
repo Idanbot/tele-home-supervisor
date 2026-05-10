@@ -10,16 +10,16 @@ from telegram.ext import ContextTypes
 from .. import piratebay, services, torrentsources, view
 from ..background import ensure_started
 from ..state import BotState
+from .callbacks import build_torrent_keyboard, paginate_torrents
 from .common import (
-    guard_sensitive,
     get_state,
     get_state_and_recorder,
+    guard_sensitive,
     record_error,
     reply_usage_with_suggestions,
     set_audit_target,
     tracked_reply_photo,
 )
-from .callbacks import build_torrent_keyboard, paginate_torrents
 
 logger = logging.getLogger(__name__)
 

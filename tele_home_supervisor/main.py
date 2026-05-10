@@ -8,21 +8,24 @@ from __future__ import annotations
 import logging
 
 from telegram import BotCommand
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
-from .logger import setup_logging
 from . import config
+from .background import cancel_tasks, ensure_started
 from .commands import COMMANDS
 from .handlers import dispatch
 from .handlers.callbacks import handle_callback_query
-from .state import BOT_STATE_KEY, BotState
-from .background import ensure_started, cancel_tasks
+from .logger import setup_logging
 from .runtime import STARTUP_TIME
+from .state import BOT_STATE_KEY, BotState
 
 logger = logging.getLogger(__name__)
 
 
 def build_application() -> Application:
+    # Validate settings before building the application
+    config.validate_settings()
+
     if config.TOKEN is None:
         raise RuntimeError("BOT_TOKEN environment variable is not set")
 
