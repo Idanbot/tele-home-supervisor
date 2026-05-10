@@ -103,6 +103,7 @@ class TestCmdAuth:
         monkeypatch.setattr(config, "ALLOWED", {123})
         monkeypatch.setattr(config, "OWNER_ID", 999)
         monkeypatch.setattr(config, "BOT_AUTH_TOTP_SECRET", "SECRET")
+        monkeypatch.setattr(meta, "_FAILED_AUTH_LIMIT", 1)
 
         class DummyTotp:
             def __init__(self, secret: str) -> None:
@@ -119,7 +120,7 @@ class TestCmdAuth:
         await meta.cmd_auth(update, context)
 
         assert context.application.bot.sent_messages
-        assert "Failed /auth" in context.application.bot.sent_messages[0][1]
+        assert "Auth Cooldown Triggered" in context.application.bot.sent_messages[0][1]
 
 
 class TestCmdCheckAuth:

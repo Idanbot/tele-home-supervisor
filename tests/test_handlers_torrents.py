@@ -98,6 +98,11 @@ async def test_pb_add_callback_subscribes(monkeypatch):
 
     monkeypatch.setattr(callbacks, "allowed", allow_guard)
 
+    async def allow_sensitive(update, context):
+        return True
+
+    monkeypatch.setattr(callbacks, "guard_sensitive", allow_sensitive)
+
     # Mock services.torrent_add
     async def mock_add(magnet, save_path="/downloads"):
         return "Torrent added"

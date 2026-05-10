@@ -13,7 +13,7 @@ class DummyChat:
         self.type = chat_type
         self.sent: list[str] = []
 
-    async def send_message(self, text: str) -> None:
+    async def send_message(self, text: str, **_: Any) -> None:
         self.sent.append(text)
 
 

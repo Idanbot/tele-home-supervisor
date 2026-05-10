@@ -49,6 +49,7 @@ async def test_cmd_auth_rejects_invalid_code(monkeypatch) -> None:
     monkeypatch.setattr(config, "ALLOWED", {123})
     monkeypatch.setattr(config, "BOT_AUTH_TOTP_SECRET", "BASE32")
     monkeypatch.setattr(config, "OWNER_ID", 999)
+    monkeypatch.setattr(meta, "_FAILED_AUTH_LIMIT", 1)
 
     class DummyTotp:
         def __init__(self, secret: str) -> None:
@@ -63,7 +64,9 @@ async def test_cmd_auth_rejects_invalid_code(monkeypatch) -> None:
 
     await meta.cmd_auth(update, context)
 
-    assert update.message.replies == ["❌ Invalid auth code."]
+    assert update.message.replies == [
+        "⏳ Too many failed auth attempts. Try again in 1h 0m."
+    ]
     state = get_state(context.application)
     assert update.effective_user.id not in state.auth_grants
     assert context.application.bot.sent_messages

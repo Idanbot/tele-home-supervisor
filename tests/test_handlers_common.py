@@ -143,7 +143,6 @@ class TestRateLimit:
     @pytest.mark.asyncio
     async def test_allows_when_not_rate_limited(self, monkeypatch) -> None:
         monkeypatch.setattr(config, "RATE_LIMIT_S", 0.0)
-        monkeypatch.setattr(common, "_last_command_ts", 0.0)
 
         called = False
 
@@ -161,7 +160,6 @@ class TestRateLimit:
     @pytest.mark.asyncio
     async def test_blocks_when_rate_limited(self, monkeypatch) -> None:
         monkeypatch.setattr(config, "RATE_LIMIT_S", 100.0)
-        monkeypatch.setattr(common, "_last_command_ts", time.monotonic())
 
         called = False
 
@@ -172,6 +170,8 @@ class TestRateLimit:
         wrapped = common.rate_limit(handler, name="test")
         update = DummyUpdate(chat_id=123, user_id=123)
         context = DummyContext()
+        state = get_state(context.application)
+        state.set_last_command_ts(123, "test", time.monotonic())
 
         await wrapped(update, context)
         assert called is False

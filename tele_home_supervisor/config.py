@@ -317,6 +317,11 @@ def get_settings() -> Settings:
     )
 
 
+def _read_settings() -> Settings:
+    """Read settings without the memoized compatibility layer."""
+    return get_settings.__wrapped__()
+
+
 def validate_settings() -> None:
     """Validate critical configuration and log warnings for issues."""
     s = get_settings()

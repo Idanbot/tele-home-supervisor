@@ -106,6 +106,11 @@ async def test_dlogs_file_callback(monkeypatch) -> None:
 
     monkeypatch.setattr(callbacks, "allowed", allow_guard)
 
+    async def allow_sensitive(update, context) -> bool:
+        return True
+
+    monkeypatch.setattr(callbacks, "guard_sensitive", allow_sensitive)
+
     async def mock_get_logs(container, since=None) -> str:
         return "log content line 1\nline 2"
 

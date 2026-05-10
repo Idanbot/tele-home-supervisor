@@ -1,8 +1,20 @@
 """Tests for ProtonDB module."""
 
-from conftest import DummyResponse
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from tele_home_supervisor import protondb
+
+
+def _mock_client(data: object, status: int = 200):
+    response = MagicMock()
+    response.status_code = status
+    response.is_success = 200 <= status < 300
+    response.json.return_value = data
+    client = MagicMock()
+    client.get = AsyncMock(return_value=response)
+    return client
 
 
 def test_format_tier_known_tiers() -> None:
@@ -32,7 +44,8 @@ def test_tier_emoji_unknown() -> None:
     assert protondb.tier_emoji(None) == ""
 
 
-def test_search_steam_games_success(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_search_steam_games_success(monkeypatch) -> None:
     fake_data = [
         {"appid": "123", "name": "Test Game", "icon": "http://example.com/icon.jpg"},
         {
@@ -42,40 +55,34 @@ def test_search_steam_games_success(monkeypatch) -> None:
         },
     ]
 
-    def fake_get(*_args, **_kwargs):
-        return DummyResponse(fake_data)
+    monkeypatch.setattr(protondb, "_get_client", lambda: _mock_client(fake_data))
 
-    monkeypatch.setattr(protondb.requests, "get", fake_get)
-
-    results = protondb.search_steam_games("test")
+    results = await protondb.search_steam_games("test")
     assert len(results) == 2
     assert results[0]["appid"] == "123"
     assert results[0]["name"] == "Test Game"
 
 
-def test_search_steam_games_limits_results(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_search_steam_games_limits_results(monkeypatch) -> None:
     fake_data = [{"appid": str(i), "name": f"Game {i}"} for i in range(20)]
 
-    def fake_get(*_args, **_kwargs):
-        return DummyResponse(fake_data)
+    monkeypatch.setattr(protondb, "_get_client", lambda: _mock_client(fake_data))
 
-    monkeypatch.setattr(protondb.requests, "get", fake_get)
-
-    results = protondb.search_steam_games("game")
+    results = await protondb.search_steam_games("game")
     assert len(results) == 10  # Limited to 10
 
 
-def test_search_steam_games_http_error(monkeypatch) -> None:
-    def fake_get(*_args, **_kwargs):
-        return DummyResponse({}, status=500)
+@pytest.mark.asyncio
+async def test_search_steam_games_http_error(monkeypatch) -> None:
+    monkeypatch.setattr(protondb, "_get_client", lambda: _mock_client({}, status=500))
 
-    monkeypatch.setattr(protondb.requests, "get", fake_get)
-
-    results = protondb.search_steam_games("test")
+    results = await protondb.search_steam_games("test")
     assert results == []
 
 
-def test_get_protondb_summary_success(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_get_protondb_summary_success(monkeypatch) -> None:
     fake_data = {
         "tier": "gold",
         "confidence": "strong",
@@ -84,45 +91,36 @@ def test_get_protondb_summary_success(monkeypatch) -> None:
         "trendingTier": "platinum",
     }
 
-    def fake_get(*_args, **_kwargs):
-        return DummyResponse(fake_data)
+    monkeypatch.setattr(protondb, "_get_client", lambda: _mock_client(fake_data))
 
-    monkeypatch.setattr(protondb.requests, "get", fake_get)
-
-    result = protondb.get_protondb_summary(123456)
+    result = await protondb.get_protondb_summary(123456)
     assert result["tier"] == "gold"
     assert result["total"] == 100
 
 
-def test_get_protondb_summary_not_found(monkeypatch) -> None:
-    def fake_get(*_args, **_kwargs):
-        return DummyResponse({}, status=404)
+@pytest.mark.asyncio
+async def test_get_protondb_summary_not_found(monkeypatch) -> None:
+    monkeypatch.setattr(protondb, "_get_client", lambda: _mock_client({}, status=404))
 
-    monkeypatch.setattr(protondb.requests, "get", fake_get)
-
-    result = protondb.get_protondb_summary(999999)
+    result = await protondb.get_protondb_summary(999999)
     assert result is None
 
 
-def test_get_steam_player_count_success(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_get_steam_player_count_success(monkeypatch) -> None:
     fake_data = {"response": {"result": 1, "player_count": 50000}}
 
-    def fake_get(*_args, **_kwargs):
-        return DummyResponse(fake_data)
+    monkeypatch.setattr(protondb, "_get_client", lambda: _mock_client(fake_data))
 
-    monkeypatch.setattr(protondb.requests, "get", fake_get)
-
-    count = protondb.get_steam_player_count(123456)
+    count = await protondb.get_steam_player_count(123456)
     assert count == 50000
 
 
-def test_get_steam_player_count_no_data(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_get_steam_player_count_no_data(monkeypatch) -> None:
     fake_data = {"response": {"result": 42}}  # result != 1 means no data
 
-    def fake_get(*_args, **_kwargs):
-        return DummyResponse(fake_data)
+    monkeypatch.setattr(protondb, "_get_client", lambda: _mock_client(fake_data))
 
-    monkeypatch.setattr(protondb.requests, "get", fake_get)
-
-    count = protondb.get_steam_player_count(123456)
+    count = await protondb.get_steam_player_count(123456)
     assert count is None

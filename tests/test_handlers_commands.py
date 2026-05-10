@@ -428,17 +428,10 @@ class TestNetworkHandlers:
         assert "Unknown host/device name" in update.message.replies[-1]
         assert "pc1 (pc, windows)" in update.message.replies[-1]
 
-    def test_build_wol_helper_command_uses_python_helper_container(self) -> None:
-        command = network._build_wol_helper_command(
-            "aa:bb:cc:dd:ee:ff",
-            broadcast_ips=["192.168.1.255", "255.255.255.255"],
-            port=9,
-        )
+    def test_get_wol_broadcast_targets_includes_fallbacks(self) -> None:
+        targets = network._get_wol_broadcast_targets(None)
 
-        assert command[:3] == ["python", "-c", network._WOL_HELPER_SCRIPT]
-        assert command[3] == "aa:bb:cc:dd:ee:ff"
-        assert command[4] == "7,9"
-        assert command[5:] == ["192.168.1.255", "255.255.255.255"]
+        assert "255.255.255.255" in targets
 
     @pytest.mark.asyncio
     async def test_cmd_traceroute_requires_args(self, monkeypatch) -> None:

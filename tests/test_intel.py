@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import requests
@@ -28,7 +28,7 @@ async def test_get_weather():
             }
         ] * 3
 
-        weather = intel.get_weather()
+        weather = await intel.get_weather()
         assert "Haifa" in weather
         assert "25.5°C" in weather
         assert "50%" in weather
@@ -53,7 +53,7 @@ async def test_get_weather_falls_back_per_location():
     with patch(
         "tele_home_supervisor.intel._weather_request", side_effect=fake_weather_request
     ):
-        weather = intel.get_weather()
+        weather = await intel.get_weather()
 
     assert "Haifa" in weather
     assert "Tel Aviv" in weather
@@ -64,7 +64,7 @@ async def test_get_weather_falls_back_per_location():
 async def test_get_news():
     with patch("tele_home_supervisor.scheduled.fetch_hackernews_top") as mock_fetch:
         mock_fetch.return_value = "📰 Hacker News - Top Stories\n1. Story 1"
-        news = intel.get_news()
+        news = await intel.get_news()
         assert "Story 1" in news
         assert "Hacker News - Top Stories" not in news
 
@@ -90,14 +90,17 @@ async def test_get_system_health():
 
 @pytest.mark.asyncio
 async def test_get_stoic_quote():
-    with patch("requests.get") as mock_get:
-        mock_get.return_value.json.return_value = {
-            "text": "Don't explain your philosophy. Embody it.",
-            "author": "Epictetus",
-        }
-        mock_get.return_value.raise_for_status = MagicMock()
+    response = MagicMock()
+    response.json.return_value = {
+        "text": "Don't explain your philosophy. Embody it.",
+        "author": "Epictetus",
+    }
+    response.raise_for_status = MagicMock()
+    client = MagicMock()
+    client.get = AsyncMock(return_value=response)
 
-        quote = intel.get_stoic_quote()
+    with patch("tele_home_supervisor.intel._get_client", return_value=client):
+        quote = await intel.get_stoic_quote()
         assert "Epictetus" in quote
         assert "Embody it" in quote
 

@@ -532,7 +532,7 @@ class BotState:
             else getattr(existing, "user_name", None),
         )
         self.clear_auth_failures(user_id, save=False)
-        self.save()
+        self.save(force=True)
 
     def revoke_auth(self, user_id: int) -> None:
         """Revoke auth for a user."""
@@ -572,7 +572,7 @@ class BotState:
             self.auth_cooldowns[user_id] = cooldown_until
         else:
             self.auth_failures[user_id] = attempts
-        self.save()
+        self.save(force=True)
         return attempts, cooldown_until
 
     def clear_auth_failures(self, user_id: int, *, save: bool = True) -> None:
@@ -609,7 +609,7 @@ class BotState:
         self.blocked_ids.add(user_id)
         self.revoke_auth(user_id)
         self.clear_auth_failures(user_id, save=False)
-        self.save()
+        self.save(force=True)
         return True
 
     def unblock_user(self, user_id: int) -> bool:
@@ -617,7 +617,7 @@ class BotState:
         if user_id not in self.blocked_ids:
             return False
         self.blocked_ids.remove(user_id)
-        self.save()
+        self.save(force=True)
         return True
 
     def prune_expired_auth(self) -> list[int]:

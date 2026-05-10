@@ -17,6 +17,7 @@ class DummyMessage:
 
 class DummyUpdate:
     def __init__(self) -> None:
+        self.effective_chat = type("DummyChat", (), {"id": 0})()
         self.effective_message = DummyMessage()
         self.message = self.effective_message
 
@@ -34,7 +35,6 @@ class DummyContext:
 @pytest.mark.asyncio
 async def test_rate_limit_records_success(monkeypatch) -> None:
     monkeypatch.setattr(config, "RATE_LIMIT_S", 0.0)
-    monkeypatch.setattr(common, "_last_command_ts", 0.0)
 
     async def handler(update, context) -> None:
         return None
@@ -54,7 +54,6 @@ async def test_rate_limit_records_success(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_rate_limit_records_error(monkeypatch) -> None:
     monkeypatch.setattr(config, "RATE_LIMIT_S", 0.0)
-    monkeypatch.setattr(common, "_last_command_ts", 0.0)
 
     async def handler(update, context) -> None:
         raise RuntimeError("boom")
@@ -76,7 +75,6 @@ async def test_rate_limit_records_error(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_rate_limit_records_rate_limited(monkeypatch) -> None:
     monkeypatch.setattr(config, "RATE_LIMIT_S", 100.0)
-    monkeypatch.setattr(common, "_last_command_ts", time.monotonic())
 
     async def handler(update, context) -> None:
         return None
@@ -84,6 +82,7 @@ async def test_rate_limit_records_rate_limited(monkeypatch) -> None:
     wrapped = common.rate_limit(handler, name="limited")
     update = DummyUpdate()
     context = DummyContext()
+    get_state(context.application).set_last_command_ts(0, "limited", time.monotonic())
 
     await wrapped(update, context)
 

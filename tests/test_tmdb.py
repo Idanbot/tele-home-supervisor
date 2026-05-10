@@ -1,4 +1,6 @@
-from conftest import DummyResponse
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from tele_home_supervisor import tmdb
 
@@ -31,16 +33,21 @@ def test_tmdb_extract_items_filters_and_limits() -> None:
     assert items[1]["year"] == "2023"
 
 
-def test_tmdb_fetch_raises_on_http_error(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_tmdb_fetch_raises_on_http_error(monkeypatch) -> None:
     monkeypatch.setattr(tmdb.config.settings, "TMDB_API_KEY", "test-key")
 
-    def fake_get(*_args, **_kwargs):
-        return DummyResponse({}, status=403, text="nope")
+    response = MagicMock()
+    response.status_code = 403
+    response.is_success = False
+    response.text = "nope"
+    client = MagicMock()
+    client.get = AsyncMock(return_value=response)
 
-    monkeypatch.setattr(tmdb.requests, "get", fake_get)
+    monkeypatch.setattr(tmdb, "_get_client", lambda: client)
 
     try:
-        tmdb.trending_movies()
+        await tmdb.trending_movies()
     except RuntimeError as exc:
         assert "TMDB HTTP 403" in str(exc)
     else:

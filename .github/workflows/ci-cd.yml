@@ -273,7 +273,7 @@ jobs:
 
       - name: Lowercase the repo name
         run: |
-          echo "IMAGE_NAME_LOW=${GITHUB_REPOSITORY,,}" >> ${GITHUB_ENV}
+          echo "IMAGE_NAME_LOW=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -338,13 +338,13 @@ jobs:
             "BUILD_COMMIT_TIME=${{ github.event.head_commit.timestamp }}"
           )
 
-          PUSH_FLAG=""
+          PUSH_ARGS=()
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            PUSH_FLAG="--push"
+            PUSH_ARGS+=(--push)
           fi
 
           ATTEST_ARGS=()
-          if [ -n "$PUSH_FLAG" ]; then
+          if [ "${#PUSH_ARGS[@]}" -gt 0 ]; then
             ATTEST_ARGS+=(--attest "type=provenance,mode=max")
           fi
 
@@ -364,7 +364,7 @@ jobs:
             "${TAG_ARGS[@]}" \
             "${LABEL_ARGS[@]}" \
             "${BUILD_ARGS[@]}" \
-            ${PUSH_FLAG} \
+            "${PUSH_ARGS[@]}" \
             . 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
           set -e

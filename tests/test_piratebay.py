@@ -1,4 +1,6 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import pytest
 
 from tele_home_supervisor import piratebay
 
@@ -50,18 +52,16 @@ def test_parse_rows():
     assert item2["magnet"].startswith("magnet:?xt=urn:btih:hash456")
 
 
-@patch("tele_home_supervisor.piratebay.requests.get")
-def test_search_html_fallback(mock_get):
+@pytest.mark.asyncio
+@patch("tele_home_supervisor.piratebay._fetch")
+async def test_search_html_fallback(mock_fetch):
     # Mock HTML response
-    mock_resp = MagicMock()
-    mock_resp.ok = True
-    mock_resp.text = SAMPLE_HTML
-    mock_get.return_value = mock_resp
+    mock_fetch.return_value = SAMPLE_HTML
 
-    results = piratebay.search("test query")
+    results = await piratebay.search("test query")
     assert len(results) == 2
     assert results[0]["name"] == "Some Movie 2024 1080p"
     # Should call the search URL
-    mock_get.assert_called()
-    args, _ = mock_get.call_args
+    mock_fetch.assert_called()
+    args, _ = mock_fetch.call_args
     assert "/search/test%20query/" in args[0]

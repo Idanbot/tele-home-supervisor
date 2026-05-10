@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tele_home_supervisor.torrentsources import (
     CLOUDSCRAPER_AVAILABLE,
     BitSearchSource,
@@ -153,29 +155,32 @@ class TestBitSearchSource:
         name = source._extract_name_from_magnet(magnet)
         assert name == "test-file.iso"
 
+    @pytest.mark.asyncio
     @patch.object(BitSearchSource, "_fetch")
-    def test_search_success(self, mock_fetch):
+    async def test_search_success(self, mock_fetch):
         mock_fetch.return_value = BITSEARCH_SAMPLE_HTML
         source = BitSearchSource()
-        results = source.search("ubuntu")
+        results = await source.search("ubuntu")
 
         assert len(results) == 2
         assert results[0].seeders >= results[1].seeders  # Sorted by seeders
         assert results[0].source == "BitSearch"
 
+    @pytest.mark.asyncio
     @patch.object(BitSearchSource, "_fetch")
-    def test_search_empty_query(self, mock_fetch):
+    async def test_search_empty_query(self, mock_fetch):
         source = BitSearchSource()
-        results = source.search("")
+        results = await source.search("")
         assert results == []
         mock_fetch.assert_not_called()
 
+    @pytest.mark.asyncio
     @patch.object(BitSearchSource, "_fetch")
-    def test_search_exception(self, mock_fetch):
+    async def test_search_exception(self, mock_fetch):
         mock_fetch.side_effect = Exception("Network error")
         source = BitSearchSource()
         debug_sink = MagicMock()
-        results = source.search("ubuntu", debug_sink)
+        results = await source.search("ubuntu", debug_sink)
 
         assert results == []
         debug_sink.assert_called_once()
@@ -184,39 +189,43 @@ class TestBitSearchSource:
 class TestEZTVSource:
     """Tests for EZTV.re source."""
 
+    @pytest.mark.asyncio
     @patch.object(EZTVSource, "_fetch_json")
-    def test_search_with_imdb_id(self, mock_fetch):
+    async def test_search_with_imdb_id(self, mock_fetch):
         mock_fetch.return_value = EZTV_SAMPLE_RESPONSE
         source = EZTVSource()
-        results = source.search("tt0944947")
+        results = await source.search("tt0944947")
 
         assert len(results) == 2
         mock_fetch.assert_called_once()
         args, _ = mock_fetch.call_args
         assert "imdb_id=tt0944947" in args[0]
 
-    def test_search_without_imdb_id(self):
+    @pytest.mark.asyncio
+    async def test_search_without_imdb_id(self):
         # EZTV doesn't support keyword search, so should return empty
         source = EZTVSource()
-        results = source.search("game of thrones")
+        results = await source.search("game of thrones")
         assert results == []
 
+    @pytest.mark.asyncio
     @patch.object(EZTVSource, "_fetch_json")
-    def test_top(self, mock_fetch):
+    async def test_top(self, mock_fetch):
         mock_fetch.return_value = EZTV_SAMPLE_RESPONSE
         source = EZTVSource()
-        results = source.top()
+        results = await source.top()
 
         assert len(results) == 2
         assert results[0].source == "EZTV"
         # Should be sorted by seeders
         assert results[0].seeders >= results[1].seeders
 
+    @pytest.mark.asyncio
     @patch.object(EZTVSource, "_fetch_json")
-    def test_parse_size(self, mock_fetch):
+    async def test_parse_size(self, mock_fetch):
         mock_fetch.return_value = EZTV_SAMPLE_RESPONSE
         source = EZTVSource()
-        results = source.top()
+        results = await source.top()
 
         # Check size parsing
         assert results[0].size is not None
@@ -230,16 +239,18 @@ class TestX1337Source:
         source = X1337Source()
         assert source.enabled == CLOUDSCRAPER_AVAILABLE
 
-    def test_search_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_search_when_disabled(self):
         source = X1337Source()
         source.enabled = False
-        results = source.search("test")
+        results = await source.search("test")
         assert results == []
 
-    def test_top_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_top_when_disabled(self):
         source = X1337Source()
         source.enabled = False
-        results = source.top()
+        results = await source.top()
         assert results == []
 
 
@@ -250,16 +261,18 @@ class TestLimeTorrentsSource:
         source = LimeTorrentsSource()
         assert source.enabled == CLOUDSCRAPER_AVAILABLE
 
-    def test_search_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_search_when_disabled(self):
         source = LimeTorrentsSource()
         source.enabled = False
-        results = source.search("test")
+        results = await source.search("test")
         assert results == []
 
-    def test_top_when_disabled(self):
+    @pytest.mark.asyncio
+    async def test_top_when_disabled(self):
         source = LimeTorrentsSource()
         source.enabled = False
-        results = source.top()
+        results = await source.top()
         assert results == []
 
 
@@ -280,8 +293,9 @@ class TestFallbackFunctions:
             assert "1337x" not in source_names
             assert "LimeTorrents" not in source_names
 
+    @pytest.mark.asyncio
     @patch.object(BitSearchSource, "search")
-    def test_fallback_search_first_source_succeeds(self, mock_search):
+    async def test_fallback_search_first_source_succeeds(self, mock_search):
         mock_results = [
             TorrentResult(
                 name="Test",
@@ -293,13 +307,14 @@ class TestFallbackFunctions:
         ]
         mock_search.return_value = mock_results
 
-        results = fallback_search("test query")
+        results = await fallback_search("test query")
         assert len(results) == 1
         assert results[0].name == "Test"
 
+    @pytest.mark.asyncio
     @patch.object(BitSearchSource, "search")
     @patch.object(EZTVSource, "search")
-    def test_fallback_search_first_fails_second_succeeds(
+    async def test_fallback_search_first_fails_second_succeeds(
         self, mock_eztv_search, mock_bitsearch_search
     ):
         mock_bitsearch_search.return_value = []
@@ -313,21 +328,25 @@ class TestFallbackFunctions:
             )
         ]
 
-        results = fallback_search("tt0944947")  # IMDB ID
+        results = await fallback_search("tt0944947")  # IMDB ID
         assert len(results) == 1
         assert results[0].source == "EZTV"
 
+    @pytest.mark.asyncio
     @patch.object(BitSearchSource, "search")
     @patch.object(EZTVSource, "search")
-    def test_fallback_search_all_fail(self, mock_eztv_search, mock_bitsearch_search):
+    async def test_fallback_search_all_fail(
+        self, mock_eztv_search, mock_bitsearch_search
+    ):
         mock_bitsearch_search.return_value = []
         mock_eztv_search.return_value = []
 
-        results = fallback_search("nonexistent query")
+        results = await fallback_search("nonexistent query")
         assert results == []
 
+    @pytest.mark.asyncio
     @patch.object(BitSearchSource, "top")
-    def test_fallback_top(self, mock_top):
+    async def test_fallback_top(self, mock_top):
         mock_results = [
             TorrentResult(
                 name="Top Result",
@@ -339,12 +358,13 @@ class TestFallbackFunctions:
         ]
         mock_top.return_value = mock_results
 
-        results = fallback_top()
+        results = await fallback_top()
         assert len(results) == 1
         assert results[0].name == "Top Result"
 
+    @pytest.mark.asyncio
     @patch.object(BitSearchSource, "top")
-    def test_fallback_top_with_category(self, mock_top):
+    async def test_fallback_top_with_category(self, mock_top):
         mock_results = [
             TorrentResult(
                 name="Movie Result",
@@ -356,6 +376,6 @@ class TestFallbackFunctions:
         ]
         mock_top.return_value = mock_results
 
-        results = fallback_top("movies")
+        results = await fallback_top("movies")
         assert len(results) == 1
         mock_top.assert_called_with("movies", None)
