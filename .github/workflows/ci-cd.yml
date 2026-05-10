@@ -350,7 +350,7 @@ jobs:
 
           rm -f build.log build-metadata.json
           CACHE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}:buildcache"
-          CACHE_ARGS=(--cache-from type=gha --cache-to type=gha,mode=max)
+          CACHE_ARGS=(--cache-from "type=gha" --cache-to "type=gha,mode=max")
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             CACHE_ARGS+=(--cache-from "type=registry,ref=${CACHE_REF}")
             CACHE_ARGS+=(--cache-to "type=registry,ref=${CACHE_REF},mode=max")
