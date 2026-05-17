@@ -53,7 +53,8 @@ ENV TELE_HOME_SUPERVISOR_BUILD_VERSION=$BUILD_VERSION \
     TELE_HOME_SUPERVISOR_COMMIT_TIME=$BUILD_COMMIT_TIME
 
 # Runtime deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     curl iproute2 tzdata git ca-certificates iputils-ping iputils-tracepath nmap procps openssh-client sshpass \
     && rm -rf /var/lib/apt/lists/*
 
