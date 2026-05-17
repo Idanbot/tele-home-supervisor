@@ -18,6 +18,7 @@ from .auth import AuthGrantRecord
 from .cache import CacheEntry, LogCacheEntry
 from .debug import DebugEntry, DebugRecorder
 from .metrics import CommandMetrics
+from .network_inventory import NetworkDeviceScan, NetworkInventoryScanSummary
 from .tmdb_cache import TmdbCacheEntry
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,9 @@ class BotState:
     # Persisted reminders [(id, chat_id, text, target_time)]
     reminders: list[dict] = field(default_factory=list)
 
+    network_inventory: dict[str, list[NetworkDeviceScan]] = field(default_factory=dict)
+    network_inventory_last_summary: NetworkInventoryScanSummary | None = None
+
     # In-memory rate limiting (chat_id, command_name) -> timestamp
     _last_command_ts: dict[tuple[int, str], float] = field(
         default_factory=dict, init=False, repr=False
@@ -111,6 +115,9 @@ class BotState:
     _audit_file: Path = field(default_factory=lambda: Path("/app/data/audit_log.json"))
     _magnet_file: Path = field(
         default_factory=lambda: Path("/app/data/magnet_cache.json")
+    )
+    _network_inventory_file: Path = field(
+        default_factory=lambda: Path("/app/data/network_inventory.json")
     )
     _debug_recorder: DebugRecorder | None = field(default=None, init=False, repr=False)
     _state_loaded: bool = field(default=False, init=False, repr=False)
@@ -682,6 +689,62 @@ class BotState:
         self.media_messages.clear()
         return entries
 
+    # ── Network inventory ────────────────────────────────────────────
+
+    def record_network_inventory_scan(
+        self,
+        summary: NetworkInventoryScanSummary,
+        devices: list[NetworkDeviceScan],
+        *,
+        retention_days: float,
+        max_scans_per_device: int,
+    ) -> tuple[list[str], list[str]]:
+        """Record one network inventory scan and return new/missing device IPs."""
+        self.prune_network_inventory(
+            retention_days=retention_days,
+            max_scans_per_device=max_scans_per_device,
+        )
+        previous_ips = {ip for ip, records in self.network_inventory.items() if records}
+        current_ips = {device.ip for device in devices}
+        new_devices = sorted(current_ips - previous_ips)
+        missing_devices = sorted(previous_ips - current_ips)
+
+        for device in devices:
+            self.network_inventory.setdefault(device.ip, []).append(device)
+
+        summary.new_devices = new_devices
+        summary.missing_devices = missing_devices
+        self.network_inventory_last_summary = summary
+        self.prune_network_inventory(
+            retention_days=retention_days,
+            max_scans_per_device=max_scans_per_device,
+        )
+        self.save_network_inventory(force=True)
+        return new_devices, missing_devices
+
+    def prune_network_inventory(
+        self, *, retention_days: float, max_scans_per_device: int
+    ) -> None:
+        cutoff = time.time() - max(0.0, retention_days) * 86400
+        keep_count = max(1, max_scans_per_device)
+        for ip in list(self.network_inventory.keys()):
+            records = [
+                record
+                for record in self.network_inventory[ip]
+                if record.scanned_at >= cutoff
+            ]
+            records.sort(key=lambda record: record.scanned_at)
+            self.network_inventory[ip] = records[-keep_count:]
+            if not self.network_inventory[ip]:
+                self.network_inventory.pop(ip, None)
+
+    def latest_network_inventory(self) -> list[NetworkDeviceScan]:
+        latest: list[NetworkDeviceScan] = []
+        for records in self.network_inventory.values():
+            if records:
+                latest.append(max(records, key=lambda record: record.scanned_at))
+        return sorted(latest, key=lambda record: record.ip)
+
     def persistence_status(self) -> tuple[bool, str]:
         """Report whether the state directory is writable for this process."""
         state_dir = self._state_file.parent
@@ -712,6 +775,7 @@ class BotState:
         persistence.load(self, self._state_file)
         persistence.load_audit(self, self._audit_file)
         persistence.load_magnets(self, self._magnet_file)
+        persistence.load_network_inventory(self, self._network_inventory_file)
 
     def save(self, force: bool = False) -> None:
         """Save basic state to disk with throttling."""
@@ -733,6 +797,14 @@ class BotState:
             return
         persistence.save_magnets(self, self._magnet_file)
         self._last_save["magnets"] = time.time()
+
+    def save_network_inventory(self, force: bool = False) -> None:
+        """Save network inventory to disk with throttling."""
+        key = "network_inventory"
+        if not force and (time.time() - self._last_save.get(key, 0) < 1.0):
+            return
+        persistence.save_network_inventory(self, self._network_inventory_file)
+        self._last_save[key] = time.time()
 
     # Keep the old private name for compatibility
     _save_state = save

@@ -114,14 +114,14 @@ async def get_news() -> str:
 
 async def get_stoic_quote() -> str:
     """Quote Module - 1 Stoic Quote with retry."""
-    url = "https://stoic-quotes.com/api/quote"
+    url = "https://www.stoic-quotes.com/api/quote"
     data = None
     last_error = None
     client = _get_client()
 
     for attempt in range(2):
         try:
-            response = await client.get(url)
+            response = await client.get(url, follow_redirects=True)
             response.raise_for_status()
             data = response.json()
             break

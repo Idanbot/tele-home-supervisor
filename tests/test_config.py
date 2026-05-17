@@ -28,6 +28,12 @@ def test_settings_defaults():
         assert settings.WOL_VERIFY_INTERVAL_S == 5.0
         assert settings.DEFAULT_MANAGED_HOST == ""
         assert settings.MANAGED_HOSTS == []
+        assert settings.NETWORK_INVENTORY_TARGETS == []
+        assert settings.NETWORK_INVENTORY_INTERVAL_S == 21600.0
+        assert settings.NETWORK_INVENTORY_RETENTION_DAYS == 14.0
+        assert settings.NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE == 20
+        assert settings.NETWORK_INVENTORY_SCAN_TIMEOUT_S == 300
+        assert settings.NETWORK_INVENTORY_NMAP_ARGS == ["-T3", "-F", "--open"]
 
 
 def test_settings_custom():
@@ -59,6 +65,12 @@ def test_settings_custom():
         "DEFAULT_MANAGED_HOST": "gaming-pc",
         "WOL_VERIFY_TIMEOUT_S": "90",
         "WOL_VERIFY_INTERVAL_S": "2",
+        "NETWORK_INVENTORY_TARGETS": "192.168.1.0/24,192.168.1.10",
+        "NETWORK_INVENTORY_INTERVAL_S": "3600",
+        "NETWORK_INVENTORY_RETENTION_DAYS": "7",
+        "NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE": "5",
+        "NETWORK_INVENTORY_SCAN_TIMEOUT_S": "60",
+        "NETWORK_INVENTORY_NMAP_ARGS": "-sn,-n",
     }
     with mock.patch.dict(os.environ, env, clear=True):
         settings = config._read_settings()
@@ -86,6 +98,15 @@ def test_settings_custom():
         assert host.aliases == ("pc", "gaming")
         assert settings.WOL_VERIFY_TIMEOUT_S == 90.0
         assert settings.WOL_VERIFY_INTERVAL_S == 2.0
+        assert settings.NETWORK_INVENTORY_TARGETS == [
+            "192.168.1.0/24",
+            "192.168.1.10",
+        ]
+        assert settings.NETWORK_INVENTORY_INTERVAL_S == 3600.0
+        assert settings.NETWORK_INVENTORY_RETENTION_DAYS == 7.0
+        assert settings.NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE == 5
+        assert settings.NETWORK_INVENTORY_SCAN_TIMEOUT_S == 60
+        assert settings.NETWORK_INVENTORY_NMAP_ARGS == ["-sn", "-n"]
 
 
 def test_settings_custom_with_quoted_managed_hosts_json():

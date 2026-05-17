@@ -27,8 +27,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# docker client (shared)
-client: DockerClient = docker.from_env()
+# docker client (shared, initialized lazily so importing the app does not require
+# a mounted Docker socket)
+client: DockerClient | None = None
+
+
+def _get_docker_client() -> DockerClient:
+    global client
+    if client is None:
+        client = docker.from_env()
+    return client
 
 
 def fmt_bytes(n: int) -> str:
@@ -278,7 +286,7 @@ def _format_ports(pmap: dict[str, list[dict[str, str]] | None] | None) -> str:
 async def list_containers_basic() -> list[dict[str, Any]]:
     def _list():
         try:
-            return client.containers.list(all=True)
+            return _get_docker_client().containers.list(all=True)
         except Exception:
             return []
 
@@ -304,7 +312,7 @@ async def list_containers_basic() -> list[dict[str, Any]]:
 async def list_container_names() -> set[str]:
     def _list():
         try:
-            return client.containers.list(all=True)
+            return _get_docker_client().containers.list(all=True)
         except Exception:
             return []
 
@@ -364,7 +372,7 @@ async def container_stats_rich() -> list[dict[str, str]]:
 
     def _collect():
         try:
-            containers = client.containers.list(all=True)
+            containers = _get_docker_client().containers.list(all=True)
         except Exception as e:
             logger.debug("container stats list failed: %s", e)
             return []
@@ -429,7 +437,7 @@ async def get_container_logs(container_name: str, lines: int = 50) -> str:
 
     def _fetch():
         try:
-            container = client.containers.get(container_name)
+            container = _get_docker_client().containers.get(container_name)
         except Exception as e:
             return f"Error: {e}"
 
@@ -465,7 +473,7 @@ async def get_container_logs_full(container_name: str, since: int | None = None)
 
     def _fetch():
         try:
-            container = client.containers.get(container_name)
+            container = _get_docker_client().containers.get(container_name)
         except Exception as e:
             return f"Error: {e}"
 
@@ -482,7 +490,7 @@ async def get_container_logs_full(container_name: str, since: int | None = None)
 async def healthcheck_container(container_name: str) -> str:
     def _inspect():
         try:
-            container = client.containers.get(container_name)
+            container = _get_docker_client().containers.get(container_name)
         except Exception:
             return f"Error inspecting {container_name}"
 
@@ -505,7 +513,7 @@ async def healthcheck_container(container_name: str) -> str:
 async def get_container_inspect(container_name: str) -> dict:
     def _inspect():
         try:
-            container = client.containers.get(container_name)
+            container = _get_docker_client().containers.get(container_name)
         except Exception as exc:
             raise RuntimeError(f"Error inspecting {container_name}: {exc}") from exc
         try:

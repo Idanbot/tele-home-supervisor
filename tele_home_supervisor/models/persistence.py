@@ -20,6 +20,11 @@ from .. import config
 from .alerts import AlertRule, AlertState
 from .audit import AuditEntry
 from .auth import AuthGrantRecord
+from .network_inventory import (
+    NetworkDeviceScan,
+    NetworkInventoryScanSummary,
+    NetworkService,
+)
 
 if TYPE_CHECKING:
     from .bot_state import BotState
@@ -197,6 +202,114 @@ def _deserialize_magnet_cache(state: BotState, data: list) -> None:
     for item in data:
         if isinstance(item, (list, tuple)) and len(item) == 2:
             state.magnet_cache[item[0]] = item[1]
+
+
+# ── Network Inventory ─────────────────────────────────────────────────
+
+
+def save_network_inventory(state: BotState, path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(_serialize_network_inventory(state), indent=2)
+        _atomic_write_text(path, payload)
+    except Exception:
+        logger.exception("Failed to save network inventory")
+
+
+def load_network_inventory(state: BotState, path: Path) -> None:
+    try:
+        if not path.exists():
+            return
+        data = json.loads(path.read_text())
+        _deserialize_network_inventory(state, data)
+        state.prune_network_inventory(
+            retention_days=config.NETWORK_INVENTORY_RETENTION_DAYS,
+            max_scans_per_device=config.NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE,
+        )
+    except Exception:
+        logger.exception("Failed to load network inventory")
+
+
+def _serialize_network_inventory(state: BotState) -> dict:
+    summary = state.network_inventory_last_summary
+    return {
+        "last_summary": summary.__dict__ if summary is not None else None,
+        "devices": {
+            ip: [_network_scan_to_dict(record) for record in records]
+            for ip, records in sorted(state.network_inventory.items())
+        },
+    }
+
+
+def _network_scan_to_dict(record: NetworkDeviceScan) -> dict:
+    data = record.__dict__.copy()
+    data["services"] = [service.__dict__ for service in record.services]
+    return data
+
+
+def _deserialize_network_inventory(state: BotState, data: dict) -> None:
+    state.network_inventory = {}
+    raw_devices = data.get("devices") if isinstance(data, dict) else None
+    if isinstance(raw_devices, dict):
+        for ip, records in raw_devices.items():
+            loaded: list[NetworkDeviceScan] = []
+            if not isinstance(records, list):
+                continue
+            for item in records:
+                record = _load_network_device_scan(item)
+                if record is not None:
+                    loaded.append(record)
+            if loaded:
+                state.network_inventory[str(ip)] = loaded
+
+    raw_summary = data.get("last_summary") if isinstance(data, dict) else None
+    if isinstance(raw_summary, dict):
+        try:
+            state.network_inventory_last_summary = NetworkInventoryScanSummary(
+                scan_id=str(raw_summary.get("scan_id") or ""),
+                scanned_at=float(raw_summary.get("scanned_at") or 0.0),
+                targets=[str(item) for item in raw_summary.get("targets") or []],
+                devices_seen=int(raw_summary.get("devices_seen") or 0),
+                new_devices=[
+                    str(item) for item in raw_summary.get("new_devices") or []
+                ],
+                missing_devices=[
+                    str(item) for item in raw_summary.get("missing_devices") or []
+                ],
+                scanner=str(raw_summary.get("scanner") or ""),
+                error=str(raw_summary.get("error") or ""),
+            )
+        except TypeError, ValueError:
+            state.network_inventory_last_summary = None
+
+
+def _load_network_device_scan(raw: object) -> NetworkDeviceScan | None:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        services = []
+        for item in raw.get("services") or []:
+            if not isinstance(item, dict):
+                continue
+            services.append(
+                NetworkService(
+                    port=int(item.get("port") or 0),
+                    protocol=str(item.get("protocol") or "tcp"),
+                    service=str(item.get("service") or ""),
+                )
+            )
+        return NetworkDeviceScan(
+            scan_id=str(raw.get("scan_id") or ""),
+            scanned_at=float(raw.get("scanned_at") or 0.0),
+            ip=str(raw.get("ip") or ""),
+            status=str(raw.get("status") or "up"),
+            hostname=str(raw.get("hostname") or ""),
+            mac=str(raw.get("mac") or ""),
+            vendor=str(raw.get("vendor") or ""),
+            services=services,
+        )
+    except TypeError, ValueError:
+        return None
 
 
 # ── Auth grants ─────────────────────────────────────────────────────

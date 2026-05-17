@@ -103,6 +103,10 @@ async def test_get_stoic_quote():
         quote = await intel.get_stoic_quote()
         assert "Epictetus" in quote
         assert "Embody it" in quote
+        client.get.assert_awaited_once_with(
+            "https://www.stoic-quotes.com/api/quote",
+            follow_redirects=True,
+        )
 
 
 @pytest.mark.asyncio

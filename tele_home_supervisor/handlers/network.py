@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime
 
 import qrcode
 from telegram import Update
@@ -25,6 +26,56 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def cmd_netinventory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard_sensitive(update, context):
+        return
+    state = get_state(context.application)
+    summary = state.network_inventory_last_summary
+    latest = state.latest_network_inventory()
+    if summary is None:
+        if config.NETWORK_INVENTORY_TARGETS:
+            await update.message.reply_text(
+                "No network inventory scan has completed yet.",
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await update.message.reply_text(
+                "Network inventory is disabled. Set NETWORK_INVENTORY_TARGETS.",
+                parse_mode=ParseMode.HTML,
+            )
+        return
+
+    ts = datetime.fromtimestamp(summary.scanned_at).strftime("%Y-%m-%d %H:%M")
+    lines = [
+        "🧭 <b>Network Inventory</b>",
+        f"Last scan: <code>{html.escape(ts)}</code>",
+        f"Scanner: <code>{html.escape(summary.scanner or 'unknown')}</code>",
+        f"Targets: <code>{html.escape(', '.join(summary.targets) or '-')}</code>",
+        f"Devices seen: <code>{summary.devices_seen}</code>",
+    ]
+    if summary.error:
+        lines.append(f"Error: <code>{html.escape(summary.error)}</code>")
+    if summary.new_devices:
+        lines.append(f"New: <code>{html.escape(', '.join(summary.new_devices))}</code>")
+    if summary.missing_devices:
+        lines.append(
+            f"Missing: <code>{html.escape(', '.join(summary.missing_devices))}</code>"
+        )
+    for device in latest[:15]:
+        label = device.hostname or device.mac or device.vendor or ""
+        services = ", ".join(
+            f"{svc.port}/{svc.protocol}" for svc in device.services[:5]
+        )
+        suffix = f" ({html.escape(label)})" if label else ""
+        service_part = (
+            f" ports: <code>{html.escape(services)}</code>" if services else ""
+        )
+        lines.append(f"• <code>{html.escape(device.ip)}</code>{suffix}{service_part}")
+    if len(latest) > 15:
+        lines.append(f"… and {len(latest) - 15} more")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 async def cmd_wifiqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

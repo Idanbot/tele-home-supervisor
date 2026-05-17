@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from telegram.constants import ParseMode
 from telegram.ext import Application
 
-from . import alerting, intel
+from . import alerting, intel, network_inventory
 from . import scheduled as scheduled_fetchers
 from .config import settings
 from .models.torrent_snapshot import TorrentSnapshot
@@ -29,6 +29,7 @@ _TASK_INTEL_BRIEFING = "intel_briefing_scheduler"
 _TASK_ALERTS = "alerts_scheduler"
 _TASK_MEDIA_CLEANUP = "media_cleanup"
 _TASK_REMINDERS = "reminders_scheduler"
+_TASK_NETWORK_INVENTORY = "network_inventory_scheduler"
 
 _POLL_INTERVAL_S = 30.0
 _ALERT_POLL_INTERVAL_S = 60.0
@@ -74,6 +75,7 @@ async def cancel_tasks(state: BotState) -> None:
         _TASK_ALERTS,
         _TASK_MEDIA_CLEANUP,
         _TASK_REMINDERS,
+        _TASK_NETWORK_INVENTORY,
     ]
     for name in task_names:
         task = state.tasks.get(name)
@@ -130,6 +132,15 @@ def ensure_started(app: Application) -> None:
     task = state.tasks.get(_TASK_REMINDERS)
     if not isinstance(task, asyncio.Task) or task.done():
         state.tasks[_TASK_REMINDERS] = asyncio.create_task(_reminders_loop(app))
+
+    # Start network inventory loop when targets are configured
+    task = state.tasks.get(_TASK_NETWORK_INVENTORY)
+    if settings.NETWORK_INVENTORY_TARGETS and (
+        not isinstance(task, asyncio.Task) or task.done()
+    ):
+        state.tasks[_TASK_NETWORK_INVENTORY] = asyncio.create_task(
+            _network_inventory_loop(app)
+        )
 
 
 def _get_state(app: Application) -> BotState:
@@ -547,3 +558,46 @@ async def _reminders_loop(app: Application) -> None:
             if await _interruptible_sleep(30.0):
                 break
     logger.info("Reminders loop stopped")
+
+
+async def _network_inventory_loop(app: Application) -> None:
+    """Periodically scan configured LAN targets and persist bounded history."""
+    interval_s = max(300.0, settings.NETWORK_INVENTORY_INTERVAL_S)
+    logger.info(
+        "Starting network inventory loop (targets=%s, interval=%ss)",
+        ",".join(settings.NETWORK_INVENTORY_TARGETS),
+        interval_s,
+    )
+    while not _shutdown_requested:
+        try:
+            start = time.monotonic()
+            state = _get_state(app)
+            summary, devices = await network_inventory.scan_network_inventory(
+                settings.NETWORK_INVENTORY_TARGETS,
+                nmap_args=settings.NETWORK_INVENTORY_NMAP_ARGS,
+                timeout_s=settings.NETWORK_INVENTORY_SCAN_TIMEOUT_S,
+            )
+            state.record_network_inventory_scan(
+                summary,
+                devices,
+                retention_days=settings.NETWORK_INVENTORY_RETENTION_DAYS,
+                max_scans_per_device=settings.NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE,
+            )
+            if summary.error:
+                logger.warning("Network inventory scan failed: %s", summary.error)
+            else:
+                logger.info(
+                    "Network inventory scan %s saw %d device(s)",
+                    summary.scan_id,
+                    summary.devices_seen,
+                )
+            elapsed = time.monotonic() - start
+            if await _interruptible_sleep(max(0.0, interval_s - elapsed)):
+                break
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Network inventory loop error")
+            if await _interruptible_sleep(interval_s):
+                break
+    logger.info("Network inventory loop stopped")

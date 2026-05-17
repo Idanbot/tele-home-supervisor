@@ -240,6 +240,31 @@ def get_settings() -> Settings:
         default_managed_host_name = managed_hosts[0].name
     wol_verify_timeout_s = _read_optional_float("WOL_VERIFY_TIMEOUT_S", 180.0)
     wol_verify_interval_s = _read_optional_float("WOL_VERIFY_INTERVAL_S", 5.0)
+    network_inventory_targets = _split_csv(
+        os.environ.get("NETWORK_INVENTORY_TARGETS", "")
+    )
+    network_inventory_interval_s = _read_optional_float(
+        "NETWORK_INVENTORY_INTERVAL_S", 6 * 3600.0
+    )
+    network_inventory_retention_days = _read_optional_float(
+        "NETWORK_INVENTORY_RETENTION_DAYS", 14.0
+    )
+    network_inventory_max_scans = _read_optional_int(
+        "NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE"
+    )
+    if network_inventory_max_scans is None or network_inventory_max_scans <= 0:
+        network_inventory_max_scans = 20
+    network_inventory_scan_timeout_s = _read_optional_int(
+        "NETWORK_INVENTORY_SCAN_TIMEOUT_S"
+    )
+    if (
+        network_inventory_scan_timeout_s is None
+        or network_inventory_scan_timeout_s <= 0
+    ):
+        network_inventory_scan_timeout_s = 300
+    network_inventory_nmap_args = _split_csv(
+        os.environ.get("NETWORK_INVENTORY_NMAP_ARGS", "-T3,-F,--open")
+    )
 
     # TMDB
     tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
@@ -305,6 +330,12 @@ def get_settings() -> Settings:
         WOL_VERIFY_INTERVAL_S=wol_verify_interval_s,
         DEFAULT_MANAGED_HOST=default_managed_host_name,
         MANAGED_HOSTS=managed_hosts,
+        NETWORK_INVENTORY_TARGETS=network_inventory_targets,
+        NETWORK_INVENTORY_INTERVAL_S=network_inventory_interval_s,
+        NETWORK_INVENTORY_RETENTION_DAYS=network_inventory_retention_days,
+        NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE=network_inventory_max_scans,
+        NETWORK_INVENTORY_SCAN_TIMEOUT_S=network_inventory_scan_timeout_s,
+        NETWORK_INVENTORY_NMAP_ARGS=network_inventory_nmap_args,
         TMDB_API_KEY=tmdb_api_key,
         TMDB_BASE_URL=tmdb_base_url,
         TMDB_USER_AGENT=tmdb_user_agent,
@@ -412,3 +443,9 @@ WOL_VERIFY_TIMEOUT_S = settings.WOL_VERIFY_TIMEOUT_S
 WOL_VERIFY_INTERVAL_S = settings.WOL_VERIFY_INTERVAL_S
 DEFAULT_MANAGED_HOST = settings.DEFAULT_MANAGED_HOST
 MANAGED_HOSTS = settings.MANAGED_HOSTS
+NETWORK_INVENTORY_TARGETS = settings.NETWORK_INVENTORY_TARGETS
+NETWORK_INVENTORY_INTERVAL_S = settings.NETWORK_INVENTORY_INTERVAL_S
+NETWORK_INVENTORY_RETENTION_DAYS = settings.NETWORK_INVENTORY_RETENTION_DAYS
+NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE = settings.NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE
+NETWORK_INVENTORY_SCAN_TIMEOUT_S = settings.NETWORK_INVENTORY_SCAN_TIMEOUT_S
+NETWORK_INVENTORY_NMAP_ARGS = settings.NETWORK_INVENTORY_NMAP_ARGS

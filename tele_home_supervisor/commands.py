@@ -220,6 +220,13 @@ _NETWORK_COMMANDS = (
         "run configured remote shutdown and watch for ping failure",
         "cmd_wolshutdown",
     ),
+    CommandSpec(
+        "netinventory",
+        "Network",
+        "/netinventory",
+        "latest scheduled home network inventory",
+        "cmd_netinventory",
+    ),
 )
 
 _TORRENTS_COMMANDS = (

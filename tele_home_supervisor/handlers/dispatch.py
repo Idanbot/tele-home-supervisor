@@ -58,6 +58,7 @@ cmd_speedtest = rate_limit(network.cmd_speedtest, name="speedtest")
 cmd_wifiqr = rate_limit(network.cmd_wifiqr, name="wifiqr")
 cmd_wol = rate_limit(network.cmd_wol, name="wol")
 cmd_wolshutdown = rate_limit(network.cmd_wolshutdown, name="wolshutdown")
+cmd_netinventory = rate_limit(network.cmd_netinventory, name="netinventory")
 
 # Torrents
 cmd_torrent_add = rate_limit(torrents.cmd_torrent_add, name="torrentadd")
