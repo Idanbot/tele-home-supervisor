@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
-import requests
 
 from tele_home_supervisor import intel
 from tele_home_supervisor.models.bot_state import BotState
@@ -36,6 +36,7 @@ async def test_get_weather():
 
 @pytest.mark.asyncio
 async def test_get_weather_falls_back_per_location():
+    """Batch failure triggers per-location fallback; all locations succeed."""
     payload = {
         "current": {"temperature_2m": 21.0, "relative_humidity_2m": 60},
         "daily": {
@@ -45,9 +46,9 @@ async def test_get_weather_falls_back_per_location():
         },
     }
 
-    def fake_weather_request(locations):
+    async def fake_weather_request(locations):
         if len(locations) > 1:
-            raise requests.ReadTimeout("timed out")
+            raise httpx.ReadTimeout("batch timed out")
         return [payload]
 
     with patch(
@@ -57,6 +58,74 @@ async def test_get_weather_falls_back_per_location():
 
     assert "Haifa" in weather
     assert "Tel Aviv" in weather
+    assert "21.0°C" in weather
+
+
+@pytest.mark.asyncio
+async def test_get_weather_per_location_retries_on_transient_failure():
+    """A transient failure on Haifa is retried and the location shows data, not unavailable."""
+    good_payload = {
+        "current": {"temperature_2m": 18.6, "relative_humidity_2m": 87},
+        "daily": {
+            "temperature_2m_max": [22.7],
+            "temperature_2m_min": [16.9],
+            "precipitation_sum": [0.0],
+        },
+    }
+
+    call_count = {"n": 0}
+
+    async def fake_weather_request(locations):
+        if len(locations) > 1:
+            # batch always fails → triggers per-location fallback
+            raise httpx.ReadTimeout("batch timed out")
+        call_count["n"] += 1
+        # Haifa is first; fail on the very first per-location call, succeed after
+        if call_count["n"] == 1:
+            raise httpx.ReadTimeout("transient timeout for Haifa")
+        return [good_payload]
+
+    with patch(
+        "tele_home_supervisor.intel._weather_request", side_effect=fake_weather_request
+    ):
+        weather = await intel.get_weather()
+
+    # Haifa must show temperature data, not "unavailable"
+    assert "Haifa" in weather
+    assert "unavailable" not in weather
+    assert "18.6°C" in weather
+
+
+@pytest.mark.asyncio
+async def test_get_weather_per_location_all_retries_exhausted_shows_unavailable():
+    """When all retries are exhausted for a location it shows 'unavailable'."""
+    good_payload = {
+        "current": {"temperature_2m": 21.0, "relative_humidity_2m": 60},
+        "daily": {
+            "temperature_2m_max": [24.0],
+            "temperature_2m_min": [18.0],
+            "precipitation_sum": [0.2],
+        },
+    }
+
+    async def fake_weather_request(locations):
+        if len(locations) > 1:
+            raise httpx.ReadTimeout("batch timed out")
+        # Identify Haifa by its latitude in the URL (first in list)
+        # The simplest approach: always fail for lat 32.794 (Haifa)
+        lat = locations[0].get("lat")
+        if abs(lat - 32.7940) < 0.001:  # Haifa
+            raise httpx.ReadTimeout("persistent timeout for Haifa")
+        return [good_payload]
+
+    with patch(
+        "tele_home_supervisor.intel._weather_request", side_effect=fake_weather_request
+    ):
+        weather = await intel.get_weather()
+
+    assert "Haifa" in weather
+    assert "• <b>Haifa</b>: unavailable" in weather
+    assert "Omer" in weather
     assert "21.0°C" in weather
 
 

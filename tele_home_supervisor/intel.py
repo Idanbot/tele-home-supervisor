@@ -26,6 +26,7 @@ INTEL_MODULES = [
 ]
 
 _WEATHER_TIMEOUT = httpx.Timeout(12.0, connect=3.5)
+_WEATHER_RETRIES = 3  # per-location attempts in the fallback path
 
 _CLIENT: httpx.AsyncClient | None = None
 
@@ -217,13 +218,25 @@ async def _fetch_weather_payloads(
 
     payloads: list[dict[str, Any] | None] = []
     for loc in locations:
-        try:
-            res = await _weather_request([loc])
-            payloads.append(res[0])
-        except Exception as exc:
-            logger.warning("Weather fetch failed for %s: %s", loc["name"], exc)
-            failures.append(exc)
-            payloads.append(None)
+        payload: dict[str, Any] | None = None
+        last_exc: Exception | None = None
+        for attempt in range(_WEATHER_RETRIES):
+            try:
+                res = await _weather_request([loc])
+                payload = res[0]
+                break
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Weather fetch failed for %s (attempt %d/%d): %s",
+                    loc["name"],
+                    attempt + 1,
+                    _WEATHER_RETRIES,
+                    exc,
+                )
+        if payload is None and last_exc is not None:
+            failures.append(last_exc)
+        payloads.append(payload)
     return payloads, failures
 
 
