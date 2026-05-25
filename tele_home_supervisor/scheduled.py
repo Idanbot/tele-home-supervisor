@@ -1,4 +1,4 @@
-"""Scheduled notification fetchers (Epic Games, Hacker News, GOG, Steam, Humble).
+"""Scheduled notification fetchers (Epic Games, Hacker News, GOG, Steam, GamerPower giveaways).
 
 Also provides a combined game offers builder for daily digests.
 """
@@ -529,128 +529,123 @@ async def _fetch_gog_free_games_uncached() -> tuple[str, list[str]]:
 
 
 async def fetch_humble_free_games() -> tuple[str, list[str]]:
+    """Fetch active PC game giveaways via GamerPower (replaces defunct Humble Bundle API)."""
     return await _cached_fetch(
-        "humble",
+        "gamerpower",
         _GAME_OFFERS_TTL_S,
-        _fetch_humble_free_games_uncached,
+        _fetch_gamerpower_giveaways_uncached,
     )
 
 
-async def _fetch_humble_free_games_uncached() -> tuple[str, list[str]]:
-    """Fetch current Humble Bundle free games/giveaways."""
+async def _fetch_gamerpower_giveaways_uncached() -> tuple[str, list[str]]:
+    """Fetch active PC game giveaways from GamerPower public API.
+
+    Covers giveaways across Steam, itch.io, IndieGala, and other platforms.
+    Excludes Epic Games and GOG which are fetched separately.
+    """
+    # Platforms already covered by dedicated fetchers – skip them here.
+    _SKIP_PLATFORMS = {"epic games store", "gog"}
+
     try:
-        url = "https://www.humblebundle.com/store/api/search"
-        params = {
-            "sort": "discount",
-            "filter": "all",
-            "search": "",
-            "request": 1,
-            "page_size": 100,
-            "page": 0,
+        url = "https://www.gamerpower.com/api/giveaways"
+        params: dict[str, str] = {
+            "platform": "pc",
+            "type": "game",
+            "sort-by": "value",
         }
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "Chrome/120.0 Safari/537.36"
-            ),
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Referer": "https://www.humblebundle.com/store",
-            "Origin": "https://www.humblebundle.com",
-            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": "Mozilla/5.0 (compatible; TeleHomeSupervisor/1.0)",
+            "Accept": "application/json",
         }
 
         client = _get_client()
         response = await client.get(url, params=params, headers=headers)
-        if response.status_code == 403:
-            # Retry once with alternate UA
-            headers["User-Agent"] = (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 Chrome/122.0 Safari/537.36"
-            )
-            response = await client.get(url, params=params, headers=headers)
         response.raise_for_status()
         data = response.json()
 
-        results = data.get("results", [])
+        if not isinstance(data, list):
+            return ("🎮 <b>Other Giveaways</b>\n\nNo active giveaways right now.", [])
+
         free_games: list[dict[str, Any]] = []
+        now = datetime.now(UTC)
 
-        for item in results:
-            current_price = item.get("current_price", {})
-            price_amount = current_price.get("amount", 1)
-            is_giveaway = item.get("is_giveaway", False)
+        for item in data:
+            # Skip platforms already shown in other sections
+            platforms_raw = item.get("platforms", "").lower()
+            if any(skip in platforms_raw for skip in _SKIP_PLATFORMS):
+                continue
 
-            if price_amount == 0 or is_giveaway:
-                title = item.get("human_name", "Unknown")
-                slug = item.get("human_url", "")
-                icon = item.get("icon", "")
-                if icon and not icon.startswith("http"):
-                    icon = f"https://hb.imgix.net{icon}"
+            status = item.get("status", "").lower()
+            if status != "active":
+                continue
 
-                free_games.append(
-                    {
-                        "title": title,
-                        "url": (
-                            f"https://www.humblebundle.com/store/{slug}"
-                            if slug
-                            else "https://www.humblebundle.com/store"
-                        ),
-                        "image": icon,
-                    }
-                )
+            # Parse expiry and skip already-expired entries
+            end_date_str = item.get("end_date", "N/A")
+            expiry_str = "ongoing"
+            if end_date_str and end_date_str != "N/A":
+                try:
+                    expiry_dt = datetime.strptime(
+                        end_date_str, "%Y-%m-%d %H:%M:%S"
+                    ).replace(tzinfo=UTC)
+                    if expiry_dt < now:
+                        continue  # Already expired
+                    expiry_str = expiry_dt.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
 
-        if not free_games:
-            giveaway_url = "https://www.humblebundle.com/store/api/lookup"
-            giveaway_params = {"products[]": "mosaic"}
-            try:
-                gw_resp = await client.get(
-                    giveaway_url,
-                    params=giveaway_params,
-                    headers=headers,
-                )
-                if gw_resp.status_code == 200:
-                    gw_data = gw_resp.json()
-                    for _key, item in gw_data.items():
-                        if isinstance(item, dict):
-                            price = item.get("current_price", {}).get("amount", 1)
-                            if price == 0:
-                                free_games.append(
-                                    {
-                                        "title": item.get("human_name", "Unknown"),
-                                        "url": f"https://www.humblebundle.com/store/{item.get('human_url', '')}",
-                                        "image": item.get("icon", ""),
-                                    }
-                                )
-            except Exception as fallback_error:
-                logger.warning(f"Humble Bundle fallback API failed: {fallback_error}")
+            title = item.get("title", "Unknown")
+            url_game = item.get("open_giveaway", item.get("gamerpower_url", ""))
+            thumbnail = item.get("thumbnail", "")
+            worth = item.get("worth", "")
+
+            free_games.append(
+                {
+                    "title": title,
+                    "url": url_game,
+                    "image": thumbnail,
+                    "expiry": expiry_str,
+                    "worth": worth,
+                    "platforms": item.get("platforms", ""),
+                }
+            )
 
         if not free_games:
-            return ("🎮 <b>Humble Bundle</b>\n\nNo free games available right now.", [])
+            return ("🎮 <b>Other Giveaways</b>\n\nNo active giveaways right now.", [])
 
-        free_games = free_games[:3]
-        lines = ["🎮 <b>Humble Bundle - Free Games</b>\n"]
+        free_games = free_games[:5]
+        lines = ["🎮 <b>Other Giveaways</b>\n"]
         image_urls: list[str] = []
 
         for game in free_games:
             title = html.escape(game["title"])
-            url = game.get("url", "https://www.humblebundle.com/store")
-            lines.append(f"🎁 <a href='{url}'>{title}</a>\n🗓️ unknown → unknown")
+            game_url = game.get("url", "https://www.gamerpower.com")
+            expiry = game.get("expiry", "ongoing")
+            worth = game.get("worth", "")
+            platforms = html.escape(game.get("platforms", ""))
 
-            if game.get("image"):
+            worth_str = f" ({html.escape(worth)})" if worth and worth != "N/A" else ""
+            date_str = f" · ends {expiry}" if expiry != "ongoing" else ""
+            lines.append(
+                f"🎁 <a href='{game_url}'>{title}</a>{worth_str}\n"
+                f"   📦 {platforms}{date_str}"
+            )
+
+            if game.get("image") and not image_urls:
                 image_urls.append(game["image"])
 
         lines.append("")
         lines.append(
-            '<a href="https://www.humblebundle.com/store/search?sort=discount&filter=all">View Humble Store</a>'
+            '<a href="https://www.gamerpower.com/free-games-for-pc">View all PC giveaways</a>'
         )
         return ("\n".join(lines), image_urls[:1])
 
     except Exception as e:
-        logger.exception("Failed to fetch Humble Bundle free games")
-        return (f"❌ Failed to fetch Humble Bundle: {html.escape(str(e))}", [])
+        logger.exception("Failed to fetch GamerPower giveaways")
+        return (f"❌ Failed to fetch giveaways: {html.escape(str(e))}", [])
 
 
 async def build_combined_game_offers(limit_steam: int = 5) -> tuple[str, str | None]:
-    """Combine Epic, Steam, GOG, and Humble offers into one HTML message."""
+    """Combine Epic, Steam, GOG, and GamerPower giveaways into one HTML message."""
     sections: list[str] = []
     epic_image: str | None = None
 

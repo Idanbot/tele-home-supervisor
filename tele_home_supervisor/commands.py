@@ -338,7 +338,7 @@ _NOTIFICATIONS_COMMANDS = (
         "gameoffers",
         "Notifications",
         "/gameoffers",
-        "show combined game offers (Epic/Steam/GOG/Humble)",
+        "show combined game offers (Epic/Steam/GOG/Giveaways)",
         "cmd_gameoffers_now",
     ),
     CommandSpec(
@@ -373,7 +373,7 @@ _NOTIFICATIONS_COMMANDS = (
         "humblefree",
         "Notifications",
         "/humblefree",
-        "show current Humble Bundle free games",
+        "show active PC game giveaways (Steam/IndieGala/itch.io)",
         "cmd_humblefree_now",
     ),
     CommandSpec(

@@ -87,7 +87,7 @@ def build_free_games_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🎮 GOG", callback_data="games:gog"),
-            InlineKeyboardButton("🎮 Humble", callback_data="games:humble"),
+            InlineKeyboardButton("🎁 Giveaways", callback_data="games:humble"),
         ],
     ]
     return InlineKeyboardMarkup(buttons)

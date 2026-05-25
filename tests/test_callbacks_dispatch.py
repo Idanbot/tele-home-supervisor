@@ -228,7 +228,7 @@ def test_build_free_games_keyboard() -> None:
     assert "🎮 Epic" in all_labels
     assert "🎮 Steam" in all_labels
     assert "🎮 GOG" in all_labels
-    assert "🎮 Humble" in all_labels
+    assert "🎁 Giveaways" in all_labels
 
 
 def test_build_protondb_keyboard_empty() -> None:

@@ -125,7 +125,7 @@ async def test_fetch_epic_free_games_uncached_formats_active_and_upcoming(monkey
 
 
 @pytest.mark.asyncio
-async def test_fetch_steam_gog_and_humble_uncached(monkeypatch):
+async def test_fetch_steam_gog_and_gamerpower_uncached(monkeypatch):
     client = MagicMock()
 
     async def fake_get(url, **kwargs):
@@ -161,17 +161,20 @@ async def test_fetch_steam_gog_and_humble_uncached(monkeypatch):
                     ]
                 }
             )
+        # GamerPower response
         return FakeResponse(
-            {
-                "results": [
-                    {
-                        "human_name": "Humble Free",
-                        "human_url": "humble-free",
-                        "icon": "/humble.jpg",
-                        "current_price": {"amount": 0},
-                    }
-                ]
-            }
+            [
+                {
+                    "title": "GamerPower Free Game (Steam)",
+                    "worth": "$19.99",
+                    "thumbnail": "https://img.example/gp.jpg",
+                    "platforms": "PC, Steam",
+                    "end_date": "2099-12-31 23:59:00",
+                    "status": "Active",
+                    "open_giveaway": "https://www.gamerpower.com/open/gp-free",
+                    "gamerpower_url": "https://www.gamerpower.com/gp-free",
+                }
+            ]
         )
 
     client.get = AsyncMock(side_effect=fake_get)
@@ -179,39 +182,64 @@ async def test_fetch_steam_gog_and_humble_uncached(monkeypatch):
 
     steam_msg, steam_images = await scheduled._fetch_steam_free_games_uncached(5)
     gog_msg, gog_images = await scheduled._fetch_gog_free_games_uncached()
-    humble_msg, humble_images = await scheduled._fetch_humble_free_games_uncached()
+    gp_msg, gp_images = await scheduled._fetch_gamerpower_giveaways_uncached()
 
     assert "Steam Free" in steam_msg
     assert steam_images == ["https://img.example/steam.jpg"]
     assert "GOG Free" in gog_msg
     assert gog_images == ["https://img.example/gog.jpg"]
-    assert "Humble Free" in humble_msg
-    assert humble_images == ["https://hb.imgix.net/humble.jpg"]
+    assert "GamerPower Free Game" in gp_msg
+    assert gp_images == ["https://img.example/gp.jpg"]
 
 
 @pytest.mark.asyncio
-async def test_humble_fallback_lookup(monkeypatch):
+async def test_gamerpower_skips_epic_and_gog_platforms(monkeypatch):
+    """Items from Epic Games Store and GOG should be filtered out."""
     client = MagicMock()
-    responses = [
-        FakeResponse({"results": []}),
-        FakeResponse(
-            {
-                "mosaic": {
-                    "human_name": "Fallback Free",
-                    "human_url": "fallback",
-                    "icon": "https://img.example/fallback.jpg",
-                    "current_price": {"amount": 0},
-                }
-            }
-        ),
-    ]
-    client.get = AsyncMock(side_effect=responses)
+
+    client.get = AsyncMock(
+        return_value=FakeResponse(
+            [
+                {
+                    "title": "Epic Exclusive",
+                    "worth": "$29.99",
+                    "thumbnail": "",
+                    "platforms": "PC, Epic Games Store",
+                    "end_date": "2099-12-31 23:59:00",
+                    "status": "Active",
+                    "open_giveaway": "https://www.gamerpower.com/open/epic",
+                    "gamerpower_url": "https://www.gamerpower.com/epic",
+                },
+                {
+                    "title": "GOG Exclusive",
+                    "worth": "$9.99",
+                    "thumbnail": "",
+                    "platforms": "PC, GOG",
+                    "end_date": "2099-12-31 23:59:00",
+                    "status": "Active",
+                    "open_giveaway": "https://www.gamerpower.com/open/gog",
+                    "gamerpower_url": "https://www.gamerpower.com/gog",
+                },
+                {
+                    "title": "Steam Indie",
+                    "worth": "$4.99",
+                    "thumbnail": "https://img.example/indie.jpg",
+                    "platforms": "PC, Steam",
+                    "end_date": "2099-12-31 23:59:00",
+                    "status": "Active",
+                    "open_giveaway": "https://www.gamerpower.com/open/indie",
+                    "gamerpower_url": "https://www.gamerpower.com/indie",
+                },
+            ]
+        )
+    )
     monkeypatch.setattr(scheduled, "_get_client", lambda: client)
 
-    message, images = await scheduled._fetch_humble_free_games_uncached()
+    message, images = await scheduled._fetch_gamerpower_giveaways_uncached()
 
-    assert "Fallback Free" in message
-    assert images == ["https://img.example/fallback.jpg"]
+    assert "Epic Exclusive" not in message
+    assert "GOG Exclusive" not in message
+    assert "Steam Indie" in message
 
 
 @pytest.mark.asyncio
@@ -225,4 +253,4 @@ async def test_fetchers_return_error_messages(monkeypatch):
     assert (await scheduled.fetch_hackernews_top(limit=1)).startswith("❌")
     assert (await scheduled._fetch_steam_free_games_uncached(1))[0].startswith("❌")
     assert (await scheduled._fetch_gog_free_games_uncached())[0].startswith("❌")
-    assert (await scheduled._fetch_humble_free_games_uncached())[0].startswith("❌")
+    assert (await scheduled._fetch_gamerpower_giveaways_uncached())[0].startswith("❌")

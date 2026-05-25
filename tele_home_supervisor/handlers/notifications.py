@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 async def cmd_mute_gameoffers(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Toggle combined Game Offers daily notifications (Epic/Steam/GOG/Humble)."""
+    """Toggle combined Game Offers daily notifications (Epic/Steam/GOG/Giveaways)."""
     if not await guard(update, context):
         return
 
@@ -60,7 +60,7 @@ async def cmd_mute_hackernews(
 async def cmd_gameoffers_now(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Fetch and display combined game offers on demand (Epic/Steam/GOG/Humble)."""
+    """Fetch and display combined game offers on demand (Epic/Steam/GOG/Giveaways)."""
     if not await guard(update, context):
         return
 
@@ -270,11 +270,11 @@ async def cmd_gogfree_now(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def cmd_humblefree_now(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Fetch and display current Humble Bundle free games on demand."""
+    """Fetch and display active PC game giveaways on demand."""
     if not await guard(update, context):
         return
 
-    msg = await update.message.reply_text("🔄 Fetching Humble Bundle free games...")
+    msg = await update.message.reply_text("🔄 Fetching game giveaways...")
 
     try:
         message, image_urls = await scheduled_fetchers.fetch_humble_free_games()
