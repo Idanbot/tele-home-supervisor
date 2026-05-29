@@ -394,7 +394,12 @@ async def handle_piratebay_select(query, context, key: str) -> None:
     if not entry:
         await query.message.reply_text("❌ Torrent link expired.")
         return
-    name, magnet, seeds, leech = entry
+    name, _magnet, seeds, leech = (
+        entry.name,
+        entry.magnet,
+        entry.seeders,
+        entry.leechers,
+    )
     safe_name = html.escape(name)
 
     msg = f"<b>{safe_name}</b>\n\n🌱 Seeds: {seeds}\n🐌 Leechers: {leech}"
@@ -416,9 +421,8 @@ async def handle_piratebay_add(query, context, key: str) -> None:
     if not entry:
         await query.message.reply_text("❌ Torrent link expired.")
         return
-    _name, magnet, _, _ = entry
 
-    res = await services.torrent_add(magnet)
+    res = await services.torrent_add(entry.magnet)
 
     chat_id = query.message.chat.id
     if not state.torrent_completion_enabled(chat_id):
@@ -433,8 +437,7 @@ async def handle_piratebay_magnet(query, context, key: str) -> None:
     if not entry:
         await query.message.reply_text("❌ Torrent link expired.")
         return
-    name, magnet, _, _ = entry
-    safe_name = html.escape(name)
-    safe_magnet = html.escape(magnet)
+    safe_name = html.escape(entry.name)
+    safe_magnet = html.escape(entry.magnet)
     msg = f"<b>{safe_name}</b>\n<code>{safe_magnet}</code>"
     await query.message.reply_text(msg, parse_mode=ParseMode.HTML)

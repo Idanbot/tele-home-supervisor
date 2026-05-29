@@ -20,6 +20,7 @@ from __future__ import annotations
 import html
 import logging
 import threading
+import time
 
 try:
     import qbittorrentapi
@@ -51,17 +52,26 @@ def fmt_bytes_compact_decimal(num_bytes: int) -> str:
 # Shared manager singleton – avoids re-authenticating on every API call
 # ---------------------------------------------------------------------------
 
-_mgr_lock = threading.Lock()
+_mgr_lock = threading.RLock()
 _mgr: TorrentManager | None = None
+_ban_until = 0.0
 
 
 def get_manager() -> TorrentManager | None:
     """Return a shared :class:`TorrentManager`, connecting lazily.
 
     Thread-safe.  Returns ``None`` when the connection cannot be
-    established.
+    established or if we are currently "banned" (e.g. after a 403).
     """
-    global _mgr
+    global _mgr, _ban_until
+    now = time.time()
+    if now < _ban_until:
+        logger.warning(
+            "qBittorrent is temporarily blocked (sleeping for %.0fs more)",
+            _ban_until - now,
+        )
+        return None
+
     with _mgr_lock:
         if _mgr is None:
             _mgr = TorrentManager()
@@ -75,6 +85,22 @@ def reset_manager() -> None:
     global _mgr
     with _mgr_lock:
         _mgr = None
+
+
+def _check_403(exc: Exception) -> bool:
+    """Check if the exception is a 403 Forbidden (ban)."""
+    global _ban_until
+    msg = str(exc).lower()
+    # Handle qbittorrentapi specific Forbidden403Error if available
+    is_403 = "403" in msg or "forbidden" in msg
+    if is_403:
+        _ban_until = time.time() + settings.QBT_BAN_DURATION_S
+        logger.error(
+            "qBittorrent returned 403 Forbidden. Likely banned. Sleeping for %.0f mins.",
+            settings.QBT_BAN_DURATION_S / 60.0,
+        )
+        reset_manager()
+    return is_403
 
 
 class TorrentManager:
@@ -148,6 +174,8 @@ class TorrentManager:
             logger.warning("Invalid qBittorrent login credentials")
             return False
         except Exception as exc:  # pragma: no cover - surface errors
+            if _check_403(exc):
+                return False
             logger.exception("Connection error to qBittorrent: %s", exc)
             return False
 
@@ -177,6 +205,8 @@ class TorrentManager:
 
             return f"✅ Added to download queue:\n<b>{html.escape(name)}</b>"
         except Exception as exc:
+            if _check_403(exc):
+                return "Failed to connect to qBittorrent."
             logger.exception("Failed to add torrent: %s", exc)
             return f"Failed to add torrent: {html.escape(str(exc))}"
 
@@ -208,7 +238,8 @@ class TorrentManager:
                         }
                     )
             return matches
-        except Exception:
+        except Exception as exc:
+            _check_403(exc)
             logger.exception("Error finding torrents by name")
             return []
 
@@ -231,22 +262,31 @@ class TorrentManager:
                 # Prefer the canonical parameter name 'hashes'
                 try:
                     self.qbt_client.torrents_pause(hashes=hashes_joined)  # type: ignore
-                except Exception:
+                except Exception as e:
+                    if _check_403(e):
+                        return False
                     # Fallbacks for older client signatures
                     try:
                         self.qbt_client.torrents_pause(torrent_hashes=hashes_joined)  # type: ignore
-                    except Exception:
+                    except Exception as e2:
+                        if _check_403(e2):
+                            return False
                         self.qbt_client.torrents_pause(hashes)  # type: ignore
             else:
                 try:
                     self.qbt_client.torrents_resume(hashes=hashes_joined)  # type: ignore
-                except Exception:
+                except Exception as e:
+                    if _check_403(e):
+                        return False
                     try:
                         self.qbt_client.torrents_resume(torrent_hashes=hashes_joined)  # type: ignore
-                    except Exception:
+                    except Exception as e2:
+                        if _check_403(e2):
+                            return False
                         self.qbt_client.torrents_resume(hashes)  # type: ignore
             return True
-        except Exception:
+        except Exception as exc:
+            _check_403(exc)
             logger.exception("Error calling pause/resume on torrents")
             return False
 
@@ -267,20 +307,26 @@ class TorrentManager:
                     hashes=hashes_joined, delete_files=delete_files
                 )  # type: ignore
                 deleted = True
-            except Exception:
+            except Exception as e:
+                if _check_403(e):
+                    return False
                 # Fallbacks for older/signature-variant clients
                 try:
                     self.qbt_client.torrents_delete(
                         torrent_hashes=hashes_joined, delete_files=delete_files
                     )  # type: ignore
                     deleted = True
-                except Exception:
+                except Exception as e2:
+                    if _check_403(e2):
+                        return False
                     try:
                         self.qbt_client.torrents_delete(
                             hashes=hashes_joined, deleteFiles=delete_files
                         )  # type: ignore
                         deleted = True
-                    except Exception:
+                    except Exception as e3:
+                        if _check_403(e3):
+                            return False
                         self.qbt_client.torrents_delete(
                             hashes=hashes, delete_files=delete_files
                         )  # type: ignore
@@ -303,12 +349,15 @@ class TorrentManager:
                     )
                     return False
             except Exception as e:
+                if _check_403(e):
+                    return False
                 logger.debug(
                     "Delete verification failed; assuming delete succeeded: %s", e
                 )
 
             return deleted
-        except Exception:
+        except Exception as exc:
+            _check_403(exc)
             logger.exception("Error deleting torrents")
             return False
 
@@ -445,6 +494,8 @@ class TorrentManager:
                 )
             return "\n\n".join(parts)
         except Exception as exc:
+            if _check_403(exc):
+                return "Failed to connect to qBittorrent."
             logger.exception("Error retrieving qBittorrent status: %s", exc)
             return f"Error retrieving status: {html.escape(str(exc))}"
 
@@ -504,7 +555,8 @@ class TorrentManager:
                     }
                 )
             return result
-        except Exception:
+        except Exception as exc:
+            _check_403(exc)
             logger.exception("Error getting torrent list")
             return []
 
@@ -532,7 +584,8 @@ class TorrentManager:
                         "upspeed": getattr(t, "upspeed", 0) or 0,
                     }
             return None
-        except Exception:
+        except Exception as exc:
+            _check_403(exc)
             logger.exception("Error finding torrent by hash")
             return None
 
@@ -567,6 +620,8 @@ class TorrentManager:
             )
             return f"🗑️ Deleted: {html.escape(torrent['name'])}"
         except Exception as e:
+            if _check_403(e):
+                return "Failed to connect to qBittorrent."
             logger.exception("delete_by_hash failed")
             return f"Failed to delete torrent: {e}"
 
@@ -612,7 +667,8 @@ class TorrentManager:
                     )
                     matches.append({"name": tname, "hash": thash, "state": state})
             return matches
-        except Exception:
+        except Exception as exc:
+            _check_403(exc)
             logger.exception("Error finding missing files torrents")
             return []
 

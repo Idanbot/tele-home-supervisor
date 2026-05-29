@@ -23,6 +23,7 @@ class Settings:
     QBT_USER: str
     QBT_PASS: str
     QBT_TIMEOUT_S: float
+    QBT_BAN_DURATION_S: float
     OLLAMA_HOST: str
     OLLAMA_MODEL: str
     BOT_AUTH_TOTP_SECRET: str | None

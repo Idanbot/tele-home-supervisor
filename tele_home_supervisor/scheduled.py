@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import inspect
 import logging
 import time
 from collections.abc import Callable
@@ -64,7 +65,7 @@ async def _cached_fetch(
     value: object | None = None
     try:
         # Check if fetcher is async
-        if asyncio.iscoroutinefunction(fetcher):
+        if inspect.iscoroutinefunction(fetcher):
             value = await fetcher()
         else:
             value = fetcher()

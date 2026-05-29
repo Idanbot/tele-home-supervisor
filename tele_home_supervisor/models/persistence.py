@@ -20,6 +20,7 @@ from .. import config
 from .alerts import AlertRule, AlertState
 from .audit import AuditEntry
 from .auth import AuthGrantRecord
+from .magnet import MagnetEntry
 from .network_inventory import (
     NetworkDeviceScan,
     NetworkInventoryScanSummary,
@@ -176,10 +177,30 @@ def _deserialize_audit_log(state: BotState, data: dict) -> None:
 # ── Magnet Cache ─────────────────────────────────────────────────────
 
 
+def _serialize_magnet_cache(state: BotState) -> list:
+    items = []
+    for key, (ts, entry) in state.magnet_cache.items():
+        items.append(
+            (
+                key,
+                [
+                    ts,
+                    {
+                        "name": entry.name,
+                        "magnet": entry.magnet,
+                        "seeders": entry.seeders,
+                        "leechers": entry.leechers,
+                    },
+                ],
+            )
+        )
+    return items
+
+
 def save_magnets(state: BotState, path: Path) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(list(state.magnet_cache.items()), indent=2)
+        payload = json.dumps(_serialize_magnet_cache(state), indent=2)
         _atomic_write_text(path, payload)
     except Exception:
         logger.exception("Failed to save magnet cache")
@@ -201,7 +222,31 @@ def _deserialize_magnet_cache(state: BotState, data: list) -> None:
     state.magnet_cache = OrderedDict()
     for item in data:
         if isinstance(item, (list, tuple)) and len(item) == 2:
-            state.magnet_cache[item[0]] = item[1]
+            key, raw = item
+            if isinstance(raw, list) and len(raw) == 2:
+                ts, entry_data = raw
+                if isinstance(entry_data, dict):
+                    entry = MagnetEntry(
+                        name=entry_data.get("name", ""),
+                        magnet=entry_data.get("magnet", ""),
+                        seeders=entry_data.get("seeders", 0),
+                        leechers=entry_data.get("leechers", 0),
+                    )
+                elif isinstance(entry_data, (list, tuple)):
+                    if len(entry_data) == 4:
+                        entry = MagnetEntry(
+                            name=entry_data[0],
+                            magnet=entry_data[1],
+                            seeders=entry_data[2],
+                            leechers=entry_data[3],
+                        )
+                    elif len(entry_data) == 2:
+                        entry = MagnetEntry(name=entry_data[0], magnet=entry_data[1])
+                    else:
+                        continue
+                else:
+                    continue
+                state.magnet_cache[key] = (float(ts), entry)
 
 
 # ── Network Inventory ─────────────────────────────────────────────────

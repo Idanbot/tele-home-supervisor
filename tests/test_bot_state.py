@@ -262,17 +262,15 @@ class TestBotStatePersistence:
 
 
 class TestBotStateMagnetCache:
-    """Tests for magnet link caching."""
-
     def test_store_and_get_magnet(self) -> None:
         state = BotState()
-        # store_magnet(name, magnet, seeders=0, leechers=0) returns key
         key = state.store_magnet("Ubuntu ISO", "magnet:?xt=...", 1024, 10)
         result = state.get_magnet(key)
         assert result is not None
-        # Returns (name, magnet, seeders, leechers)
-        assert result[0] == "Ubuntu ISO"
-        assert result[1] == "magnet:?xt=..."
+        assert result.name == "Ubuntu ISO"
+        assert result.magnet == "magnet:?xt=..."
+        assert result.seeders == 1024
+        assert result.leechers == 10
 
     def test_get_nonexistent_magnet(self) -> None:
         state = BotState()

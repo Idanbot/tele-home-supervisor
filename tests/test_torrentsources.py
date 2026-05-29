@@ -335,9 +335,15 @@ class TestFallbackFunctions:
     @pytest.mark.asyncio
     @patch.object(BitSearchSource, "search")
     @patch.object(EZTVSource, "search")
+    @patch("tele_home_supervisor.torrentsources.get_enabled_sources")
     async def test_fallback_search_all_fail(
-        self, mock_eztv_search, mock_bitsearch_search
+        self, mock_get_enabled, mock_eztv_search, mock_bitsearch_search
     ):
+        # Only use the sources we're mocking
+        mock_eztv = EZTVSource()
+        mock_bitsearch = BitSearchSource()
+        mock_get_enabled.return_value = [mock_bitsearch, mock_eztv]
+
         mock_bitsearch_search.return_value = []
         mock_eztv_search.return_value = []
 

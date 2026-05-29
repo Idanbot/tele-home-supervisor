@@ -211,6 +211,7 @@ def get_settings() -> Settings:
         qbt_timeout = float(os.environ.get("QBT_TIMEOUT_S", "8") or "8")
     except Exception:
         qbt_timeout = 8.0
+    qbt_ban_duration = _read_optional_float("QBT_BAN_DURATION_S", 300.0)
 
     # Ollama
     ollama_host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
@@ -306,6 +307,7 @@ def get_settings() -> Settings:
         QBT_USER=qbt_user,
         QBT_PASS=qbt_pass,
         QBT_TIMEOUT_S=qbt_timeout,
+        QBT_BAN_DURATION_S=qbt_ban_duration,
         OLLAMA_HOST=ollama_host,
         OLLAMA_MODEL=ollama_model,
         BOT_AUTH_TOTP_SECRET=bot_auth_totp_secret,

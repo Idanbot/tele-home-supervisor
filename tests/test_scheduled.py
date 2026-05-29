@@ -56,7 +56,8 @@ class TestFetchHackernewsTop:
             assert "Story 1" in result
 
     @pytest.mark.asyncio
-    async def test_handles_api_error(self) -> None:
+    @patch("tele_home_supervisor.scheduled.asyncio.sleep", new_callable=AsyncMock)
+    async def test_handles_api_error(self, mock_sleep) -> None:
         import requests as real_requests
 
         client = MagicMock()
