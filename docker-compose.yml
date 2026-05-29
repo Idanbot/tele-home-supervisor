@@ -1,17 +1,5 @@
 ---
 services:
-  telebot_data_init:
-    image: busybox:1.36
-    container_name: rpi-telebot-data-init
-    user: "0:0"
-    command:
-      - sh
-      - -c
-      - mkdir -p /data && chown -R 10001:10001 /data
-    volumes:
-      - telebot_data:/data
-    restart: "no"
-
   rpi_telebot:
     image: ghcr.io/idanbot/tele-home-supervisor:latest
     container_name: rpi-telebot
@@ -24,8 +12,6 @@ services:
       - /tmp
     user: "10001:10001"
     depends_on:
-      telebot_data_init:
-        condition: service_completed_successfully
       docker-proxy:
         condition: service_started
 
@@ -45,7 +31,7 @@ services:
       - WATCH_PATHS=${WATCH_PATHS:-/,/srv/media}
       - SHOW_WAN=${SHOW_WAN:-false}
       - TZ=${TZ:-Asia/Jerusalem}
-      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - RATE_LIMIT_S=${RATE_LIMIT_S:-1.0}
       - QBT_TIMEOUT_S=${QBT_TIMEOUT_S:-8}
       - DOCKER_HOST=http://docker-proxy:2375
@@ -122,9 +108,12 @@ services:
     image: containrrr/watchtower:latest
     container_name: watchtower
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
 
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
     logging:
       driver: "json-file"
@@ -134,17 +123,12 @@ services:
 
     environment:
       - TZ=Asia/Jerusalem
-      # remove old images
       - WATCHTOWER_CLEANUP=true
-      # check every 5 minutes
       - WATCHTOWER_POLL_INTERVAL=300
       - WATCHTOWER_INCLUDE_STOPPED=true
-      # also check immediately on startup
       - WATCHTOWER_UPDATE_ON_START=true
-      # Docker v29 raised the minimum API version to 1.44
       - DOCKER_API_VERSION=1.44
 
-    # Only update this specific container
     command:
       - rpi-telebot
 networks:

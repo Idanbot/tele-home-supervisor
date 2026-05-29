@@ -41,7 +41,7 @@ repos:
     hooks:
       - id: docker-compose-config
         name: docker compose config
-        entry: docker compose -f docker-compose.yml config
+        entry: docker compose -f docker-compose.yml config --no-interpolate -q
         language: system
         pass_filenames: false
         files: '^docker-compose\.yml$'

@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install build deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      gcc build-essential python3-dev curl iproute2 tzdata libffi-dev libssl-dev pkg-config \
+      gcc build-essential python3-dev curl libffi-dev libssl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -68,7 +68,7 @@ WORKDIR /app
 # Create data directory
 RUN mkdir -p /app/data && chown -R app:app /app
 
-# Copy installed packages from builder (Now this actually contains your deps!)
+# Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 

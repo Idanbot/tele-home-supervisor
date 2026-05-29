@@ -63,3 +63,4 @@ venv.bak/
 
 # Docker
 *.tar
+.env
