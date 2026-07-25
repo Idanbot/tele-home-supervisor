@@ -2,25 +2,103 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import random
 import time
+from html.parser import HTMLParser
 from typing import Any
 
 import httpx
 from defusedxml import ElementTree
 
-from .config import settings as app_settings
 from .models.reddit_settings import RedditBriefingSettings
 
 logger = logging.getLogger(__name__)
 
 _REDDIT_BASE_URL = "https://www.reddit.com"
+_REDDIT_SCRAPE_BASE_URL = "https://old.reddit.com"
+_USER_AGENT = (
+    "Mozilla/5.0 (compatible; tele-home-supervisor/0.1; low-volume personal use)"
+)
 _TIMEOUT = httpx.Timeout(10.0, connect=3.5)
-_OAUTH_TOKEN: str | None = None
-_OAUTH_TOKEN_EXPIRES_AT = 0.0
+_CACHE_TTL_SECONDS = 30 * 60
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
+_CANDIDATE_CACHE: dict[tuple[str, str], tuple[float, tuple[dict[str, Any], ...]]] = {}
+
+
+class _OldRedditParser(HTMLParser):
+    """Extract post metadata from an old Reddit listing."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.posts: list[dict[str, Any]] = []
+        self._post: dict[str, Any] | None = None
+        self._post_depth = 0
+        self._capture_title = False
+        self._title_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = {key: value or "" for key, value in attrs}
+        classes = set(attributes.get("class", "").split())
+
+        if tag == "div" and self._post is None and "thing" in classes:
+            self._post = {
+                "id": attributes.get("data-fullname", "").removeprefix("t3_"),
+                "subreddit": attributes.get("data-subreddit", ""),
+                "author": attributes.get("data-author", ""),
+                "score": _parse_int(attributes.get("data-score")),
+                "num_comments": _parse_int(attributes.get("data-comments-count")),
+                "permalink": attributes.get("data-permalink", ""),
+                "_skip": (
+                    "stickied" in classes
+                    or attributes.get("data-promoted") == "true"
+                    or attributes.get("data-nsfw") == "true"
+                ),
+            }
+            self._post_depth = 1
+            return
+
+        if self._post is None:
+            return
+        if tag == "div":
+            self._post_depth += 1
+        if tag == "a" and "title" in classes:
+            self._capture_title = True
+            self._title_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._capture_title:
+            self._title_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._post is None:
+            return
+        if tag == "a" and self._capture_title:
+            self._post["title"] = "".join(self._title_parts).strip()
+            self._capture_title = False
+        if tag != "div":
+            return
+
+        self._post_depth -= 1
+        if self._post_depth == 0:
+            post = self._post
+            if (
+                not post.pop("_skip")
+                and post.get("id")
+                and post.get("title")
+                and post.get("permalink")
+            ):
+                self.posts.append(post)
+            self._post = None
+
+
+def _parse_int(value: str | None) -> int:
+    try:
+        return int(value or 0)
+    except ValueError:
+        return 0
 
 
 def _mode_for(settings: RedditBriefingSettings, index: int) -> str:
@@ -29,56 +107,49 @@ def _mode_for(settings: RedditBriefingSettings, index: int) -> str:
     return ("top", "trending", "random")[index % 3]
 
 
-async def _get_oauth_token(client: httpx.AsyncClient) -> str | None:
-    global _OAUTH_TOKEN, _OAUTH_TOKEN_EXPIRES_AT
-    if not app_settings.REDDIT_CLIENT_ID or not app_settings.REDDIT_CLIENT_SECRET:
-        return None
-    if _OAUTH_TOKEN and time.time() < _OAUTH_TOKEN_EXPIRES_AT:
-        return _OAUTH_TOKEN
-
-    response = await client.post(
-        "https://www.reddit.com/api/v1/access_token",
-        data={"grant_type": "client_credentials"},
-        auth=(
-            app_settings.REDDIT_CLIENT_ID,
-            app_settings.REDDIT_CLIENT_SECRET,
-        ),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    token = str(payload.get("access_token") or "")
-    if not token:
-        return None
-    _OAUTH_TOKEN = token
-    _OAUTH_TOKEN_EXPIRES_AT = time.time() + max(
-        60, int(payload.get("expires_in") or 3600) - 60
-    )
-    return token
+def _parse_old_reddit(content: str) -> list[dict[str, Any]]:
+    parser = _OldRedditParser()
+    parser.feed(content)
+    parser.close()
+    return parser.posts
 
 
-async def _fetch_json_candidates(
-    client: httpx.AsyncClient, subreddit: str, mode: str, token: str
+async def _get_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    params: dict[str, str] | None = None,
+) -> httpx.Response:
+    for attempt in range(3):
+        try:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            return response
+        except (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.HTTPStatusError,
+        ):
+            if attempt == 2:
+                raise
+            await asyncio.sleep(0.5 * (attempt + 1))
+    raise RuntimeError("Reddit request retry loop ended unexpectedly")
+
+
+async def _fetch_html_candidates(
+    client: httpx.AsyncClient, subreddit: str, mode: str
 ) -> list[dict[str, Any]]:
     sort = "top" if mode == "top" else "hot"
-    params: dict[str, str | int] = {"limit": 15, "raw_json": 1}
-    if sort == "top":
-        params["t"] = "day"
-    url = f"https://oauth.reddit.com/r/{subreddit}/{sort}"
-    response = await client.get(
-        url, params=params, headers={"Authorization": f"Bearer {token}"}
+    params = {"sort": "top", "t": "day"} if sort == "top" else None
+    response = await _get_with_retry(
+        client,
+        f"{_REDDIT_SCRAPE_BASE_URL}/r/{subreddit}/{sort}/",
+        params=params,
     )
-    response.raise_for_status()
-    payload = response.json()
-
-    children = payload.get("data", {}).get("children", [])
-    return [
-        child["data"]
-        for child in children
-        if isinstance(child, dict)
-        and isinstance(child.get("data"), dict)
-        and not child["data"].get("over_18")
-        and not child["data"].get("stickied")
-    ]
+    posts = _parse_old_reddit(response.text)
+    if not posts:
+        raise ValueError("Reddit public listing contained no posts")
+    return posts
 
 
 async def _fetch_rss_candidates(
@@ -86,10 +157,11 @@ async def _fetch_rss_candidates(
 ) -> list[dict[str, Any]]:
     sort = "top" if mode == "top" else "hot"
     params = {"t": "day"} if sort == "top" else None
-    response = await client.get(
-        f"{_REDDIT_BASE_URL}/r/{subreddit}/{sort}/.rss", params=params
+    response = await _get_with_retry(
+        client,
+        f"{_REDDIT_BASE_URL}/r/{subreddit}/{sort}/.rss",
+        params=params,
     )
-    response.raise_for_status()
     root = ElementTree.fromstring(response.content)
     posts: list[dict[str, Any]] = []
     for entry in root.findall("atom:entry", _ATOM_NS):
@@ -115,17 +187,32 @@ async def _fetch_rss_candidates(
 
 
 async def _fetch_candidates(subreddit: str, mode: str) -> list[dict[str, Any]]:
-    headers = {"User-Agent": app_settings.REDDIT_USER_AGENT}
+    sort = "top" if mode == "top" else "hot"
+    cache_key = (subreddit, sort)
+    cached = _CANDIDATE_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _CACHE_TTL_SECONDS:
+        return [dict(post) for post in cached[1]]
+
     async with httpx.AsyncClient(
-        headers=headers,
+        headers={"User-Agent": _USER_AGENT},
         timeout=_TIMEOUT,
         follow_redirects=True,
         transport=httpx.AsyncHTTPTransport(retries=2),
     ) as client:
-        token = await _get_oauth_token(client)
-        if token:
-            return await _fetch_json_candidates(client, subreddit, mode, token)
-        return await _fetch_rss_candidates(client, subreddit, mode)
+        try:
+            posts = await _fetch_html_candidates(client, subreddit, mode)
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning(
+                "Reddit HTML scrape failed for r/%s (%s), using RSS: %s",
+                subreddit,
+                mode,
+                exc,
+            )
+            posts = await _fetch_rss_candidates(client, subreddit, mode)
+
+    _CANDIDATE_CACHE[cache_key] = (now, tuple(dict(post) for post in posts))
+    return [dict(post) for post in posts]
 
 
 def _format_post(post: dict[str, Any], index: int) -> str:

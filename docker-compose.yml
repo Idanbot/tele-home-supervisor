@@ -1,7 +1,7 @@
 ---
 services:
   rpi_telebot:
-    image: ghcr.io/idanbot/tele-home-supervisor:latest
+    image: ${TELEBOT_IMAGE:-ghcr.io/idanbot/tele-home-supervisor:latest}
     container_name: rpi-telebot
     read_only: true
     cap_drop:
@@ -47,9 +47,6 @@ services:
       - TPB_COOKIE=${TPB_COOKIE:-}
       - TPB_REFERER=${TPB_REFERER:-}
       - TMDB_API_KEY=${TMDB_API_KEY:-}
-      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-}
-      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}
-      - REDDIT_USER_AGENT=${REDDIT_USER_AGENT:-tele-home-supervisor/0.1}
       - TMDB_BASE_URL=${TMDB_BASE_URL:-https://api.themoviedb.org/3}
       - TMDB_USER_AGENT=${TMDB_USER_AGENT:-}
       - BOT_AUTH_TTL_HOURS=${BOT_AUTH_TTL_HOURS:-168}
@@ -74,8 +71,8 @@ services:
       - NETWORK_INVENTORY_NMAP_ARGS=${NETWORK_INVENTORY_NMAP_ARGS:--T3,-F,--open}
 
     volumes:
-      - /srv/media:/srv/media:ro
-      - /sys/class/thermal/thermal_zone0:/host_thermal:ro
+      - ${MEDIA_PATH:-/srv/media}:/srv/media:ro
+      - ${THERMAL_PATH:-/sys/class/thermal/thermal_zone0}:/host_thermal:ro
       - telebot_data:/app/data
 
     logging:

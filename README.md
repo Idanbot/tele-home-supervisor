@@ -72,9 +72,6 @@ BOT_AUTH_TOTP_SECRET=<insert-base32-secret-here>
 OLLAMA_HOST=http://192.168.1.100:11434
 QBT_HOST=qbittorrent
 TMDB_API_KEY=your_tmdb_api_key
-REDDIT_CLIENT_ID=your_reddit_app_client_id
-REDDIT_CLIENT_SECRET=your_reddit_app_client_secret
-REDDIT_USER_AGENT=tele-home-supervisor/0.1 by your_reddit_username
 
 # Optional: Managed hosts/devices (recommended for /wol and /wolshutdown)
 DEFAULT_MANAGED_HOST=gaming-pc
@@ -109,12 +106,9 @@ docker compose up -d
 | `QBT_USER` | qBittorrent username. |
 | `QBT_PASS` | qBittorrent password. |
 | `TMDB_API_KEY` | API Key for Movie/TV metadata (The Movie Database). |
-| `REDDIT_CLIENT_ID` | Reddit app client ID. Recommended for reliable briefing access and vote/comment metadata. |
-| `REDDIT_CLIENT_SECRET` | Reddit app client secret. |
-| `REDDIT_USER_AGENT` | Descriptive Reddit API user agent containing your Reddit username. |
-
-Reddit credentials are optional. Without them, the briefing falls back to
-Reddit's public RSS feeds, where vote and comment counts may be unavailable.
+Reddit briefings scrape public old Reddit listings at low frequency and cache
+each subreddit/sort result for 30 minutes. No Reddit account or app credentials
+are required. Public RSS is used as a metadata-limited fallback.
 
 ### Customization
 | Variable | Default | Description |
@@ -125,6 +119,8 @@ Reddit's public RSS feeds, where vote and comment counts may be unavailable.
 | `DEFAULT_MANAGED_HOST` | `` | Default managed host/device name used by `/wol` and `/wolshutdown`. |
 | `MANAGED_HOSTS_JSON` | `` | JSON array of managed host/device objects with `name`, `ping_host`, `mac`, WOL, and SSH shutdown fields. |
 | `WATCH_PATHS` | `/` | Comma-separated paths to monitor for disk usage. |
+| `MEDIA_PATH` | `/srv/media` | Host media directory mounted read-only at `/srv/media`. |
+| `THERMAL_PATH` | `/sys/class/thermal/thermal_zone0` | Host thermal sensor path mounted read-only at `/host_thermal`. |
 | `SHOW_WAN` | `false` | Set to `true` to show public IP in `/health`. |
 | `LOG_LEVEL` | `DEBUG` | logging verbosity. |
 | `LOG_FORMAT` | `text` | set to `json` for structured logging. |

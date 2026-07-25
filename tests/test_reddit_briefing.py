@@ -31,6 +31,41 @@ def test_reddit_settings_normalizes_and_clamps() -> None:
     assert RedditBriefingSettings.from_dict(None).post_count == 3
 
 
+def test_old_reddit_parser_extracts_metadata_and_filters_unsafe_posts() -> None:
+    listing = """
+    <div class="thing link" data-fullname="t3_safe"
+         data-author="alice" data-subreddit="python" data-score="123"
+         data-comments-count="45" data-permalink="/r/python/comments/safe"
+         data-promoted="false" data-nsfw="false">
+      <div class="entry"><a class="title may-blank">Safe &amp; useful</a></div>
+    </div>
+    <div class="thing link stickied" data-fullname="t3_sticky"
+         data-author="mod" data-subreddit="python" data-score="1"
+         data-comments-count="2" data-permalink="/r/python/comments/sticky"
+         data-promoted="false" data-nsfw="false">
+      <a class="title">Pinned post</a>
+    </div>
+    <div class="thing link" data-fullname="t3_nsfw"
+         data-author="bob" data-subreddit="python"
+         data-permalink="/r/python/comments/nsfw"
+         data-promoted="false" data-nsfw="true">
+      <a class="title">Filtered post</a>
+    </div>
+    """
+
+    assert reddit_briefing._parse_old_reddit(listing) == [
+        {
+            "id": "safe",
+            "subreddit": "python",
+            "author": "alice",
+            "score": 123,
+            "num_comments": 45,
+            "permalink": "/r/python/comments/safe",
+            "title": "Safe & useful",
+        }
+    ]
+
+
 @pytest.mark.asyncio
 async def test_reddit_digest_formats_metadata(monkeypatch) -> None:
     settings = RedditBriefingSettings(
@@ -130,3 +165,45 @@ async def test_rss_fallback_parses_atom_safely() -> None:
         }
     ]
     assert "↑ n/a" in reddit_briefing._format_post(posts[0], 1)
+
+
+@pytest.mark.asyncio
+async def test_fetch_candidates_scrapes_and_caches(monkeypatch) -> None:
+    reddit_briefing._CANDIDATE_CACHE.clear()
+    scraped = [
+        {
+            "id": "one",
+            "title": "Scraped",
+            "subreddit": "python",
+            "author": "dev",
+            "score": 5,
+            "num_comments": 2,
+            "permalink": "/r/python/comments/one",
+        }
+    ]
+    scrape = AsyncMock(return_value=scraped)
+    rss = AsyncMock()
+    monkeypatch.setattr(reddit_briefing, "_fetch_html_candidates", scrape)
+    monkeypatch.setattr(reddit_briefing, "_fetch_rss_candidates", rss)
+
+    first = await reddit_briefing._fetch_candidates("python", "trending")
+    first[0]["title"] = "mutated"
+    second = await reddit_briefing._fetch_candidates("python", "trending")
+
+    assert second[0]["title"] == "Scraped"
+    scrape.assert_awaited_once()
+    rss.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_candidates_uses_rss_when_scrape_fails(monkeypatch) -> None:
+    reddit_briefing._CANDIDATE_CACHE.clear()
+    scrape = AsyncMock(side_effect=httpx.HTTPError("blocked"))
+    fallback = [{"id": "rss", "title": "Fallback"}]
+    rss = AsyncMock(return_value=fallback)
+    monkeypatch.setattr(reddit_briefing, "_fetch_html_candidates", scrape)
+    monkeypatch.setattr(reddit_briefing, "_fetch_rss_candidates", rss)
+
+    assert await reddit_briefing._fetch_candidates("python", "top") == fallback
+    scrape.assert_awaited_once()
+    rss.assert_awaited_once()

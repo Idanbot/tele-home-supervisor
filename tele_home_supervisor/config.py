@@ -267,13 +267,6 @@ def get_settings() -> Settings:
         os.environ.get("NETWORK_INVENTORY_NMAP_ARGS", "-T3,-F,--open")
     )
 
-    # Reddit
-    reddit_client_id = (os.environ.get("REDDIT_CLIENT_ID") or "").strip()
-    reddit_client_secret = (os.environ.get("REDDIT_CLIENT_SECRET") or "").strip()
-    reddit_user_agent = (
-        os.environ.get("REDDIT_USER_AGENT") or "tele-home-supervisor/0.1 by Idanbot"
-    ).strip()
-
     # TMDB
     tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
     tmdb_base_url = os.environ.get(
@@ -345,9 +338,6 @@ def get_settings() -> Settings:
         NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE=network_inventory_max_scans,
         NETWORK_INVENTORY_SCAN_TIMEOUT_S=network_inventory_scan_timeout_s,
         NETWORK_INVENTORY_NMAP_ARGS=network_inventory_nmap_args,
-        REDDIT_CLIENT_ID=reddit_client_id,
-        REDDIT_CLIENT_SECRET=reddit_client_secret,
-        REDDIT_USER_AGENT=reddit_user_agent,
         TMDB_API_KEY=tmdb_api_key,
         TMDB_BASE_URL=tmdb_base_url,
         TMDB_USER_AGENT=tmdb_user_agent,
