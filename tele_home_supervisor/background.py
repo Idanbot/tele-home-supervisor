@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from telegram.constants import ParseMode
 from telegram.ext import Application
 
-from . import alerting, intel, network_inventory
+from . import alerting, intel, network_inventory, release_monitor
 from . import scheduled as scheduled_fetchers
 from .config import settings
 from .models.torrent_snapshot import TorrentSnapshot
@@ -30,6 +30,7 @@ _TASK_ALERTS = "alerts_scheduler"
 _TASK_MEDIA_CLEANUP = "media_cleanup"
 _TASK_REMINDERS = "reminders_scheduler"
 _TASK_NETWORK_INVENTORY = "network_inventory_scheduler"
+_TASK_RELEASE_WATCHES = "release_watch_scheduler"
 
 _POLL_INTERVAL_S = 30.0
 _ALERT_POLL_INTERVAL_S = 60.0
@@ -76,6 +77,7 @@ async def cancel_tasks(state: BotState) -> None:
         _TASK_MEDIA_CLEANUP,
         _TASK_REMINDERS,
         _TASK_NETWORK_INVENTORY,
+        _TASK_RELEASE_WATCHES,
     ]
     for name in task_names:
         task = state.tasks.get(name)
@@ -140,6 +142,12 @@ def ensure_started(app: Application) -> None:
     ):
         state.tasks[_TASK_NETWORK_INVENTORY] = asyncio.create_task(
             _network_inventory_loop(app)
+        )
+
+    task = state.tasks.get(_TASK_RELEASE_WATCHES)
+    if not isinstance(task, asyncio.Task) or task.done():
+        state.tasks[_TASK_RELEASE_WATCHES] = asyncio.create_task(
+            _release_watch_scheduler(app)
         )
 
 
@@ -477,6 +485,68 @@ async def _intel_briefing_scheduler(app: Application) -> None:
             logger.exception("Intel Briefing scheduler error")
             await _interruptible_sleep(3600)
     logger.info("Intel Briefing scheduler stopped")
+
+
+async def check_release_watches(app: Application, *, chat_id: int | None = None) -> int:
+    """Check active watches and disable each one after a successful notification."""
+    state = _get_state(app)
+    watches = state.get_release_watches(chat_id, enabled_only=True)
+    triggered = 0
+
+    for watch in watches:
+        checked_at = time.time()
+        try:
+            match = await release_monitor.check_watch(watch)
+            if match is None:
+                state.mark_release_watch_checked(watch.id, checked_at)
+                continue
+
+            message = release_monitor.format_match(watch, match)
+            await app.bot.send_message(
+                chat_id=watch.chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            state.mark_release_watch_checked(
+                watch.id,
+                checked_at,
+                matched_name=str(match.get("name") or watch.query),
+            )
+            triggered += 1
+        except Exception:
+            logger.exception("Release watch %s check failed", watch.id)
+
+    return triggered
+
+
+async def _release_watch_scheduler(app: Application) -> None:
+    """Run persisted release watches daily at 9 AM Israel time."""
+    logger.info("Starting release watch scheduler (9 AM Israel time)")
+
+    while not _shutdown_requested:
+        try:
+            wait_seconds = _seconds_until_time(9, 0)
+            if await _interruptible_sleep(wait_seconds):
+                break
+
+            state = _get_state(app)
+            now = time.time()
+            if (now - state.last_release_watch_run) < (22 * 3600):
+                await _interruptible_sleep(300)
+                continue
+
+            await check_release_watches(app)
+            state.last_release_watch_run = now
+            state.save(force=True)
+            await _interruptible_sleep(120)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Release watch scheduler error")
+            await _interruptible_sleep(3600)
+
+    logger.info("Release watch scheduler stopped")
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import httpx
 from . import scheduled as scheduled_fetchers
 from . import utils
 from .models.bot_state import BotState
+from .reddit_briefing import get_reddit_digest
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ INTEL_MODULES = [
     ("news", "📰 Hacker News"),
     ("system", "🖥️ System Health"),
     ("quote", "🏛️ Stoic Quote"),
+    ("reddit", "👽 Reddit Radar"),
 ]
 
 _WEATHER_TIMEOUT = httpx.Timeout(12.0, connect=3.5)
@@ -185,6 +187,9 @@ async def build_intel_briefing(
 
     if "quote" not in disabled:
         tasks.append(get_stoic_quote())
+
+    if "reddit" not in disabled and state is not None and chat_id is not None:
+        tasks.append(get_reddit_digest(state.get_reddit_settings(chat_id)))
 
     if not tasks:
         return (

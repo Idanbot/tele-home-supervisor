@@ -129,6 +129,31 @@ async def test_intel_toggle_and_briefing(monkeypatch):
     query.answer.assert_awaited_once()
     query.edit_message_reply_markup.assert_awaited_once()
 
+
+@pytest.mark.asyncio
+async def test_reddit_settings_commands(monkeypatch, tmp_path):
+    monkeypatch.setattr(notifications, "guard", allow_guard)
+    update = DummyUpdate(chat_id=1, user_id=1)
+    context = DummyContext(args=["add", "r/linux"])
+    state = notifications.BotState()
+    state._state_file = tmp_path / "state.json"
+    context.application.bot_data[notifications.BOT_STATE_KEY] = state
+
+    await notifications.cmd_reddit_settings(update, context)
+    context.args = ["count", "5"]
+    await notifications.cmd_reddit_settings(update, context)
+    context.args = ["mode", "random"]
+    await notifications.cmd_reddit_settings(update, context)
+    context.args = ["group", "fun", "off"]
+    await notifications.cmd_reddit_settings(update, context)
+
+    settings = state.get_reddit_settings(1)
+    assert settings.custom_subreddits == {"linux"}
+    assert settings.post_count == 5
+    assert settings.mode == "random"
+    assert "fun" not in settings.enabled_groups
+    assert "Reddit Briefing Settings" in update.message.replies[-1]
+
     monkeypatch.setattr(
         notifications.intel,
         "build_intel_briefing",

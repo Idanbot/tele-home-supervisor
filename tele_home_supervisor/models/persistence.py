@@ -26,6 +26,8 @@ from .network_inventory import (
     NetworkInventoryScanSummary,
     NetworkService,
 )
+from .reddit_settings import RedditBriefingSettings
+from .release_watch import ReleaseWatch
 
 if TYPE_CHECKING:
     from .bot_state import BotState
@@ -41,6 +43,11 @@ def serialize(state: BotState) -> dict:
         "disabled_intel_modules": {
             str(k): list(v) for k, v in state.disabled_intel_modules.items()
         },
+        "reddit_briefing_settings": {
+            str(chat_id): settings.to_dict()
+            for chat_id, settings in state.reddit_briefing_settings.items()
+        },
+        "release_watches": [watch.to_dict() for watch in state.release_watches],
         "torrent_completion_subscribers": list(state.torrent_completion_subscribers),
         "alerts_enabled": list(state.alerts_enabled),
         "alert_rules": [
@@ -71,6 +78,7 @@ def serialize(state: BotState) -> dict:
         "reminders": state.reminders,
         "last_game_offers_run": state.last_game_offers_run,
         "last_intel_briefing_run": state.last_intel_briefing_run,
+        "last_release_watch_run": state.last_release_watch_run,
     }
 
 
@@ -103,6 +111,23 @@ def load(state: BotState, path: Path) -> None:
             except TypeError, ValueError:
                 continue
 
+        state.reddit_briefing_settings = {}
+        raw_reddit_settings = data.get("reddit_briefing_settings") or {}
+        if isinstance(raw_reddit_settings, dict):
+            for chat_id, raw_settings in raw_reddit_settings.items():
+                try:
+                    state.reddit_briefing_settings[int(chat_id)] = (
+                        RedditBriefingSettings.from_dict(raw_settings)
+                    )
+                except TypeError, ValueError:
+                    continue
+
+        state.release_watches = []
+        for raw_watch in data.get("release_watches") or []:
+            watch = ReleaseWatch.from_dict(raw_watch)
+            if watch is not None:
+                state.release_watches.append(watch)
+
         state.torrent_completion_subscribers = set(
             data.get("torrent_completion_subscribers", [])
         )
@@ -120,6 +145,7 @@ def load(state: BotState, path: Path) -> None:
         state.last_intel_briefing_run = float(
             data.get("last_intel_briefing_run") or 0.0
         )
+        state.last_release_watch_run = float(data.get("last_release_watch_run") or 0.0)
 
         # Legacy fallback for high-frequency caches if they were in the main file
         if "audit_log" in data:
