@@ -180,9 +180,16 @@ class TestBotStatePersistence:
             state.grant_auth(100, time.time() + 3600)
             state.block_user(200)
             state.record_failed_auth(300, now=time.time())
+            state.set_reddit_group(123, "fun", False)
+            state.add_reddit_subreddit(123, "r/linux")
+            state.set_reddit_post_count(123, 5)
+            state.set_reddit_mode(123, "top")
+            watch = state.add_release_watch(123, "movie", "Dune Part Two", "1080p")
+            assert watch is not None
+            state.last_release_watch_run = 42.0
 
             # Save
-            state.save()
+            state.save(force=True)
 
             # Create new state and load
             state2 = BotState()
@@ -199,6 +206,33 @@ class TestBotStatePersistence:
             assert 100 in state2.auth_records
             assert 200 in state2.blocked_ids
             assert state2.auth_failures.get(300) == 1
+            reddit = state2.get_reddit_settings(123)
+            assert "fun" not in reddit.enabled_groups
+            assert reddit.custom_subreddits == {"linux"}
+            assert reddit.post_count == 5
+            assert reddit.mode == "top"
+            assert state2.release_watches[0].query == "Dune Part Two"
+            assert state2.last_release_watch_run == 42.0
+
+    def test_reddit_and_release_watch_mutators(self, tmp_path) -> None:
+        state = BotState()
+        state._state_file = tmp_path / "state.json"
+
+        assert state.set_reddit_group(1, "unknown", True) is False
+        assert state.add_reddit_subreddit(1, "bad/name") is None
+        assert state.remove_reddit_subreddit(1, "python") is False
+        assert state.set_reddit_post_count(1, 0) is False
+        assert state.set_reddit_mode(1, "invalid") is False
+        assert state.add_release_watch(1, "movie", "No quality") is None
+
+        watch = state.add_release_watch(1, "game", "Hades II")
+        assert watch is not None
+        assert state.set_release_watch_enabled(1, watch.id, False) is True
+        assert state.set_release_watch_enabled(1, watch.id, True) is True
+        state.mark_release_watch_checked(watch.id, 10.0, "Hades II PC")
+        assert watch.enabled is False
+        assert watch.triggered_at == 10.0
+        assert state.remove_release_watch(1, watch.id) is True
 
     def test_save_and_load_preserves_auth_record_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -192,12 +192,14 @@ async def test_build_intel_briefing_filtering():
         patch("tele_home_supervisor.intel.get_news", return_value="NEWS"),
         patch("tele_home_supervisor.intel.get_system_health", return_value="SYSTEM"),
         patch("tele_home_supervisor.intel.get_stoic_quote", return_value="QUOTE"),
+        patch("tele_home_supervisor.intel.get_reddit_digest", return_value="REDDIT"),
     ):
         intel_msg = await intel.build_intel_briefing(chat_id, state)
 
         assert "GREETING" in intel_msg
         assert "SYSTEM" in intel_msg
         assert "QUOTE" in intel_msg
+        assert "REDDIT" in intel_msg
         assert "WEATHER" not in intel_msg
         assert "NEWS" not in intel_msg
 

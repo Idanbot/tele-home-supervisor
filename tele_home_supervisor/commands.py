@@ -390,6 +390,20 @@ _NOTIFICATIONS_COMMANDS = (
         "fetch Intel Briefing on demand",
         "cmd_intel_briefing",
     ),
+    CommandSpec(
+        "reddit_settings",
+        "Notifications",
+        "/reddit_settings [group|add|remove|count|mode]",
+        "configure Reddit posts in the Intel Briefing",
+        "cmd_reddit_settings",
+    ),
+    CommandSpec(
+        "releasewatch",
+        "Notifications",
+        "/releasewatch [add|remove|enable|check]",
+        "manage daily one-shot movie, episode, and PC game watches",
+        "cmd_releasewatch",
+    ),
 )
 
 _MEDIA_COMMANDS = (

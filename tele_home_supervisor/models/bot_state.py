@@ -20,6 +20,13 @@ from .debug import DebugEntry, DebugRecorder
 from .magnet import MagnetEntry
 from .metrics import CommandMetrics
 from .network_inventory import NetworkDeviceScan, NetworkInventoryScanSummary
+from .reddit_settings import (
+    REDDIT_GROUPS,
+    REDDIT_MODES,
+    RedditBriefingSettings,
+    normalize_subreddit,
+)
+from .release_watch import VIDEO_QUALITIES, WATCH_KINDS, ReleaseWatch
 from .tmdb_cache import TmdbCacheEntry
 
 logger = logging.getLogger(__name__)
@@ -60,6 +67,12 @@ class BotState:
 
     # Intel Briefing module settings (chat_id -> set of disabled module IDs)
     disabled_intel_modules: dict[int, set[str]] = field(default_factory=dict)
+    reddit_briefing_settings: dict[int, RedditBriefingSettings] = field(
+        default_factory=dict
+    )
+
+    # Persisted one-shot release availability watches
+    release_watches: list[ReleaseWatch] = field(default_factory=list)
 
     # Alerts (per-chat)
     alerts_enabled: set[int] = field(default_factory=set)
@@ -108,6 +121,7 @@ class BotState:
     # Persistence of last run times for scheduled tasks
     last_game_offers_run: float = 0.0
     last_intel_briefing_run: float = 0.0
+    last_release_watch_run: float = 0.0
 
     # Heartbeat for container health checks
     last_heartbeat: float = field(default_factory=time.time)
@@ -842,6 +856,138 @@ class BotState:
             self.save()
             return True
         return False
+
+    def get_reddit_settings(self, chat_id: int) -> RedditBriefingSettings:
+        return self.reddit_briefing_settings.setdefault(
+            chat_id, RedditBriefingSettings()
+        )
+
+    def set_reddit_group(self, chat_id: int, group: str, enabled: bool) -> bool:
+        group = group.lower()
+        if group not in REDDIT_GROUPS:
+            return False
+        settings = self.get_reddit_settings(chat_id)
+        if enabled:
+            settings.enabled_groups.add(group)
+        else:
+            settings.enabled_groups.discard(group)
+        self.save(force=True)
+        return True
+
+    def add_reddit_subreddit(self, chat_id: int, value: str) -> str | None:
+        subreddit = normalize_subreddit(value)
+        if subreddit is None:
+            return None
+        self.get_reddit_settings(chat_id).custom_subreddits.add(subreddit)
+        self.save(force=True)
+        return subreddit
+
+    def remove_reddit_subreddit(self, chat_id: int, value: str) -> bool:
+        subreddit = normalize_subreddit(value)
+        if subreddit is None:
+            return False
+        settings = self.get_reddit_settings(chat_id)
+        if subreddit not in settings.custom_subreddits:
+            return False
+        settings.custom_subreddits.remove(subreddit)
+        self.save(force=True)
+        return True
+
+    def set_reddit_post_count(self, chat_id: int, count: int) -> bool:
+        if count < 1 or count > 5:
+            return False
+        self.get_reddit_settings(chat_id).post_count = count
+        self.save(force=True)
+        return True
+
+    def set_reddit_mode(self, chat_id: int, mode: str) -> bool:
+        mode = mode.lower()
+        if mode not in REDDIT_MODES:
+            return False
+        self.get_reddit_settings(chat_id).mode = mode
+        self.save(force=True)
+        return True
+
+    def add_release_watch(
+        self,
+        chat_id: int,
+        kind: str,
+        query: str,
+        min_quality: str | None = None,
+    ) -> ReleaseWatch | None:
+        kind = kind.lower()
+        query = query.strip()
+        quality = min_quality.lower() if min_quality else None
+        if (
+            kind not in WATCH_KINDS
+            or not query
+            or (kind != "game" and quality not in VIDEO_QUALITIES)
+        ):
+            return None
+        watch = ReleaseWatch(
+            id=secrets.token_hex(3),
+            chat_id=chat_id,
+            kind=kind,
+            query=query,
+            min_quality=quality if kind != "game" else None,
+            enabled=True,
+            created_at=time.time(),
+        )
+        self.release_watches.append(watch)
+        self.save(force=True)
+        return watch
+
+    def get_release_watches(
+        self, chat_id: int | None = None, *, enabled_only: bool = False
+    ) -> list[ReleaseWatch]:
+        return [
+            watch
+            for watch in self.release_watches
+            if (chat_id is None or watch.chat_id == chat_id)
+            and (not enabled_only or watch.enabled)
+        ]
+
+    def remove_release_watch(self, chat_id: int, watch_id: str) -> bool:
+        initial_len = len(self.release_watches)
+        self.release_watches = [
+            watch
+            for watch in self.release_watches
+            if not (watch.chat_id == chat_id and watch.id == watch_id)
+        ]
+        if len(self.release_watches) == initial_len:
+            return False
+        self.save(force=True)
+        return True
+
+    def set_release_watch_enabled(
+        self, chat_id: int, watch_id: str, enabled: bool
+    ) -> bool:
+        for watch in self.release_watches:
+            if watch.chat_id == chat_id and watch.id == watch_id:
+                watch.enabled = enabled
+                if enabled:
+                    watch.triggered_at = 0.0
+                    watch.matched_name = None
+                self.save(force=True)
+                return True
+        return False
+
+    def mark_release_watch_checked(
+        self,
+        watch_id: str,
+        checked_at: float,
+        matched_name: str | None = None,
+    ) -> None:
+        for watch in self.release_watches:
+            if watch.id != watch_id:
+                continue
+            watch.last_checked_at = checked_at
+            if matched_name:
+                watch.enabled = False
+                watch.triggered_at = checked_at
+                watch.matched_name = matched_name
+            self.save(force=True)
+            return
 
     def pop_due_reminders(self) -> list[dict]:
         now = time.time()

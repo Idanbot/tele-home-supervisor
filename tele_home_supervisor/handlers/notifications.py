@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 
 from .. import intel
 from .. import scheduled as scheduled_fetchers
+from ..models.reddit_settings import REDDIT_GROUPS, REDDIT_MODES
 from ..state import BOT_STATE_KEY, BotState
 from .common import guard, tracked_reply_photo
 
@@ -397,3 +398,73 @@ async def cmd_intel_briefing(
     except Exception as e:
         logger.exception("Intel Briefing fetch failed")
         await msg.edit_text(f"❌ Error: {html.escape(str(e))}")
+
+
+def _reddit_settings_text(state: BotState, chat_id: int) -> str:
+    settings = state.get_reddit_settings(chat_id)
+    groups = ", ".join(
+        f"{name}={'on' if name in settings.enabled_groups else 'off'}"
+        for name in REDDIT_GROUPS
+    )
+    custom = (
+        ", ".join(f"r/{name}" for name in sorted(settings.custom_subreddits)) or "none"
+    )
+    return (
+        "👽 <b>Reddit Briefing Settings</b>\n"
+        f"<b>Groups:</b> {groups}\n"
+        f"<b>Custom:</b> {custom}\n"
+        f"<b>Posts:</b> {settings.post_count}\n"
+        f"<b>Mode:</b> {settings.mode}\n\n"
+        "<code>/reddit_settings group fun|tech|devops on|off</code>\n"
+        "<code>/reddit_settings add r/subreddit</code>\n"
+        "<code>/reddit_settings remove r/subreddit</code>\n"
+        "<code>/reddit_settings count 1-5</code>\n"
+        "<code>/reddit_settings mode mixed|top|trending|random</code>"
+    )
+
+
+async def cmd_reddit_settings(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Show or update per-chat Reddit briefing preferences."""
+    if not await guard(update, context):
+        return
+
+    state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    chat_id = update.effective_chat.id
+    args = context.args
+    error: str | None = None
+
+    if args:
+        action = args[0].lower()
+        if action == "group" and len(args) == 3:
+            enabled = args[2].lower() == "on"
+            if args[2].lower() not in {"on", "off"} or not state.set_reddit_group(
+                chat_id, args[1], enabled
+            ):
+                error = "Unknown group or state."
+        elif action == "add" and len(args) == 2:
+            if state.add_reddit_subreddit(chat_id, args[1]) is None:
+                error = "Invalid subreddit name."
+        elif action == "remove" and len(args) == 2:
+            if not state.remove_reddit_subreddit(chat_id, args[1]):
+                error = "Custom subreddit was not found."
+        elif action == "count" and len(args) == 2:
+            try:
+                valid = state.set_reddit_post_count(chat_id, int(args[1]))
+            except ValueError:
+                valid = False
+            if not valid:
+                error = "Post count must be between 1 and 5."
+        elif action == "mode" and len(args) == 2:
+            if args[1].lower() not in REDDIT_MODES or not state.set_reddit_mode(
+                chat_id, args[1]
+            ):
+                error = "Mode must be mixed, top, trending, or random."
+        else:
+            error = "Invalid Reddit settings command."
+
+    text = _reddit_settings_text(state, chat_id)
+    if error:
+        text = f"❌ {html.escape(error)}\n\n{text}"
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)

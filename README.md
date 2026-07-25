@@ -15,11 +15,11 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 
 ### 🖥️ System & Network
 *   **Real-time Monitoring**: Visual bars for CPU, RAM, and Disk usage (`/health`, `/diskusage`).
-*   **Network Tools**: Ping, DNS lookup, Traceroute, and Speedtest (`/speedtest`).
+*   **Network Tools**: Ping, DNS lookup, Traceroute, Speedtest, and persisted nmap inventory scans (`/netinventory`).
 *   **Wake-on-LAN**: Wake named managed devices and track power-up/status directly from the bot.
 *   **Guest WiFi**: Generate QR codes for instant WiFi access (`/wifiqr`).
 *   **Utilities**: Set async reminders (`/remind`), check uptime, and view top processes.
-*   **Intel Briefing**: Daily 8 AM summary of weather, news, system health, and stoic wisdom.
+*   **Intel Briefing**: Daily 8 AM summary of weather, news, system health, stoic wisdom, and configurable Reddit posts.
 *   **Alerts**: Threshold-based notifications with per-chat rules (`/alerts`).
 *   **Audit Log**: Recent command/callback history (`/audit`).
 
@@ -31,6 +31,7 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 ### 🎬 Media & Torrents
 *   **Torrent Manager**: Full qBittorrent control (Add, Pause, Delete) with completion notifications.
 *   **Discovery**: Search torrent providers (`/pbsearch`) or check trending movies/shows on TMDB.
+*   **Release Watches**: Daily one-shot checks for movies, TV episodes, and PC games, with minimum video-quality filters.
 *   **Gaming**: Check Linux/Steam Deck compatibility via ProtonDB (`/protondb`) and track free game giveaways (Epic, Steam, GOG).
 
 ### 🧠 Local AI Integration
@@ -71,6 +72,9 @@ BOT_AUTH_TOTP_SECRET=<insert-base32-secret-here>
 OLLAMA_HOST=http://192.168.1.100:11434
 QBT_HOST=qbittorrent
 TMDB_API_KEY=your_tmdb_api_key
+REDDIT_CLIENT_ID=your_reddit_app_client_id
+REDDIT_CLIENT_SECRET=your_reddit_app_client_secret
+REDDIT_USER_AGENT=tele-home-supervisor/0.1 by your_reddit_username
 
 # Optional: Managed hosts/devices (recommended for /wol and /wolshutdown)
 DEFAULT_MANAGED_HOST=gaming-pc
@@ -105,6 +109,12 @@ docker compose up -d
 | `QBT_USER` | qBittorrent username. |
 | `QBT_PASS` | qBittorrent password. |
 | `TMDB_API_KEY` | API Key for Movie/TV metadata (The Movie Database). |
+| `REDDIT_CLIENT_ID` | Reddit app client ID. Recommended for reliable briefing access and vote/comment metadata. |
+| `REDDIT_CLIENT_SECRET` | Reddit app client secret. |
+| `REDDIT_USER_AGENT` | Descriptive Reddit API user agent containing your Reddit username. |
+
+Reddit credentials are optional. Without them, the briefing falls back to
+Reddit's public RSS feeds, where vote and comment counts may be unavailable.
 
 ### Customization
 | Variable | Default | Description |
@@ -177,6 +187,7 @@ docker compose up -d
 | `/wifiqr &lt;ssid&gt; [password]` | generate WiFi QR code |
 | `/wol [host|mac|ip]` | send Wake-on-LAN packet and watch for ping response |
 | `/wolshutdown [host|ip]` | run configured remote shutdown and watch for ping failure |
+| `/netinventory [history [ip]]` | show the latest LAN inventory or retained scan history |
 
 ### Torrents
 
@@ -209,6 +220,23 @@ docker compose up -d
 | `/humblefree` | show current Humble Bundle free games |
 | `/intel_settings` | Intel Briefing module settings |
 | `/intel_briefing` | fetch Intel Briefing on demand |
+| `/reddit_settings` | show Reddit briefing groups, custom subreddits, count, and mode |
+| `/reddit_settings group fun\|tech\|devops on\|off` | enable or disable a built-in subreddit group |
+| `/reddit_settings add r/subreddit` | add a custom subreddit |
+| `/reddit_settings remove r/subreddit` | remove a custom subreddit |
+| `/reddit_settings count 1-5` | set the total number of Reddit posts |
+| `/reddit_settings mode mixed\|top\|trending\|random` | choose Reddit post selection mode |
+| `/releasewatch add movie 1080p &lt;title&gt;` | watch for a movie at the selected quality or above |
+| `/releasewatch add episode 720p &lt;show S01E01&gt;` | watch for a TV episode at the selected quality or above |
+| `/releasewatch add game &lt;title&gt;` | watch for a PC game release |
+| `/releasewatch remove &lt;id&gt;` | remove a release watch |
+| `/releasewatch enable &lt;id&gt;` | reactivate a disabled one-shot watch |
+| `/releasewatch check` | run this chat's active release watches immediately |
+
+Release watches run daily at 9 AM Israel time. A matching watch is disabled only
+after its Telegram notification is delivered successfully. Reddit settings,
+release watches, check timestamps, and trigger results persist in the bot state
+file under the mounted `./data` directory.
 
 ### Media
 

@@ -11,6 +11,7 @@ from . import (
     meta,
     network,
     notifications,
+    release_watches,
     system,
     torrents,
 )
@@ -84,6 +85,10 @@ cmd_gogfree_now = rate_limit(notifications.cmd_gogfree_now, name="gogfree")
 cmd_humblefree_now = rate_limit(notifications.cmd_humblefree_now, name="humblefree")
 cmd_intel_settings = rate_limit(notifications.cmd_intel_settings, name="intel_settings")
 cmd_intel_briefing = rate_limit(notifications.cmd_intel_briefing, name="intel_briefing")
+cmd_reddit_settings = rate_limit(
+    notifications.cmd_reddit_settings, name="reddit_settings"
+)
+cmd_releasewatch = rate_limit(release_watches.cmd_releasewatch, name="releasewatch")
 cmd_alerts = rate_limit(alerts.cmd_alerts, name="alerts")
 
 # AI
