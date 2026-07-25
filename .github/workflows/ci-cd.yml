@@ -213,8 +213,8 @@ jobs:
             print('Compose migration reload OK')
         run: |
           set -euo pipefail
-          mkdir -p "$MEDIA_PATH"
-          printf '42000\n' > "$THERMAL_PATH"
+          mkdir -p "$MEDIA_PATH" "$THERMAL_PATH"
+          printf '42000\n' > "$THERMAL_PATH/temp"
           network_created=false
           if ! docker network inspect bit-net >/dev/null 2>&1; then
             docker network create bit-net >/dev/null
