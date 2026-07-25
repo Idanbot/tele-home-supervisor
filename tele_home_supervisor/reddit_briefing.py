@@ -125,7 +125,11 @@ async def _get_with_retry(
             response = await client.get(url, params=params)
             response.raise_for_status()
             return response
-        except httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError:
+        except (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.HTTPStatusError,
+        ):
             if attempt == 2:
                 raise
             await asyncio.sleep(0.5 * (attempt + 1))
