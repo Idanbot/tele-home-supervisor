@@ -106,9 +106,15 @@ docker compose up -d
 | `QBT_USER` | qBittorrent username. |
 | `QBT_PASS` | qBittorrent password. |
 | `TMDB_API_KEY` | API Key for Movie/TV metadata (The Movie Database). |
+
 Reddit briefings scrape public old Reddit listings at low frequency and cache
 each subreddit/sort result for 30 minutes. No Reddit account or app credentials
 are required. Public RSS is used as a metadata-limited fallback.
+
+Built-in briefing groups are `fun` (`funny`, `memes`, `videos`), `tech`
+(`programming`, `technology`), and `devops` (`devops`, `cloudcomputing`,
+`artificial`). They and the `/reddit_fetch` curated picker are defined in
+`tele_home_supervisor/models/reddit_settings.py`.
 
 ### Customization
 | Variable | Default | Description |
@@ -150,11 +156,11 @@ unchanged as rollback copies.
 | `/start` | show help |
 | `/help` | this menu |
 | `/whoami` | show chat and user info |
-| `/auth &lt;code&gt;` | authorize sensitive commands for 7 days |
+| `/auth <code>` | authorize sensitive commands for 7 days |
 | `/check_auth` | check auth status and time remaining |
 | `/auth_file` | show all persisted authenticated user IDs and expiry |
-| `/ban &lt;user_id&gt;` | owner-only persistent block for a user ID |
-| `/unban &lt;user_id&gt;` | owner-only remove a user ID from persistent blocks |
+| `/ban <user_id>` | owner-only persistent block for a user ID |
+| `/unban <user_id>` | owner-only remove a user ID from persistent blocks |
 | `/banlist` | owner-only view aggregated blocked user IDs |
 | `/version` | bot version and build info |
 | `/metrics` | command metrics summary |
@@ -171,7 +177,7 @@ unchanged as rollback copies.
 | `/temp` | CPU temperature (reads /host_thermal/temp) |
 | `/top` | top CPU processes |
 | `/diskusage` | visual disk usage bars |
-| `/remind &lt;minutes&gt; &lt;msg&gt;` | set a reminder timer |
+| `/remind <minutes> <msg>` | set a reminder timer |
 | `/cleanup` | delete all tracked media messages now |
 
 ### Docker
@@ -179,22 +185,22 @@ unchanged as rollback copies.
 | Command | Description |
 | :--- | :--- |
 | `/docker` | list containers, status, ports |
-| `/dinspect &lt;container&gt;` | inspect container (JSON, file if large) |
+| `/dinspect <container>` | inspect container (JSON, file if large) |
 | `/dockerstats` | CPU/MEM per running container |
 | `/dstatsrich` | detailed Docker stats (net/block IO) |
-| `/dlogs &lt;container&gt; [page] [--since &lt;time&gt;] [--file]` | container logs (default sends file; use page for pagination) |
-| `/dhealth &lt;container&gt;` | container health check |
+| `/dlogs <container> [page] [--since <time>] [--file]` | container logs (default sends file; use page for pagination) |
+| `/dhealth <container>` | container health check |
 
 ### Network
 
 | Command | Description |
 | :--- | :--- |
-| `/ping &lt;ip&gt; [count]` | ping an IP or hostname |
+| `/ping <ip> [count]` | ping an IP or hostname |
 | `/ports` | listening ports (inside container) |
-| `/dns &lt;name&gt;` | DNS lookup |
-| `/traceroute &lt;host&gt; [max_hops]` | trace network route |
+| `/dns <name>` | DNS lookup |
+| `/traceroute <host> [max_hops]` | trace network route |
 | `/speedtest [MB]` | quick download speed test |
-| `/wifiqr &lt;ssid&gt; [password]` | generate WiFi QR code |
+| `/wifiqr <ssid> [password]` | generate WiFi QR code |
 | `/wol [host|mac|ip]` | send Wake-on-LAN packet and watch for ping response |
 | `/wolshutdown [host|ip]` | run configured remote shutdown and watch for ping failure |
 | `/netinventory [history [ip]]` | show the latest LAN inventory or retained scan history |
@@ -203,17 +209,17 @@ unchanged as rollback copies.
 
 | Command | Description |
 | :--- | :--- |
-| `/tadd &lt;torrent&gt; [save_path]` | add torrent (magnet/URL) |
+| `/tadd <torrent> [save_path]` | add torrent (magnet/URL) |
 | `/tstatus` | show torrent status |
-| `/tstop &lt;torrent&gt;` | pause torrent(s) by name |
-| `/tstart &lt;torrent&gt;` | resume torrent(s) by name |
-| `/tdelete &lt;torrent&gt; yes` | delete torrent(s) and files |
+| `/tstop <torrent>` | pause torrent(s) by name |
+| `/tstart <torrent>` | resume torrent(s) by name |
+| `/tdelete <torrent> yes` | delete torrent(s) and files |
 | `/tclean yes` | remove torrents with missing files |
 | `/subscribe [on|off|status]` | torrent completion notifications |
 | `/pbtop [category]` | top Pirate Bay torrents (audio, video, apps, games, porn, other) |
-| `/pbsearch &lt;query&gt;` | search Pirate Bay torrents |
+| `/pbsearch <query>` | search Pirate Bay torrents |
 | `/pbprovider [provider]` | show or set forced torrent provider |
-| `/pbtoggle &lt;provider&gt;` | toggle torrent provider on/off |
+| `/pbtoggle <provider>` | toggle torrent provider on/off |
 
 ### Notifications
 
@@ -236,11 +242,12 @@ unchanged as rollback copies.
 | `/reddit_settings remove r/subreddit` | remove a custom subreddit |
 | `/reddit_settings count 1-5` | set the total number of Reddit posts |
 | `/reddit_settings mode mixed\|top\|trending\|random` | choose Reddit post selection mode |
-| `/releasewatch add movie 1080p &lt;title&gt;` | watch for a movie at the selected quality or above |
-| `/releasewatch add episode 720p &lt;show S01E01&gt;` | watch for a TV episode at the selected quality or above |
-| `/releasewatch add game &lt;title&gt;` | watch for a PC game release |
-| `/releasewatch remove &lt;id&gt;` | remove a release watch |
-| `/releasewatch enable &lt;id&gt;` | reactivate a disabled one-shot watch |
+| `/reddit_fetch <subreddit> [trending\|random\|top]` | fetch one Reddit photo, video, or text post; no arguments opens the curated picker |
+| `/releasewatch add movie 1080p <title>` | watch for a movie at the selected quality or above |
+| `/releasewatch add episode 720p <show S01E01>` | watch for a TV episode at the selected quality or above |
+| `/releasewatch add game <title>` | watch for a PC game release |
+| `/releasewatch remove <id>` | remove a release watch |
+| `/releasewatch enable <id>` | reactivate a disabled one-shot watch |
 | `/releasewatch check` | run this chat's active release watches immediately |
 
 Release watches run daily at 9 AM Israel time. A matching watch is disabled only
@@ -255,21 +262,21 @@ the `telebot_data` Docker volume.
 | `/movies` | TMDB trending movies |
 | `/shows` | TMDB trending shows |
 | `/incinema` | TMDB in cinemas now |
-| `/tmdb &lt;query&gt;` | TMDB search (movies + shows) |
-| `/protondb &lt;game&gt;` | ProtonDB Linux/Steam Deck compatibility |
+| `/tmdb <query>` | TMDB search (movies + shows) |
+| `/protondb <game>` | ProtonDB Linux/Steam Deck compatibility |
 
 ### AI
 
 | Command | Description |
 | :--- | :--- |
-| `/ask &lt;question&gt;` | ask a question, flags: --temp|-t 0.4 --top-k|-k 40 --top-p|-p 0.9 --num-predict|-n 640 |
+| `/ask <question>` | ask a question, flags: --temp|-t 0.4 --top-k|-k 40 --top-p|-p 0.9 --num-predict|-n 640 |
 | `/askreset` | reset custom AI generation parameters |
-| `/ollamahost &lt;http://host:port&gt;` | set Ollama host target |
-| `/ollamamodel &lt;model&gt;` | set Ollama model |
+| `/ollamahost <http://host:port>` | set Ollama host target |
+| `/ollamamodel <model>` | set Ollama model |
 | `/ollamareset` | reset Ollama host/model overrides |
 | `/ollamashow` | show current Ollama host/model |
 | `/ollamalist` | list available Ollama models |
-| `/ollamapull &lt;model&gt;` | download an Ollama model |
+| `/ollamapull <model>` | download an Ollama model |
 | `/ollamastatus` | show current Ollama download status |
 | `/ollamacancel` | cancel current Ollama download |
 

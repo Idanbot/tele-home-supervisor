@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 from defusedxml import ElementTree
 
-from .models.reddit_settings import RedditBriefingSettings
+from .models.reddit_settings import RedditBriefingSettings, normalize_subreddit
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,9 @@ _TIMEOUT = httpx.Timeout(10.0, connect=3.5)
 _CACHE_TTL_SECONDS = 30 * 60
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 _CANDIDATE_CACHE: dict[tuple[str, str], tuple[float, tuple[dict[str, Any], ...]]] = {}
+REDDIT_FETCH_MODES = {"top", "trending", "random"}
+_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
+_VIDEO_SUFFIXES = (".mp4", ".webm", ".mov")
 
 
 class _OldRedditParser(HTMLParser):
@@ -38,6 +41,8 @@ class _OldRedditParser(HTMLParser):
         self._post_depth = 0
         self._capture_title = False
         self._title_parts: list[str] = []
+        self._body_container_depth: int | None = None
+        self._body_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = {key: value or "" for key, value in attrs}
@@ -51,6 +56,8 @@ class _OldRedditParser(HTMLParser):
                 "score": _parse_int(attributes.get("data-score")),
                 "num_comments": _parse_int(attributes.get("data-comments-count")),
                 "permalink": attributes.get("data-permalink", ""),
+                "url": attributes.get("data-url", ""),
+                "domain": attributes.get("data-domain", ""),
                 "_skip": (
                     "stickied" in classes
                     or attributes.get("data-promoted") == "true"
@@ -64,13 +71,25 @@ class _OldRedditParser(HTMLParser):
             return
         if tag == "div":
             self._post_depth += 1
+            if "usertext-body" in classes:
+                self._body_container_depth = self._post_depth
+                self._body_parts = []
         if tag == "a" and "title" in classes:
             self._capture_title = True
             self._title_parts = []
+        if (
+            tag == "source"
+            and attributes.get("type", "").startswith("video/")
+            and attributes.get("src", "").startswith("https://")
+            and not self._post.get("media_url")
+        ):
+            self._post["media_url"] = attributes["src"]
 
     def handle_data(self, data: str) -> None:
         if self._capture_title:
             self._title_parts.append(data)
+        elif self._body_container_depth is not None:
+            self._body_parts.append(data)
 
     def handle_endtag(self, tag: str) -> None:
         if self._post is None:
@@ -78,9 +97,21 @@ class _OldRedditParser(HTMLParser):
         if tag == "a" and self._capture_title:
             self._post["title"] = "".join(self._title_parts).strip()
             self._capture_title = False
+        if tag == "p" and self._body_container_depth is not None:
+            self._body_parts.append("\n")
         if tag != "div":
             return
 
+        if self._body_container_depth == self._post_depth:
+            paragraphs = [
+                " ".join(paragraph.split())
+                for paragraph in "".join(self._body_parts).splitlines()
+                if paragraph.strip()
+            ]
+            if paragraphs:
+                self._post["selftext"] = "\n".join(paragraphs)
+            self._body_container_depth = None
+            self._body_parts = []
         self._post_depth -= 1
         if self._post_depth == 0:
             post = self._post
@@ -233,6 +264,43 @@ def _format_post(post: dict[str, Any], index: int) -> str:
         f'{index}. <a href="{link}">{title}</a>\n'
         f"   r/{subreddit} · ↑ {score} · 💬 {comments} · u/{author}"
     )
+
+
+def format_reddit_post(post: dict[str, Any]) -> str:
+    """Format one Reddit post for a Telegram message or media caption."""
+    summary = _format_post(post, 1).removeprefix("1. ")
+    body = str(post.get("selftext") or "").strip()
+    if body:
+        summary = f"{summary}\n\n{html.escape(body[:500])}"
+    return summary
+
+
+def reddit_post_media_kind(post: dict[str, Any]) -> str:
+    """Return the Telegram delivery kind for a scraped post."""
+    media_url = str(post.get("media_url") or post.get("url") or "").lower()
+    path = media_url.split("?", 1)[0]
+    if path.endswith(_IMAGE_SUFFIXES):
+        return "photo"
+    if path.endswith(_VIDEO_SUFFIXES):
+        return "video"
+    return "text"
+
+
+async def fetch_reddit_post(subreddit: str, mode: str = "trending") -> dict[str, Any]:
+    """Fetch one safe post from a subreddit using the requested ordering."""
+    normalized = normalize_subreddit(subreddit)
+    normalized_mode = mode.lower()
+    if normalized is None:
+        raise ValueError("Invalid subreddit name")
+    if normalized_mode not in REDDIT_FETCH_MODES:
+        raise ValueError("Mode must be trending, random, or top")
+
+    posts = await _fetch_candidates(normalized, normalized_mode)
+    if not posts:
+        raise LookupError(f"No posts found in r/{normalized}")
+    if normalized_mode == "random":
+        return dict(random.choice(posts))  # noqa: S311 - content selection, not security
+    return dict(posts[0])
 
 
 async def get_reddit_digest(settings: RedditBriefingSettings) -> str:

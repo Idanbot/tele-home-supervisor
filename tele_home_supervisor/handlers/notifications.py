@@ -5,15 +5,21 @@ from __future__ import annotations
 import html
 import logging
 
+import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from .. import intel
+from .. import intel, reddit_briefing
 from .. import scheduled as scheduled_fetchers
-from ..models.reddit_settings import REDDIT_GROUPS, REDDIT_MODES
+from ..models.reddit_settings import (
+    REDDIT_FETCH_SUBREDDITS,
+    REDDIT_GROUPS,
+    REDDIT_MODES,
+    normalize_subreddit,
+)
 from ..state import BOT_STATE_KEY, BotState
-from .common import guard, tracked_reply_photo
+from .common import guard, tracked_reply_photo, tracked_reply_video
 
 logger = logging.getLogger(__name__)
 
@@ -468,3 +474,135 @@ async def cmd_reddit_settings(
     if error:
         text = f"❌ {html.escape(error)}\n\n{text}"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+async def cmd_reddit_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fetch one Reddit post or show the curated subreddit picker."""
+    if not await guard(update, context):
+        return
+
+    if not context.args:
+        rows: list[list[InlineKeyboardButton]] = []
+        for index in range(0, len(REDDIT_FETCH_SUBREDDITS), 2):
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        label,
+                        callback_data=f"reddit_fetch:pick:{subreddit}",
+                    )
+                    for label, subreddit in REDDIT_FETCH_SUBREDDITS[index : index + 2]
+                ]
+            )
+        await update.message.reply_text(
+            "👽 Choose a subreddit",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+        return
+
+    subreddit = normalize_subreddit(context.args[0])
+    mode = context.args[1].lower() if len(context.args) == 2 else "trending"
+    if (
+        subreddit is None
+        or len(context.args) > 2
+        or mode not in reddit_briefing.REDDIT_FETCH_MODES
+    ):
+        await update.message.reply_text(
+            "Usage: /reddit_fetch <subreddit> [trending|random|top]"
+        )
+        return
+
+    await _fetch_and_deliver_reddit_post(update.message, context, subreddit, mode)
+
+
+async def _fetch_and_deliver_reddit_post(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    subreddit: str,
+    mode: str,
+) -> None:
+    try:
+        post = await reddit_briefing.fetch_reddit_post(subreddit, mode)
+        caption = reddit_briefing.format_reddit_post(post)
+        state: BotState = context.application.bot_data.setdefault(
+            BOT_STATE_KEY, BotState()
+        )
+        media_kind = reddit_briefing.reddit_post_media_kind(post)
+        if media_kind == "photo":
+            try:
+                await tracked_reply_photo(
+                    message,
+                    state,
+                    photo=str(post.get("media_url") or post.get("url")),
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            except Exception as exc:
+                logger.warning("Reddit photo delivery failed, using text: %s", exc)
+        elif media_kind == "video":
+            try:
+                await tracked_reply_video(
+                    message,
+                    state,
+                    video=str(post.get("media_url") or post.get("url")),
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            except Exception as exc:
+                logger.warning("Reddit video delivery failed, using text: %s", exc)
+        await message.reply_text(
+            caption,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=False,
+        )
+    except (httpx.HTTPError, LookupError, ValueError) as exc:
+        await message.reply_text(
+            f"❌ Reddit fetch failed: {html.escape(str(exc))}",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def handle_reddit_fetch_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle the subreddit and mode pickers for ``/reddit_fetch``."""
+    query = update.callback_query
+    parts = str(query.data or "").split(":")
+    if len(parts) == 3 and parts[:2] == ["reddit_fetch", "pick"]:
+        subreddit = normalize_subreddit(parts[2])
+        if subreddit is None:
+            await query.edit_message_text("❌ Invalid subreddit.")
+            return
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        mode.title(),
+                        callback_data=f"reddit_fetch:run:{subreddit}:{mode}",
+                    )
+                    for mode in ("trending", "random", "top")
+                ]
+            ]
+        )
+        await query.edit_message_text(
+            f"👽 Choose a mode for r/{html.escape(subreddit)}",
+            reply_markup=keyboard,
+        )
+        return
+
+    if len(parts) == 4 and parts[:2] == ["reddit_fetch", "run"]:
+        subreddit = normalize_subreddit(parts[2])
+        mode = parts[3].lower()
+        if subreddit is None or mode not in reddit_briefing.REDDIT_FETCH_MODES:
+            await query.edit_message_text("❌ Invalid Reddit fetch selection.")
+            return
+        await query.edit_message_text(
+            f"🔄 Fetching r/{html.escape(subreddit)} ({html.escape(mode)})..."
+        )
+        await _fetch_and_deliver_reddit_post(
+            query.message,
+            context,
+            subreddit,
+            mode,
+        )

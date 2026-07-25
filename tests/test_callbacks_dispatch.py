@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -148,6 +149,21 @@ async def test_dispatch_noop_torrent(monkeypatch) -> None:
     ctx = _DummyContext()
     await callbacks.handle_callback_query(update, ctx)
     assert update.callback_query._edited_texts == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_reddit_fetch_callback(monkeypatch) -> None:
+    monkeypatch.setattr(callbacks, "allowed", lambda *_: True)
+    handler = AsyncMock()
+    monkeypatch.setattr(
+        callbacks.notifications, "handle_reddit_fetch_callback", handler
+    )
+    update = _DummyUpdate("reddit_fetch:pick:memes")
+    context = _DummyContext()
+
+    await callbacks.handle_callback_query(update, context)
+
+    handler.assert_awaited_once_with(update, context)
 
 
 @pytest.mark.asyncio

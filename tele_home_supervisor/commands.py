@@ -398,6 +398,14 @@ _NOTIFICATIONS_COMMANDS = (
         "cmd_reddit_settings",
     ),
     CommandSpec(
+        "reddit_fetch",
+        "Notifications",
+        "/reddit_fetch <subreddit> [trending|random|top]",
+        "fetch one Reddit photo, video, or text post",
+        "cmd_reddit_fetch",
+        aliases=("redditfetch",),
+    ),
+    CommandSpec(
         "releasewatch",
         "Notifications",
         "/releasewatch [add|remove|enable|check]",

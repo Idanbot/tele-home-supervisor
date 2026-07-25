@@ -36,8 +36,11 @@ def test_old_reddit_parser_extracts_metadata_and_filters_unsafe_posts() -> None:
     <div class="thing link" data-fullname="t3_safe"
          data-author="alice" data-subreddit="python" data-score="123"
          data-comments-count="45" data-permalink="/r/python/comments/safe"
+         data-url="https://i.redd.it/safe.jpg" data-domain="i.redd.it"
          data-promoted="false" data-nsfw="false">
       <div class="entry"><a class="title may-blank">Safe &amp; useful</a></div>
+      <video><source src="https://v.redd.it/safe/DASH_720.mp4"
+                     type="video/mp4"></video>
     </div>
     <div class="thing link stickied" data-fullname="t3_sticky"
          data-author="mod" data-subreddit="python" data-score="1"
@@ -61,9 +64,31 @@ def test_old_reddit_parser_extracts_metadata_and_filters_unsafe_posts() -> None:
             "score": 123,
             "num_comments": 45,
             "permalink": "/r/python/comments/safe",
+            "url": "https://i.redd.it/safe.jpg",
+            "domain": "i.redd.it",
+            "media_url": "https://v.redd.it/safe/DASH_720.mp4",
             "title": "Safe & useful",
         }
     ]
+
+
+def test_old_reddit_parser_extracts_self_post_text() -> None:
+    listing = """
+    <div class="thing link self" data-fullname="t3_text"
+         data-author="writer" data-subreddit="news" data-score="8"
+         data-comments-count="3" data-permalink="/r/news/comments/text"
+         data-url="/r/news/comments/text" data-domain="self.news"
+         data-promoted="false" data-nsfw="false">
+      <a class="title">A text post</a>
+      <div class="usertext-body may-blank-within md-container">
+        <div class="md"><p>First paragraph.</p><p>Second paragraph.</p></div>
+      </div>
+    </div>
+    """
+
+    post = reddit_briefing._parse_old_reddit(listing)[0]
+
+    assert post["selftext"] == "First paragraph.\nSecond paragraph."
 
 
 @pytest.mark.asyncio

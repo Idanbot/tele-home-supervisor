@@ -373,6 +373,14 @@ async def handle_callback_query(update, context) -> None:
                 data,
                 cb_media.handle_protondb_info(query, context, data),
             )
+        elif data.startswith("reddit_fetch:"):
+            await _run_audit_action(
+                update,
+                context,
+                "reddit_fetch",
+                data,
+                notifications.handle_reddit_fetch_callback(update, context),
+            )
         elif data.startswith("intel_toggle:"):
             await _run_audit_action(
                 update,

@@ -10,6 +10,15 @@ REDDIT_GROUPS: dict[str, tuple[str, ...]] = {
     "tech": ("programming", "technology"),
     "devops": ("devops", "cloudcomputing", "artificial"),
 }
+REDDIT_FETCH_SUBREDDITS: tuple[tuple[str, str], ...] = (
+    ("AI Video", "aivideo"),
+    ("Memes", "memes"),
+    ("Dank Memes", "dankmemes"),
+    ("Art", "art"),
+    ("Accidental Renaissance", "accidentalrenaissance"),
+    ("Popular", "popular"),
+    ("News", "news"),
+)
 REDDIT_MODES = {"mixed", "top", "trending", "random"}
 _SUBREDDIT_RE = re.compile(r"^[A-Za-z0-9_]{2,21}$")
 

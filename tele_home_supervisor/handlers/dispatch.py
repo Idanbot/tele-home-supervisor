@@ -88,6 +88,7 @@ cmd_intel_briefing = rate_limit(notifications.cmd_intel_briefing, name="intel_br
 cmd_reddit_settings = rate_limit(
     notifications.cmd_reddit_settings, name="reddit_settings"
 )
+cmd_reddit_fetch = rate_limit(notifications.cmd_reddit_fetch, name="reddit_fetch")
 cmd_releasewatch = rate_limit(release_watches.cmd_releasewatch, name="releasewatch")
 cmd_alerts = rate_limit(alerts.cmd_alerts, name="alerts")
 
