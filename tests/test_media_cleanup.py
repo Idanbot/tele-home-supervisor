@@ -87,13 +87,15 @@ class TestMediaPersistence:
     def test_load_media_messages_roundtrip(self, tmp_path):
         state = BotState()
         state._state_file = tmp_path / "state.json"
+        state._database_file = tmp_path / "state.sqlite3"
         state.track_media_message(100, 200)
         state.track_media_message(300, 400)
         state.save()
 
         state2 = BotState()
         state2._state_file = tmp_path / "state.json"
-        persistence.load(state2, state2._state_file)
+        state2._database_file = tmp_path / "state.sqlite3"
+        persistence.load(state2, state2._database_file)
         assert len(state2.media_messages) == 2
         assert state2.media_messages[0][:2] == [100, 200]
         assert state2.media_messages[1][:2] == [300, 400]

@@ -129,6 +129,20 @@ Reddit's public RSS feeds, where vote and comment counts may be unavailable.
 | `LOG_LEVEL` | `DEBUG` | logging verbosity. |
 | `LOG_FORMAT` | `text` | set to `json` for structured logging. |
 
+### Persistence and migrations
+
+Persistent bot state is stored in SQLite at
+`/app/data/tele_home_supervisor.sqlite3` inside the `telebot_data` Docker
+volume. Compact settings use a state document, while audit entries, magnet
+cache records, and per-device network scans use indexed tables with bounded
+retention.
+
+Schema migrations run transactionally during startup. On the first SQLite
+startup, existing `bot_state.json`, `audit_log.json`, `magnet_cache.json`, and
+`network_inventory.json` files are imported once. Import markers prevent stale
+JSON from overwriting SQLite on later restarts, and the original files remain
+unchanged as rollback copies.
+
 ---
 
 ## 📚 Commands
@@ -142,7 +156,7 @@ Reddit's public RSS feeds, where vote and comment counts may be unavailable.
 | `/whoami` | show chat and user info |
 | `/auth &lt;code&gt;` | authorize sensitive commands for 7 days |
 | `/check_auth` | check auth status and time remaining |
-| `/auth_file` | show all authenticated user IDs and expiry from file |
+| `/auth_file` | show all persisted authenticated user IDs and expiry |
 | `/ban &lt;user_id&gt;` | owner-only persistent block for a user ID |
 | `/unban &lt;user_id&gt;` | owner-only remove a user ID from persistent blocks |
 | `/banlist` | owner-only view aggregated blocked user IDs |
@@ -235,8 +249,8 @@ Reddit's public RSS feeds, where vote and comment counts may be unavailable.
 
 Release watches run daily at 9 AM Israel time. A matching watch is disabled only
 after its Telegram notification is delivered successfully. Reddit settings,
-release watches, check timestamps, and trigger results persist in the bot state
-file under the mounted `./data` directory.
+release watches, check timestamps, and trigger results persist in SQLite under
+the `telebot_data` Docker volume.
 
 ### Media
 

@@ -18,6 +18,7 @@ async def allow_sensitive(update, context):
 def _state(context: DummyContext, tmp_path: Path) -> BotState:
     state = BotState()
     state._state_file = tmp_path / "state.json"
+    state._database_file = tmp_path / "state.sqlite3"
     context.application.bot_data[BOT_STATE_KEY] = state
     return state
 
