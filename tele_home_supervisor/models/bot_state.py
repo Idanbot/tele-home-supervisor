@@ -134,6 +134,9 @@ class BotState:
     _network_inventory_file: Path = field(
         default_factory=lambda: Path("/app/data/network_inventory.json")
     )
+    _database_file: Path = field(
+        default_factory=lambda: Path("/app/data/tele_home_supervisor.sqlite3")
+    )
     _debug_recorder: DebugRecorder | None = field(default=None, init=False, repr=False)
     _state_loaded: bool = field(default=False, init=False, repr=False)
     _last_save: dict[str, float] = field(default_factory=dict, init=False, repr=False)
@@ -335,7 +338,7 @@ class BotState:
         entry = MagnetEntry(
             name=name, magnet=magnet, seeders=seeders, leechers=leechers
         )
-        self.magnet_cache[key] = (time.monotonic(), entry)
+        self.magnet_cache[key] = (time.time(), entry)
         self._prune_magnets()
         self.save_magnets()
         return key
@@ -346,7 +349,7 @@ class BotState:
         if not entry:
             return None
         ts, magnet_entry = entry
-        if (time.monotonic() - ts) > _MAGNET_CACHE_TTL_S:
+        if (time.time() - ts) > _MAGNET_CACHE_TTL_S:
             self.magnet_cache.pop(key, None)
             self.save_magnets()
             return None
@@ -355,7 +358,7 @@ class BotState:
     def _prune_magnets(self) -> None:
         if not self.magnet_cache:
             return
-        now = time.monotonic()
+        now = time.time()
         stale_keys = [
             key
             for key, val in self.magnet_cache.items()
@@ -501,6 +504,7 @@ class BotState:
 
     def clear_audit_entries(self, chat_id: int) -> None:
         self.audit_log.pop(chat_id, None)
+        self.save_audit(force=True)
 
     def toggle_gameoffers_mute(self, chat_id: int) -> bool:
         """Toggle combined Game Offers notifications. Returns True if now muted."""
@@ -761,7 +765,7 @@ class BotState:
 
     def persistence_status(self) -> tuple[bool, str]:
         """Report whether the state directory is writable for this process."""
-        state_dir = self._state_file.parent
+        state_dir = self._database_file.parent
         try:
             state_dir.mkdir(parents=True, exist_ok=True)
             stat_result = state_dir.stat()
@@ -785,31 +789,46 @@ class BotState:
         """Load persisted state from disk. Only loads once per instance."""
         if self._state_loaded:
             return
+        try:
+            persistence.initialize_and_import_legacy(
+                self,
+                self._database_file,
+                state_path=self._state_file,
+                audit_path=self._audit_file,
+                magnet_path=self._magnet_file,
+                network_inventory_path=self._network_inventory_file,
+            )
+        except OSError as exc:
+            logger.warning(
+                "State database is unavailable at %s: %s", self._database_file, exc
+            )
+            self._state_loaded = True
+            return
+        persistence.load(self, self._database_file)
+        persistence.load_audit(self, self._database_file)
+        persistence.load_magnets(self, self._database_file)
+        persistence.load_network_inventory(self, self._database_file)
         self._state_loaded = True
-        persistence.load(self, self._state_file)
-        persistence.load_audit(self, self._audit_file)
-        persistence.load_magnets(self, self._magnet_file)
-        persistence.load_network_inventory(self, self._network_inventory_file)
 
     def save(self, force: bool = False) -> None:
         """Save basic state to disk with throttling."""
         if not force and (time.time() - self._last_save.get("state", 0) < 1.0):
             return
-        persistence.save(self, self._state_file)
+        persistence.save(self, self._database_file)
         self._last_save["state"] = time.time()
 
     def save_audit(self, force: bool = False) -> None:
         """Save audit log to disk with throttling."""
         if not force and (time.time() - self._last_save.get("audit", 0) < 1.0):
             return
-        persistence.save_audit(self, self._audit_file)
+        persistence.save_audit(self, self._database_file)
         self._last_save["audit"] = time.time()
 
     def save_magnets(self, force: bool = False) -> None:
         """Save magnet cache to disk with throttling."""
         if not force and (time.time() - self._last_save.get("magnets", 0) < 1.0):
             return
-        persistence.save_magnets(self, self._magnet_file)
+        persistence.save_magnets(self, self._database_file)
         self._last_save["magnets"] = time.time()
 
     def save_network_inventory(self, force: bool = False) -> None:
@@ -817,7 +836,7 @@ class BotState:
         key = "network_inventory"
         if not force and (time.time() - self._last_save.get(key, 0) < 1.0):
             return
-        persistence.save_network_inventory(self, self._network_inventory_file)
+        persistence.save_network_inventory(self, self._database_file)
         self._last_save[key] = time.time()
 
     # Keep the old private name for compatibility

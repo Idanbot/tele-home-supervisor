@@ -137,6 +137,7 @@ async def test_reddit_settings_commands(monkeypatch, tmp_path):
     context = DummyContext(args=["add", "r/linux"])
     state = notifications.BotState()
     state._state_file = tmp_path / "state.json"
+    state._database_file = tmp_path / "state.sqlite3"
     context.application.bot_data[notifications.BOT_STATE_KEY] = state
 
     await notifications.cmd_reddit_settings(update, context)

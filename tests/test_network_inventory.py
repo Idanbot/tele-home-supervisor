@@ -142,9 +142,9 @@ def test_expand_ping_targets_caps_large_networks() -> None:
 
 
 def test_bot_state_inventory_lifecycle_persists_and_prunes(tmp_path: Path) -> None:
-    state_file = tmp_path / "inventory.json"
+    database_file = tmp_path / "state.sqlite3"
     state = BotState()
-    state._network_inventory_file = state_file
+    state._database_file = database_file
     old = time.time() - 10 * 86400
     now = time.time()
 
@@ -182,7 +182,7 @@ def test_bot_state_inventory_lifecycle_persists_and_prunes(tmp_path: Path) -> No
     assert "192.168.1.20" in state.network_inventory
 
     loaded = BotState()
-    loaded._network_inventory_file = state_file
+    loaded._database_file = database_file
     loaded.load_state()
 
     assert loaded.network_inventory_last_summary is not None

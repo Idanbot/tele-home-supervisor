@@ -1,4 +1,4 @@
-"""BotState JSON persistence helpers.
+"""BotState SQLite persistence and legacy JSON import helpers.
 
 Serialisation and deserialisation are deliberately kept in plain
 functions rather than methods on *BotState* itself so that the
@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 import time
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .. import config
+from . import database
 from .alerts import AlertRule, AlertState
 from .audit import AuditEntry
 from .auth import AuthGrantRecord
@@ -83,79 +82,90 @@ def serialize(state: BotState) -> dict:
 
 
 def save(state: BotState, path: Path) -> None:
-    """Persist *state* to *path* as JSON."""
+    """Persist compact state as a single SQLite document."""
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(serialize(state), indent=2, sort_keys=True)
-        _atomic_write_text(path, payload)
+        payload = json.dumps(serialize(state), separators=(",", ":"), sort_keys=True)
+        with database.connect(path) as connection:
+            connection.execute(
+                """
+                INSERT INTO state_documents(key, payload, updated_at)
+                VALUES ('core', ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                (payload, time.time()),
+            )
     except Exception:
         logger.exception("Failed to save bot state")
 
 
 def load(state: BotState, path: Path) -> None:
-    """Populate *state* from *path*. No-op when the file is missing."""
+    """Populate compact state from SQLite."""
     try:
-        if not path.exists():
+        with database.connect(path) as connection:
+            row = connection.execute(
+                "SELECT payload FROM state_documents WHERE key = 'core'"
+            ).fetchone()
+        if row is None:
             return
-        data = json.loads(path.read_text())
-
-        legacy_epic = set(data.get("epic_games_muted", []))
-        state.gameoffers_muted = set(data.get("gameoffers_muted", [])) or legacy_epic
-        state.hackernews_muted = set(data.get("hackernews_muted", []))
-
-        state.disabled_intel_modules = {}
-        raw_disabled = data.get("disabled_intel_modules") or {}
-        for k, v in raw_disabled.items():
-            try:
-                state.disabled_intel_modules[int(k)] = set(v)
-            except TypeError, ValueError:
-                continue
-
-        state.reddit_briefing_settings = {}
-        raw_reddit_settings = data.get("reddit_briefing_settings") or {}
-        if isinstance(raw_reddit_settings, dict):
-            for chat_id, raw_settings in raw_reddit_settings.items():
-                try:
-                    state.reddit_briefing_settings[int(chat_id)] = (
-                        RedditBriefingSettings.from_dict(raw_settings)
-                    )
-                except TypeError, ValueError:
-                    continue
-
-        state.release_watches = []
-        for raw_watch in data.get("release_watches") or []:
-            watch = ReleaseWatch.from_dict(raw_watch)
-            if watch is not None:
-                state.release_watches.append(watch)
-
-        state.torrent_completion_subscribers = set(
-            data.get("torrent_completion_subscribers", [])
-        )
-        state.alerts_enabled = set(data.get("alerts_enabled", []))
-        state.blocked_ids = _load_blocked_ids(data.get("blocked_ids") or [])
-
-        _load_alert_rules(state, data.get("alert_rules") or [])
-        _load_alert_states(state, data.get("alert_states") or {})
-        _deserialize_auth_grants(state, data.get("auth_grants") or [])
-        _deserialize_auth_failures(state, data.get("auth_failures") or [])
-        state.media_messages = _load_media_messages(data.get("media_messages") or [])
-        state.reminders = data.get("reminders") or []
-
-        state.last_game_offers_run = float(data.get("last_game_offers_run") or 0.0)
-        state.last_intel_briefing_run = float(
-            data.get("last_intel_briefing_run") or 0.0
-        )
-        state.last_release_watch_run = float(data.get("last_release_watch_run") or 0.0)
-
-        # Legacy fallback for high-frequency caches if they were in the main file
-        if "audit_log" in data:
-            _deserialize_audit_log(state, data["audit_log"])
-        if "magnet_cache" in data:
-            _deserialize_magnet_cache(state, data["magnet_cache"])
-
+        _deserialize_core(state, json.loads(row["payload"]))
         logger.info("Loaded bot state from %s", path)
     except Exception:
         logger.exception("Failed to load bot state")
+
+
+def _deserialize_core(state: BotState, data: dict) -> None:
+    legacy_epic = set(data.get("epic_games_muted", []))
+    state.gameoffers_muted = set(data.get("gameoffers_muted", [])) or legacy_epic
+    state.hackernews_muted = set(data.get("hackernews_muted", []))
+
+    state.disabled_intel_modules = {}
+    raw_disabled = data.get("disabled_intel_modules") or {}
+    for k, v in raw_disabled.items():
+        try:
+            state.disabled_intel_modules[int(k)] = set(v)
+        except TypeError, ValueError:
+            continue
+
+    state.reddit_briefing_settings = {}
+    raw_reddit_settings = data.get("reddit_briefing_settings") or {}
+    if isinstance(raw_reddit_settings, dict):
+        for chat_id, raw_settings in raw_reddit_settings.items():
+            try:
+                state.reddit_briefing_settings[int(chat_id)] = (
+                    RedditBriefingSettings.from_dict(raw_settings)
+                )
+            except TypeError, ValueError:
+                continue
+
+    state.release_watches = []
+    for raw_watch in data.get("release_watches") or []:
+        watch = ReleaseWatch.from_dict(raw_watch)
+        if watch is not None:
+            state.release_watches.append(watch)
+
+    state.torrent_completion_subscribers = set(
+        data.get("torrent_completion_subscribers", [])
+    )
+    state.alerts_enabled = set(data.get("alerts_enabled", []))
+    state.blocked_ids = _load_blocked_ids(data.get("blocked_ids") or [])
+
+    _load_alert_rules(state, data.get("alert_rules") or [])
+    _load_alert_states(state, data.get("alert_states") or {})
+    _deserialize_auth_grants(state, data.get("auth_grants") or [])
+    _deserialize_auth_failures(state, data.get("auth_failures") or [])
+    state.media_messages = _load_media_messages(data.get("media_messages") or [])
+    state.reminders = data.get("reminders") or []
+
+    state.last_game_offers_run = float(data.get("last_game_offers_run") or 0.0)
+    state.last_intel_briefing_run = float(data.get("last_intel_briefing_run") or 0.0)
+    state.last_release_watch_run = float(data.get("last_release_watch_run") or 0.0)
+
+    if "audit_log" in data:
+        _deserialize_audit_log(state, data["audit_log"])
+    if "magnet_cache" in data:
+        _deserialize_magnet_cache(state, data["magnet_cache"])
 
 
 # ── Audit Log ───────────────────────────────────────────────────────
@@ -163,28 +173,45 @@ def load(state: BotState, path: Path) -> None:
 
 def save_audit(state: BotState, path: Path) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(_serialize_audit_log(state), indent=2)
-        _atomic_write_text(path, payload)
+        rows = [
+            (
+                entry.id,
+                chat_id,
+                entry.created_at,
+                json.dumps(entry.__dict__, separators=(",", ":"), sort_keys=True),
+            )
+            for chat_id, entries in state.audit_log.items()
+            for entry in entries
+        ]
+        with database.connect(path) as connection:
+            connection.execute("DELETE FROM audit_entries")
+            connection.executemany(
+                """
+                INSERT INTO audit_entries(id, chat_id, created_at, payload)
+                VALUES (?, ?, ?, ?)
+                """,
+                rows,
+            )
     except Exception:
         logger.exception("Failed to save audit log")
 
 
 def load_audit(state: BotState, path: Path) -> None:
     try:
-        if not path.exists():
-            return
-        data = json.loads(path.read_text())
+        with database.connect(path) as connection:
+            rows = connection.execute(
+                """
+                SELECT chat_id, payload
+                FROM audit_entries
+                ORDER BY chat_id, created_at, id
+                """
+            ).fetchall()
+        data: dict[str, list[dict]] = {}
+        for row in rows:
+            data.setdefault(str(row["chat_id"]), []).append(json.loads(row["payload"]))
         _deserialize_audit_log(state, data)
     except Exception:
         logger.exception("Failed to load audit log")
-
-
-def _serialize_audit_log(state: BotState) -> dict:
-    return {
-        str(chat_id): [entry.__dict__ for entry in entries]
-        for chat_id, entries in state.audit_log.items()
-    }
 
 
 def _deserialize_audit_log(state: BotState, data: dict) -> None:
@@ -203,40 +230,48 @@ def _deserialize_audit_log(state: BotState, data: dict) -> None:
 # ── Magnet Cache ─────────────────────────────────────────────────────
 
 
-def _serialize_magnet_cache(state: BotState) -> list:
-    items = []
-    for key, (ts, entry) in state.magnet_cache.items():
-        items.append(
-            (
-                key,
-                [
-                    ts,
-                    {
-                        "name": entry.name,
-                        "magnet": entry.magnet,
-                        "seeders": entry.seeders,
-                        "leechers": entry.leechers,
-                    },
-                ],
-            )
-        )
-    return items
-
-
 def save_magnets(state: BotState, path: Path) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(_serialize_magnet_cache(state), indent=2)
-        _atomic_write_text(path, payload)
+        rows = []
+        for key, (cached_at, entry) in state.magnet_cache.items():
+            payload = json.dumps(
+                {
+                    "name": entry.name,
+                    "magnet": entry.magnet,
+                    "seeders": entry.seeders,
+                    "leechers": entry.leechers,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            rows.append((key, cached_at, payload))
+        with database.connect(path) as connection:
+            connection.execute("DELETE FROM magnet_cache")
+            connection.executemany(
+                """
+                INSERT INTO magnet_cache(cache_key, cached_at, payload)
+                VALUES (?, ?, ?)
+                """,
+                rows,
+            )
     except Exception:
         logger.exception("Failed to save magnet cache")
 
 
 def load_magnets(state: BotState, path: Path) -> None:
     try:
-        if not path.exists():
-            return
-        data = json.loads(path.read_text())
+        with database.connect(path) as connection:
+            rows = connection.execute(
+                """
+                SELECT cache_key, cached_at, payload
+                FROM magnet_cache
+                ORDER BY cached_at, cache_key
+                """
+            ).fetchall()
+        data = [
+            [row["cache_key"], [row["cached_at"], json.loads(row["payload"])]]
+            for row in rows
+        ]
         _deserialize_magnet_cache(state, data)
     except Exception:
         logger.exception("Failed to load magnet cache")
@@ -280,18 +315,80 @@ def _deserialize_magnet_cache(state: BotState, data: list) -> None:
 
 def save_network_inventory(state: BotState, path: Path) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(_serialize_network_inventory(state), indent=2)
-        _atomic_write_text(path, payload)
+        rows = [
+            (
+                ip,
+                record.scan_id,
+                record.scanned_at,
+                json.dumps(
+                    _network_scan_to_dict(record),
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            )
+            for ip, records in state.network_inventory.items()
+            for record in records
+        ]
+        summary = state.network_inventory_last_summary
+        with database.connect(path) as connection:
+            connection.execute("DELETE FROM network_device_scans")
+            connection.executemany(
+                """
+                INSERT INTO network_device_scans(ip, scan_id, scanned_at, payload)
+                VALUES (?, ?, ?, ?)
+                """,
+                rows,
+            )
+            if summary is None:
+                connection.execute("DELETE FROM network_inventory_summary")
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO network_inventory_summary(
+                        singleton, payload, updated_at
+                    )
+                    VALUES (1, ?, ?)
+                    ON CONFLICT(singleton) DO UPDATE SET
+                        payload = excluded.payload,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        json.dumps(
+                            summary.__dict__, separators=(",", ":"), sort_keys=True
+                        ),
+                        time.time(),
+                    ),
+                )
     except Exception:
         logger.exception("Failed to save network inventory")
 
 
 def load_network_inventory(state: BotState, path: Path) -> None:
     try:
-        if not path.exists():
-            return
-        data = json.loads(path.read_text())
+        with database.connect(path) as connection:
+            rows = connection.execute(
+                """
+                SELECT ip, payload
+                FROM network_device_scans
+                ORDER BY ip, scanned_at, scan_id
+                """
+            ).fetchall()
+            summary_row = connection.execute(
+                """
+                SELECT payload
+                FROM network_inventory_summary
+                WHERE singleton = 1
+                """
+            ).fetchone()
+        devices: dict[str, list[dict]] = {}
+        for row in rows:
+            devices.setdefault(str(row["ip"]), []).append(json.loads(row["payload"]))
+        data = {
+            "devices": devices,
+            "last_summary": (
+                json.loads(summary_row["payload"]) if summary_row is not None else None
+            ),
+        }
         _deserialize_network_inventory(state, data)
         state.prune_network_inventory(
             retention_days=config.NETWORK_INVENTORY_RETENTION_DAYS,
@@ -299,17 +396,6 @@ def load_network_inventory(state: BotState, path: Path) -> None:
         )
     except Exception:
         logger.exception("Failed to load network inventory")
-
-
-def _serialize_network_inventory(state: BotState) -> dict:
-    summary = state.network_inventory_last_summary
-    return {
-        "last_summary": summary.__dict__ if summary is not None else None,
-        "devices": {
-            ip: [_network_scan_to_dict(record) for record in records]
-            for ip, records in sorted(state.network_inventory.items())
-        },
-    }
 
 
 def _network_scan_to_dict(record: NetworkDeviceScan) -> dict:
@@ -381,6 +467,159 @@ def _load_network_device_scan(raw: object) -> NetworkDeviceScan | None:
         )
     except TypeError, ValueError:
         return None
+
+
+# ── Legacy JSON import ──────────────────────────────────────────────
+
+
+def initialize_and_import_legacy(
+    state: BotState,
+    database_path: Path,
+    *,
+    state_path: Path,
+    audit_path: Path,
+    magnet_path: Path,
+    network_inventory_path: Path,
+) -> None:
+    """Initialize SQLite and import each legacy JSON store at most once."""
+    database.migrate(database_path)
+    _import_legacy_core(state, database_path, state_path)
+    _import_legacy_audit(state, database_path, audit_path)
+    _import_legacy_magnets(state, database_path, magnet_path)
+    _import_legacy_network_inventory(state, database_path, network_inventory_path)
+
+
+def _legacy_imported(database_path: Path, source: str) -> bool:
+    with database.connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT 1 FROM legacy_imports WHERE source = ?", (source,)
+        ).fetchone()
+    return row is not None
+
+
+def _mark_legacy_imported(database_path: Path, source: str) -> None:
+    with database.connect(database_path) as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO legacy_imports(source, imported_at)
+            VALUES (?, ?)
+            """,
+            (source, time.time()),
+        )
+
+
+def _table_has_rows(database_path: Path, table: str) -> bool:
+    queries = {
+        "state_documents": "SELECT 1 FROM state_documents LIMIT 1",
+        "audit_entries": "SELECT 1 FROM audit_entries LIMIT 1",
+        "magnet_cache": "SELECT 1 FROM magnet_cache LIMIT 1",
+        "network_device_scans": "SELECT 1 FROM network_device_scans LIMIT 1",
+    }
+    query = queries.get(table)
+    if query is None:
+        raise ValueError(f"Unsupported table: {table}")
+    with database.connect(database_path) as connection:
+        row = connection.execute(query).fetchone()
+    return row is not None
+
+
+def _read_legacy_json(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _import_legacy_core(state: BotState, database_path: Path, path: Path) -> None:
+    source = "bot_state.json"
+    if _legacy_imported(database_path, source) or not path.exists():
+        return
+    if _table_has_rows(database_path, "state_documents"):
+        _mark_legacy_imported(database_path, source)
+        return
+    try:
+        data = _read_legacy_json(path)
+        if not isinstance(data, dict):
+            raise ValueError("legacy bot state must be a JSON object")
+        _deserialize_core(state, data)
+        save(state, database_path)
+        if "audit_log" in data:
+            save_audit(state, database_path)
+        if "magnet_cache" in data:
+            _reset_legacy_magnet_timestamps(state)
+            save_magnets(state, database_path)
+        _mark_legacy_imported(database_path, source)
+        logger.info("Imported legacy state from %s", path)
+    except Exception:
+        logger.exception("Failed to import legacy state from %s", path)
+
+
+def _import_legacy_audit(state: BotState, database_path: Path, path: Path) -> None:
+    source = "audit_log.json"
+    if _legacy_imported(database_path, source) or not path.exists():
+        return
+    if _table_has_rows(database_path, "audit_entries"):
+        _mark_legacy_imported(database_path, source)
+        return
+    try:
+        data = _read_legacy_json(path)
+        if not isinstance(data, dict):
+            raise ValueError("legacy audit log must be a JSON object")
+        _deserialize_audit_log(state, data)
+        save_audit(state, database_path)
+        _mark_legacy_imported(database_path, source)
+        logger.info("Imported legacy audit log from %s", path)
+    except Exception:
+        logger.exception("Failed to import legacy audit log from %s", path)
+
+
+def _reset_legacy_magnet_timestamps(state: BotState) -> None:
+    now = time.time()
+    state.magnet_cache = type(state.magnet_cache)(
+        (key, (now, entry)) for key, (_, entry) in state.magnet_cache.items()
+    )
+
+
+def _import_legacy_magnets(state: BotState, database_path: Path, path: Path) -> None:
+    source = "magnet_cache.json"
+    if _legacy_imported(database_path, source) or not path.exists():
+        return
+    if _table_has_rows(database_path, "magnet_cache"):
+        _mark_legacy_imported(database_path, source)
+        return
+    try:
+        data = _read_legacy_json(path)
+        if not isinstance(data, list):
+            raise ValueError("legacy magnet cache must be a JSON array")
+        _deserialize_magnet_cache(state, data)
+        _reset_legacy_magnet_timestamps(state)
+        save_magnets(state, database_path)
+        _mark_legacy_imported(database_path, source)
+        logger.info("Imported legacy magnet cache from %s", path)
+    except Exception:
+        logger.exception("Failed to import legacy magnet cache from %s", path)
+
+
+def _import_legacy_network_inventory(
+    state: BotState, database_path: Path, path: Path
+) -> None:
+    source = "network_inventory.json"
+    if _legacy_imported(database_path, source) or not path.exists():
+        return
+    if _table_has_rows(database_path, "network_device_scans"):
+        _mark_legacy_imported(database_path, source)
+        return
+    try:
+        data = _read_legacy_json(path)
+        if not isinstance(data, dict):
+            raise ValueError("legacy network inventory must be a JSON object")
+        _deserialize_network_inventory(state, data)
+        state.prune_network_inventory(
+            retention_days=config.NETWORK_INVENTORY_RETENTION_DAYS,
+            max_scans_per_device=config.NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE,
+        )
+        save_network_inventory(state, database_path)
+        _mark_legacy_imported(database_path, source)
+        logger.info("Imported legacy network inventory from %s", path)
+    except Exception:
+        logger.exception("Failed to import legacy network inventory from %s", path)
 
 
 # ── Auth grants ─────────────────────────────────────────────────────
@@ -512,42 +751,6 @@ def _coerce_optional_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-
-
-def _atomic_write_text(path: Path, payload: str) -> None:
-    """Atomically replace *path* with *payload*."""
-    tmp_fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
-        text=True,
-    )
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
-            # Restrict permissions to owner only (0600)
-            try:
-                os.fchmod(handle.fileno(), 0o600)
-            except OSError:
-                pass  # May not be supported on all filesystems
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-        try:
-            dir_fd = os.open(path.parent, os.O_RDONLY)
-        except OSError:
-            return
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    except Exception:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
 
 
 # ── Alert rules / state ─────────────────────────────────────────────

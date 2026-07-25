@@ -170,8 +170,10 @@ class TestBotStatePersistence:
     def test_save_and_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "state.json"
+            database_file = Path(tmpdir) / "state.sqlite3"
             state = BotState()
             state._state_file = state_file
+            state._database_file = database_file
 
             state.gameoffers_muted.add(123)
             state.hackernews_muted.add(456)
@@ -194,6 +196,7 @@ class TestBotStatePersistence:
             # Create new state and load
             state2 = BotState()
             state2._state_file = state_file
+            state2._database_file = database_file
             state2.load_state()
 
             # Verify
@@ -217,6 +220,7 @@ class TestBotStatePersistence:
     def test_reddit_and_release_watch_mutators(self, tmp_path) -> None:
         state = BotState()
         state._state_file = tmp_path / "state.json"
+        state._database_file = tmp_path / "state.sqlite3"
 
         assert state.set_reddit_group(1, "unknown", True) is False
         assert state.add_reddit_subreddit(1, "bad/name") is None
@@ -237,8 +241,10 @@ class TestBotStatePersistence:
     def test_save_and_load_preserves_auth_record_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "state.json"
+            database_file = Path(tmpdir) / "state.sqlite3"
             state = BotState()
             state._state_file = state_file
+            state._database_file = database_file
 
             granted_at = time.time()
             expiry = granted_at + 3600
@@ -252,6 +258,7 @@ class TestBotStatePersistence:
 
             state2 = BotState()
             state2._state_file = state_file
+            state2._database_file = database_file
             state2.load_state()
 
             record = state2.auth_records[100]
@@ -264,6 +271,7 @@ class TestBotStatePersistence:
         with tempfile.TemporaryDirectory() as tmpdir:
             state = BotState()
             state._state_file = Path(tmpdir) / "state.json"
+            state._database_file = Path(tmpdir) / "state.sqlite3"
 
             ok, message = state.persistence_status()
 
@@ -274,14 +282,17 @@ class TestBotStatePersistence:
         with tempfile.TemporaryDirectory() as tmpdir:
             state = BotState()
             state._state_file = Path(tmpdir) / "nonexistent.json"
+            state._database_file = Path(tmpdir) / "state.sqlite3"
             # Should not raise
             state.load_state()
 
     def test_load_only_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "state.json"
+            database_file = Path(tmpdir) / "state.sqlite3"
             state = BotState()
             state._state_file = state_file
+            state._database_file = database_file
 
             state.gameoffers_muted.add(123)
             state.save()
