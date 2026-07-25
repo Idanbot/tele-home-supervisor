@@ -202,7 +202,7 @@ async def _fetch_candidates(subreddit: str, mode: str) -> list[dict[str, Any]]:
     ) as client:
         try:
             posts = await _fetch_html_candidates(client, subreddit, mode)
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             logger.warning(
                 "Reddit HTML scrape failed for r/%s (%s), using RSS: %s",
                 subreddit,
