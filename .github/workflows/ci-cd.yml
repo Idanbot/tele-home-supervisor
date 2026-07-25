@@ -81,6 +81,7 @@ jobs:
       - name: Trivy FS Scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: "v0.72.0"
           scan-type: "fs"
           scan-ref: "."
           trivy-config: trivy.yaml
@@ -182,21 +183,59 @@ jobs:
             --build-arg BUILD_COMMIT="${GITHUB_SHA}" \
             -t tele-home-supervisor:ci-smoke . 2>&1 | tee docker-build.log
 
-      - name: Run Docker image smoke
+      - name: Run Docker Compose migration smoke
         env:
-          SMOKE_CODE: >-
-            from tele_home_supervisor.main import build_application;
-            assert build_application() is not None;
-            print('Container smoke OK')
+          TELEBOT_IMAGE: tele-home-supervisor:ci-smoke
+          BOT_TOKEN: test-token
+          ALLOWED_CHAT_IDS: "123"
+          MEDIA_PATH: ${{ runner.temp }}/telebot-media
+          THERMAL_PATH: ${{ runner.temp }}/telebot-thermal
+          WRITE_SMOKE_CODE: >-
+            from tele_home_supervisor.models import database;
+            from tele_home_supervisor.models.bot_state import BotState;
+            state = BotState();
+            writable, message = state.persistence_status();
+            assert writable, message;
+            state.load_state();
+            state.last_intel_briefing_run = 123.0;
+            state.save(force=True);
+            assert database.schema_version(state._database_file)
+            == database.SCHEMA_VERSION;
+            print('Compose migration write OK')
+          READ_SMOKE_CODE: >-
+            from tele_home_supervisor.models import database;
+            from tele_home_supervisor.models.bot_state import BotState;
+            state = BotState();
+            state.load_state();
+            assert state.last_intel_briefing_run == 123.0;
+            assert database.schema_version(state._database_file)
+            == database.SCHEMA_VERSION;
+            print('Compose migration reload OK')
         run: |
-          set -o pipefail
-          docker run --rm \
+          set -euo pipefail
+          mkdir -p "$MEDIA_PATH"
+          printf '42000\n' > "$THERMAL_PATH"
+          network_created=false
+          if ! docker network inspect bit-net >/dev/null 2>&1; then
+            docker network create bit-net >/dev/null
+            network_created=true
+          fi
+          cleanup() {
+            docker compose -p telebot-ci down --volumes >/dev/null 2>&1 || true
+            if [ "$network_created" = true ]; then
+              docker network rm bit-net >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          docker compose -p telebot-ci run --rm --no-deps \
             --entrypoint python \
-            -e BOT_TOKEN=test-token \
-            -e ALLOWED_CHAT_IDS=123 \
-            tele-home-supervisor:ci-smoke \
-            -c "$SMOKE_CODE" \
+            rpi_telebot -c "$WRITE_SMOKE_CODE" \
             2>&1 | tee docker-run.log
+          docker compose -p telebot-ci run --rm --no-deps \
+            --entrypoint python \
+            rpi_telebot -c "$READ_SMOKE_CODE" \
+            2>&1 | tee -a docker-run.log
 
       - name: Upload container logs
         if: always()
@@ -502,6 +541,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: "v0.72.0"
           image-ref: >-
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOW }}@${{
             steps.build-and-push.outputs.digest }}

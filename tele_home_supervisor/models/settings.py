@@ -51,11 +51,6 @@ class Settings:
     NETWORK_INVENTORY_SCAN_TIMEOUT_S: int
     NETWORK_INVENTORY_NMAP_ARGS: list[str]
 
-    # Reddit
-    REDDIT_CLIENT_ID: str
-    REDDIT_CLIENT_SECRET: str
-    REDDIT_USER_AGENT: str
-
     # TMDB
     TMDB_API_KEY: str
     TMDB_BASE_URL: str
