@@ -17,6 +17,34 @@ _QUALITY_PATTERNS = (
     ("720p", re.compile(r"\b720[pi]\b", re.IGNORECASE)),
     ("480p", re.compile(r"\b(?:480[pi]|dvdrip)\b", re.IGNORECASE)),
 )
+_REJECTED_SOURCE_TOKENS = {
+    "cam",
+    "camrip",
+    "camts",
+    "hdcam",
+    "hqcam",
+    "ts",
+    "hdts",
+    "telesync",
+    "tc",
+    "hdtc",
+    "telecine",
+    "scr",
+    "screener",
+    "dvdscr",
+    "dvdscreener",
+    "workprint",
+    "wp",
+}
+_REJECTED_TITLE_PATTERNS = (
+    re.compile(r"\bxxx\b"),
+    re.compile(r"\bporn\b"),
+    re.compile(r"\bmaking\s+of\b"),
+    re.compile(r"\bbehind\s+the\s+scenes\b"),
+    re.compile(r"\bsoundtrack\b"),
+    re.compile(r"\bfeaturette\b"),
+    re.compile(r"\btrailer\b"),
+)
 
 
 def detect_video_quality(name: str) -> str | None:
@@ -26,12 +54,32 @@ def detect_video_quality(name: str) -> str | None:
     return None
 
 
+def _normalized_words(value: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", value.lower())
+
+
+def _matches_query(query: str, name: str) -> bool:
+    query_words = _normalized_words(query)
+    name_words = set(_normalized_words(name))
+    return bool(query_words) and all(word in name_words for word in query_words)
+
+
+def _is_rejected_release(name: str) -> bool:
+    normalized = " ".join(_normalized_words(name))
+    words = set(normalized.split())
+    return bool(words & _REJECTED_SOURCE_TOKENS) or any(
+        pattern.search(normalized) for pattern in _REJECTED_TITLE_PATTERNS
+    )
+
+
 def select_match(
     watch: ReleaseWatch, results: list[dict[str, object]]
 ) -> dict[str, object] | None:
     accepted = []
     for result in results:
         name = str(result.get("name") or "")
+        if not _matches_query(watch.query, name) or _is_rejected_release(name):
+            continue
         quality = detect_video_quality(name)
         if watch.kind != "game":
             if quality is None or watch.min_quality is None:
@@ -48,7 +96,7 @@ def select_match(
 
 
 async def check_watch(watch: ReleaseWatch) -> dict[str, object] | None:
-    results = await services.piratebay_search(watch.query)
+    results = await services.piratebay_site_search(watch.query)
     return select_match(watch, results)
 
 

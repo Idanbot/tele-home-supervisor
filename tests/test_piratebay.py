@@ -64,4 +64,15 @@ async def test_search_html_fallback(mock_fetch):
     # Should call the search URL
     mock_fetch.assert_called()
     args, _ = mock_fetch.call_args
-    assert "/search/test%20query/" in args[0]
+    assert "/search.php?q=test%20query" in args[0]
+
+
+@pytest.mark.asyncio
+@patch("tele_home_supervisor.piratebay._fetch")
+async def test_search_site_uses_live_html_only(mock_fetch):
+    mock_fetch.return_value = SAMPLE_HTML
+
+    results = await piratebay.search_site("test query")
+
+    assert len(results) == 2
+    assert results[0]["name"] == "Some Movie 2024 1080p"

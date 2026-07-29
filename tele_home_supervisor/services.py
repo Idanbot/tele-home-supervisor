@@ -126,6 +126,10 @@ async def piratebay_search(query: str, debug_sink=None) -> list[dict[str, object
     return await piratebay.search(query, debug_sink)
 
 
+async def piratebay_site_search(query: str, debug_sink=None) -> list[dict[str, object]]:
+    return await piratebay.search_site(query, debug_sink)
+
+
 async def tmdb_trending_movies(page: int = 1) -> dict[str, object]:
     return await tmdb.trending_movies(page)
 

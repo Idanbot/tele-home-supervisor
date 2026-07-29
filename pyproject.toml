@@ -61,6 +61,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "--cov=tele_home_supervisor --cov-report=term-missing --cov-fail-under=70"
 
+[tool.coverage.run]
+data_file = "/tmp/tele-home-supervisor.coverage"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

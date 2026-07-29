@@ -52,6 +52,8 @@ venv.bak/
 
 # Pytest
 .pytest_cache/
+.coverage
+.coverage.*
 
 # Pylance / cache
 .mypy_cache/

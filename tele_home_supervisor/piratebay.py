@@ -313,14 +313,16 @@ async def top(category: str | None, debug_sink=None) -> list[dict[str, object]]:
     return []  # All sources failed - return empty, don't raise
 
 
-async def search(query: str, debug_sink=None) -> list[dict[str, object]]:
+async def _search_html(
+    query: str, debug_sink=None
+) -> tuple[list[dict[str, object]], bool]:
     from tele_home_supervisor import torrentsources
 
     q = (query or "").strip()
     if not q:
-        return []
+        return [], True
     q_escaped = quote(q, safe="")
-    url = f"{config.settings.TPB_BASE_URL}/search/{q_escaped}/0/99/0"
+    url = f"{config.settings.TPB_BASE_URL}/search.php?q={q_escaped}"
     try:
         html_text = await _fetch(url)
         _ensure_not_blocked(html_text)
@@ -328,16 +330,35 @@ async def search(query: str, debug_sink=None) -> list[dict[str, object]]:
         if results:
             logger.debug("piratebay search html results: %s", len(results))
             torrentsources._last_used_provider = "PirateBay"
-            return results
+            return results, True
         if _is_no_results(html_text):
             logger.debug("piratebay search html no results")
             torrentsources._last_used_provider = "PirateBay"
-            return []
+            return [], True
         logger.debug("piratebay search html parse empty; falling back to api")
     except Exception as exc:
         logger.debug("piratebay search html failed: %s", exc)
         if debug_sink:
             debug_sink("piratebay search html failed", str(exc))
+    return [], False
+
+
+async def search_site(query: str, debug_sink=None) -> list[dict[str, object]]:
+    """Search only the live Pirate Bay HTML page, without fallback providers."""
+    results, _ = await _search_html(query, debug_sink)
+    return results
+
+
+async def search(query: str, debug_sink=None) -> list[dict[str, object]]:
+    from tele_home_supervisor import torrentsources
+
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    results, definitive = await _search_html(q, debug_sink)
+    if results or definitive:
+        return results
 
     results = await _api_search(q, debug_sink=debug_sink)
     if results:
