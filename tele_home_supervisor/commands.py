@@ -526,26 +526,26 @@ _AI_COMMANDS = (
     CommandSpec(
         "cf_tts",
         "AI",
-        "/cf-tts <prompt>",
+        "/cf_tts <prompt>",
         "generate speech audio via Cloudflare Workers AI",
         "cmd_cf_tts",
-        aliases=("cf-tts", "cftts"),
+        aliases=("cftts",),
     ),
     CommandSpec(
         "cf_imagegen",
         "AI",
-        "/cf-imagegen <prompt>",
+        "/cf_imagegen <prompt>",
         "generate image via Cloudflare Workers AI (Flux-2-dev)",
         "cmd_cf_imagegen",
-        aliases=("cf-imagegen", "cfimagegen"),
+        aliases=("cfimagegen",),
     ),
     CommandSpec(
         "cf_usage",
         "AI",
-        "/cf-usage",
+        "/cf_usage",
         "show Cloudflare Workers AI usage and allowances",
         "cmd_cf_usage",
-        aliases=("cf-usage", "cfusage"),
+        aliases=("cfusage",),
     ),
 )
 
