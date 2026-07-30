@@ -523,6 +523,30 @@ _AI_COMMANDS = (
         "cancel current Ollama download",
         "cmd_ollamacancel",
     ),
+    CommandSpec(
+        "cf_tts",
+        "AI",
+        "/cf-tts <prompt>",
+        "generate speech audio via Cloudflare Workers AI",
+        "cmd_cf_tts",
+        aliases=("cf-tts", "cftts"),
+    ),
+    CommandSpec(
+        "cf_imagegen",
+        "AI",
+        "/cf-imagegen <prompt>",
+        "generate image via Cloudflare Workers AI (Flux-2-dev)",
+        "cmd_cf_imagegen",
+        aliases=("cf-imagegen", "cfimagegen"),
+    ),
+    CommandSpec(
+        "cf_usage",
+        "AI",
+        "/cf-usage",
+        "show Cloudflare Workers AI usage and allowances",
+        "cmd_cf_usage",
+        aliases=("cf-usage", "cfusage"),
+    ),
 )
 
 

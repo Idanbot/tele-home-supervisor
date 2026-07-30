@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import time
+from io import BytesIO
 from typing import Any
 
 import httpx
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.error import RetryAfter
 from telegram.ext import ContextTypes
 
 from .. import config
 from ..ai_delivery import build_streaming_delivery
 from ..ai_service import GenerationTarget, create_text_provider
+from ..orange_echo import OrangeEchoClient, OrangeEchoError
 from ..utils import split_telegram_message
-from .common import guard
+from .common import get_state, guard, tracked_reply_photo, tracked_reply_voice
 
 logger = logging.getLogger(__name__)
 
@@ -635,3 +639,244 @@ async def _run_ollama_pull(app, message, host: str, model: str) -> None:
             message,
             f"❌ Ollama pull error for {model}\nHost: {host}",
         )
+
+
+async def extract_text_prompt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> str:
+    """Extract text prompt from command args or replied text message/file."""
+    if context.args:
+        return " ".join(context.args).strip()
+
+    reply = update.message.reply_to_message if update and update.message else None
+    if reply:
+        if reply.document:
+            try:
+                tg_file = await context.bot.get_file(reply.document.file_id)
+                data = await tg_file.download_as_bytearray()
+                return data.decode("utf-8", errors="replace").strip()
+            except Exception as e:
+                logger.warning(
+                    "Failed to download or decode text file from reply: %s", e
+                )
+                return ""
+        if reply.text:
+            return reply.text.strip()
+        if reply.caption:
+            return reply.caption.strip()
+
+    return ""
+
+
+async def cmd_cf_tts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Generate speech audio via Cloudflare Workers AI."""
+    if not await guard(update, context):
+        return
+
+    prompt = await extract_text_prompt(update, context)
+    if not prompt:
+        await update.message.reply_text(
+            "Usage: /cf-tts <prompt> (or reply to a text message or file)"
+        )
+        return
+
+    if not config.ORANGE_ECHO_API_KEY:
+        await update.message.reply_text(
+            "❌ ORANGE_ECHO_API_KEY environment variable is not configured."
+        )
+        return
+
+    if len(prompt) > 1600:
+        prompt = prompt[:1600]
+
+    status_msg = await update.message.reply_text(
+        "🔄 Synthesizing speech via Cloudflare AI..."
+    )
+
+    client = OrangeEchoClient(
+        base_url=config.ORANGE_ECHO_BASE_URL,
+        api_key=config.ORANGE_ECHO_API_KEY,
+    )
+    try:
+        audio_bytes = await client.synthesize(prompt)
+        voice_file = BytesIO(audio_bytes)
+        voice_file.name = "speech.ogg"
+
+        state = get_state(context.application)
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception as exc:
+                logger.debug("Failed to delete status message: %s", exc)
+
+        await tracked_reply_voice(
+            update.message,
+            state,
+            voice=voice_file,
+            caption=f"🗣️ Cloudflare TTS ({len(prompt)} chars)",
+        )
+    except OrangeEchoError as e:
+        logger.warning("Cloudflare TTS API error: %s", e)
+        error_text = f"❌ Cloudflare TTS failed: {e.code} - {e}"
+        if status_msg:
+            await status_msg.edit_text(error_text)
+        else:
+            await update.message.reply_text(error_text)
+    except Exception as e:
+        logger.exception("Cloudflare TTS failed: %s", e)
+        error_text = f"❌ Cloudflare TTS failed: {e}"
+        if status_msg:
+            await status_msg.edit_text(error_text)
+        else:
+            await update.message.reply_text(error_text)
+    finally:
+        await client.close()
+
+
+async def cmd_cf_imagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Generate image via Cloudflare Workers AI (Flux-2-dev)."""
+    if not await guard(update, context):
+        return
+
+    prompt = await extract_text_prompt(update, context)
+    if not prompt:
+        await update.message.reply_text(
+            "Usage: /cf-imagegen <prompt> (or reply to a text message or file)"
+        )
+        return
+
+    if not config.ORANGE_ECHO_API_KEY:
+        await update.message.reply_text(
+            "❌ ORANGE_ECHO_API_KEY environment variable is not configured."
+        )
+        return
+
+    if len(prompt) > 2048:
+        prompt = prompt[:2048]
+
+    status_msg = await update.message.reply_text(
+        "🎨 Generating image via Cloudflare AI (Flux-2-dev)..."
+    )
+
+    client = OrangeEchoClient(
+        base_url=config.ORANGE_ECHO_BASE_URL,
+        api_key=config.ORANGE_ECHO_API_KEY,
+    )
+    try:
+        generated = await client.generate_image(prompt)
+        suffix = {
+            "image/jpeg": "jpg",
+            "image/png": "png",
+            "image/webp": "webp",
+        }.get(generated.mime_type, "jpg")
+
+        photo_file = BytesIO(generated.content)
+        photo_file.name = f"image.{suffix}"
+
+        state = get_state(context.application)
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception as exc:
+                logger.debug("Failed to delete status message: %s", exc)
+
+        caption = f"🎨 Model: {generated.model}\nPrompt: {prompt[:200]}"
+        await tracked_reply_photo(
+            update.message,
+            state,
+            photo=photo_file,
+            caption=caption,
+        )
+    except OrangeEchoError as e:
+        logger.warning("Cloudflare ImageGen API error: %s", e)
+        error_text = f"❌ Cloudflare ImageGen failed: {e.code} - {e}"
+        if status_msg:
+            await status_msg.edit_text(error_text)
+        else:
+            await update.message.reply_text(error_text)
+    except Exception as e:
+        logger.exception("Cloudflare ImageGen failed: %s", e)
+        error_text = f"❌ Cloudflare ImageGen failed: {e}"
+        if status_msg:
+            await status_msg.edit_text(error_text)
+        else:
+            await update.message.reply_text(error_text)
+    finally:
+        await client.close()
+
+
+def _format_allowances_json(data: dict[str, object]) -> str:
+    """Format allowances dictionary into a readable Telegram HTML message."""
+    lines = ["📊 <b>Cloudflare Workers AI Allowances & Usage</b>\n"]
+
+    for key, value in data.items():
+        label = html.escape(key.replace("_", " ").title())
+        if isinstance(value, dict):
+            used = value.get("used")
+            limit = value.get("limit")
+            remaining = value.get("remaining")
+            details = []
+            if used is not None and limit is not None:
+                details.append(f"{used}/{limit} used")
+            elif used is not None:
+                details.append(f"used: {used}")
+            if remaining is not None:
+                details.append(f"remaining: {remaining}")
+
+            if not details:
+                details = [f"{k}: {v}" for k, v in value.items()]
+
+            lines.append(
+                f"• <b>{label}</b>: {html.escape(', '.join(str(d) for d in details))}"
+            )
+        else:
+            lines.append(f"• <b>{label}</b>: <code>{html.escape(str(value))}</code>")
+
+    if len(lines) == 1:
+        lines.append("No allowance information available.")
+
+    return "\n".join(lines)
+
+
+async def cmd_cf_usage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Check Cloudflare Workers AI usage and daily allowances."""
+    if not await guard(update, context):
+        return
+
+    if not config.ORANGE_ECHO_API_KEY:
+        await update.message.reply_text(
+            "❌ ORANGE_ECHO_API_KEY environment variable is not configured."
+        )
+        return
+
+    status_msg = await update.message.reply_text(
+        "🔄 Fetching Cloudflare AI allowances..."
+    )
+
+    client = OrangeEchoClient(
+        base_url=config.ORANGE_ECHO_BASE_URL,
+        api_key=config.ORANGE_ECHO_API_KEY,
+    )
+    try:
+        data = await client.get_allowances()
+        message_text = _format_allowances_json(data)
+        if status_msg:
+            await status_msg.edit_text(message_text, parse_mode=ParseMode.HTML)
+        else:
+            await update.message.reply_text(message_text, parse_mode=ParseMode.HTML)
+    except OrangeEchoError as e:
+        logger.warning("Cloudflare allowances API error: %s", e)
+        error_text = f"❌ Failed to fetch allowances: {e.code} - {e}"
+        if status_msg:
+            await status_msg.edit_text(error_text)
+        else:
+            await update.message.reply_text(error_text)
+    except Exception as e:
+        logger.exception("Failed to fetch Cloudflare allowances: %s", e)
+        error_text = f"❌ Failed to fetch allowances: {e}"
+        if status_msg:
+            await status_msg.edit_text(error_text)
+        else:
+            await update.message.reply_text(error_text)
+    finally:
+        await client.close()

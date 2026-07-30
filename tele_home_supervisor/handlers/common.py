@@ -118,6 +118,16 @@ async def tracked_reply_video(message, state: BotState, **kwargs) -> object:
     return sent
 
 
+async def tracked_reply_voice(message, state: BotState, **kwargs) -> object:
+    """Send a voice reply and record it for auto-deletion."""
+    sent = await message.reply_voice(**kwargs)
+    if sent and hasattr(sent, "message_id"):
+        chat_id = getattr(getattr(sent, "chat", None), "id", None)
+        if chat_id is not None:
+            state.track_media_message(chat_id, sent.message_id)
+    return sent
+
+
 def get_state_and_recorder(context) -> tuple[BotState, DebugRecorder]:
     state = get_state(context.application)
     return state, state.debug_recorder()

@@ -294,6 +294,12 @@ def get_settings() -> Settings:
     tpb_cookie = os.environ.get("TPB_COOKIE", "")
     tpb_referer = os.environ.get("TPB_REFERER", "")
 
+    # Cloudflare / Orange Echo
+    orange_echo_base_url = os.environ.get(
+        "ORANGE_ECHO_BASE_URL", "https://orange-echo.botbolidan.workers.dev"
+    ).rstrip("/")
+    orange_echo_api_key = os.environ.get("ORANGE_ECHO_API_KEY", "")
+
     return Settings(
         BOT_TOKEN=token,
         OWNER_ID=owner_id,
@@ -347,6 +353,8 @@ def get_settings() -> Settings:
         TPB_USER_AGENT=tpb_user_agent,
         TPB_COOKIE=tpb_cookie,
         TPB_REFERER=tpb_referer,
+        ORANGE_ECHO_BASE_URL=orange_echo_base_url,
+        ORANGE_ECHO_API_KEY=orange_echo_api_key,
     )
 
 
@@ -451,3 +459,5 @@ NETWORK_INVENTORY_RETENTION_DAYS = settings.NETWORK_INVENTORY_RETENTION_DAYS
 NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE = settings.NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE
 NETWORK_INVENTORY_SCAN_TIMEOUT_S = settings.NETWORK_INVENTORY_SCAN_TIMEOUT_S
 NETWORK_INVENTORY_NMAP_ARGS = settings.NETWORK_INVENTORY_NMAP_ARGS
+ORANGE_ECHO_BASE_URL = settings.ORANGE_ECHO_BASE_URL
+ORANGE_ECHO_API_KEY = settings.ORANGE_ECHO_API_KEY

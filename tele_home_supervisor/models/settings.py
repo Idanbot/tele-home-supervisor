@@ -63,3 +63,7 @@ class Settings:
     TPB_USER_AGENT: str
     TPB_COOKIE: str
     TPB_REFERER: str
+
+    # Cloudflare / Orange Echo
+    ORANGE_ECHO_BASE_URL: str
+    ORANGE_ECHO_API_KEY: str
