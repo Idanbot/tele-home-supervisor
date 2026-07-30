@@ -676,7 +676,7 @@ async def cmd_cf_tts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     prompt = await extract_text_prompt(update, context)
     if not prompt:
         await update.message.reply_text(
-            "Usage: /cf_tts <prompt> (or reply to a text message or file)"
+            "Usage: /cf-tts <prompt> (or reply to a text message or file)"
         )
         return
 
@@ -741,7 +741,7 @@ async def cmd_cf_imagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     prompt = await extract_text_prompt(update, context)
     if not prompt:
         await update.message.reply_text(
-            "Usage: /cf_imagegen <prompt> (or reply to a text message or file)"
+            "Usage: /cf-imagegen <prompt> (or reply to a text message or file)"
         )
         return
 
