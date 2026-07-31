@@ -493,7 +493,10 @@ async def _intel_briefing_scheduler(app: Application) -> None:
                             (
                                 audio_bytes,
                                 error_reason,
-                            ) = await intel.generate_tts_announcer_audio(raw_text)
+                            ) = await intel.generate_tts_announcer_audio(
+                                raw_text, state
+                            )
+
                             if audio_bytes:
                                 voice_file = BytesIO(audio_bytes)
                                 voice_file.name = "intel_narration.ogg"

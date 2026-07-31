@@ -8,7 +8,9 @@ import secrets
 import time
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from .. import services
 from . import persistence
@@ -38,6 +40,33 @@ _MAGNET_CACHE_TTL_S = 30 * 60
 _MAGNET_CACHE_MAX = 200
 _LOG_CACHE_TTL_S = 5 * 60
 _DEBUG_TTL_S = 60 * 60
+
+
+@dataclass
+class CFRunRecord:
+    action: str
+    timestamp: str
+    neurons_used: int
+    total_used_after: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "action": self.action,
+            "timestamp": self.timestamp,
+            "neurons_used": self.neurons_used,
+            "total_used_after": self.total_used_after,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> CFRunRecord:
+        return cls(
+            action=str(data.get("action", "Unknown")),
+            timestamp=str(data.get("timestamp", "")),
+            neurons_used=int(data.get("neurons_used", 0)),
+            total_used_after=int(data.get("total_used_after", 0)),
+        )
+
+
 _DEBUG_MAX_PER_CMD = 50
 _TMDB_CACHE_TTL_S = 15 * 60
 _TMDB_CACHE_MAX = 200
@@ -70,6 +99,7 @@ class BotState:
     intel_fire_time: dict[int, tuple[int, int]] = field(default_factory=dict)
     intel_tts_announcer: set[int] = field(default_factory=set)
     disabled_tts_sections: dict[int, set[str]] = field(default_factory=dict)
+    cf_run_logs: list[CFRunRecord] = field(default_factory=list)
     reddit_briefing_settings: dict[int, RedditBriefingSettings] = field(
         default_factory=dict
     )
@@ -576,6 +606,40 @@ class BotState:
         disabled.add(section_id)
         self.save()
         return False
+
+    def add_cf_run_log(
+        self, action: str, neurons_used: int, total_used_after: int
+    ) -> None:
+        """Log a Cloudflare Workers AI execution with date, time, action, and neurons used."""
+        now_str = datetime.now(ZoneInfo("Asia/Jerusalem")).strftime("%Y-%m-%d %H:%M:%S")
+        record = CFRunRecord(
+            action=action,
+            timestamp=now_str,
+            neurons_used=neurons_used,
+            total_used_after=total_used_after,
+        )
+        self.cf_run_logs.append(record)
+        if len(self.cf_run_logs) > 50:
+            self.cf_run_logs = self.cf_run_logs[-50:]
+        self.save()
+
+    def get_recent_cf_run_logs(self, limit: int = 5) -> list[CFRunRecord]:
+        """Get recent Cloudflare run records (default: last 5)."""
+        return self.cf_run_logs[-limit:]
+
+    def get_cf_command_averages(self, limit: int = 5) -> dict[str, tuple[float, int]]:
+        """Calculate average neurons used over the last N runs per action command."""
+        by_action: dict[str, list[int]] = {}
+        for record in self.cf_run_logs:
+            by_action.setdefault(record.action, []).append(record.neurons_used)
+
+        results: dict[str, tuple[float, int]] = {}
+        for action, neurons_list in by_action.items():
+            recent_samples = neurons_list[-limit:]
+            if recent_samples:
+                avg = sum(recent_samples) / len(recent_samples)
+                results[action] = (avg, len(recent_samples))
+        return results
 
     def grant_auth(
         self,

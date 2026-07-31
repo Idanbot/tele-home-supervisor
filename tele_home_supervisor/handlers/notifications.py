@@ -544,8 +544,9 @@ async def cmd_intel_briefing(
             )
             raw_text = await intel.build_tts_announcer_raw_text(chat_id, state)
             audio_bytes, error_reason = await intel.generate_tts_announcer_audio(
-                raw_text
+                raw_text, state
             )
+
             if audio_bytes:
                 voice_file = BytesIO(audio_bytes)
                 voice_file.name = "intel_narration.ogg"

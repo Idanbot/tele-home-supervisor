@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from conftest import DummyContext, DummyMessage, DummyUpdate
@@ -178,3 +178,41 @@ def test_orange_echo_error_user_friendly_message():
 
     err_generic = OrangeEchoError(500, "internal_error", "Server crashed")
     assert "Cloudflare AI Error (internal_error)" in err_generic.user_friendly_message()
+
+
+def test_extract_total_neurons():
+    from tele_home_supervisor.orange_echo import extract_total_neurons
+
+    assert (
+        extract_total_neurons(
+            {"daily_neurons": {"used": 1200, "limit": 10000, "remaining": 8800}}
+        )
+        == 1200
+    )
+    assert extract_total_neurons({"used": 500}) == 500
+    assert extract_total_neurons({"unknown": "data"}) == 0
+
+
+@pytest.mark.asyncio
+async def test_track_cf_action():
+    from tele_home_supervisor.models.bot_state import BotState
+    from tele_home_supervisor.orange_echo import track_cf_action
+
+    client = Mock()
+    client.get_allowances = AsyncMock(
+        side_effect=[
+            {"daily_neurons": {"used": 100}},
+            {"daily_neurons": {"used": 250}},
+        ]
+    )
+
+    async def dummy_coro():
+        return "result"
+
+    state = BotState()
+    res = await track_cf_action(client, state, "Test Action", dummy_coro())
+    assert res == "result"
+    assert len(state.cf_run_logs) == 1
+    assert state.cf_run_logs[0].action == "Test Action"
+    assert state.cf_run_logs[0].neurons_used == 150
+    assert state.cf_run_logs[0].total_used_after == 250

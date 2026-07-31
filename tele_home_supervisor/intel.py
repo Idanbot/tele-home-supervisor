@@ -506,6 +506,7 @@ async def build_tts_announcer_raw_text(
 
 async def generate_tts_announcer_audio(
     raw_text: str,
+    state: BotState | None = None,
 ) -> tuple[bytes | None, str | None]:
     """Send raw TTS text to Cloudflare Workers AI (Orange Echo) optimize & speech pipeline."""
     if not config.ORANGE_ECHO_API_KEY:
@@ -513,13 +514,21 @@ async def generate_tts_announcer_audio(
         logger.warning(err_msg)
         return None, err_msg
 
+    from .orange_echo import track_cf_action
+
     client = OrangeEchoClient(
         base_url=config.ORANGE_ECHO_BASE_URL,
         api_key=config.ORANGE_ECHO_API_KEY,
     )
     try:
-        narration = await client.optimize(raw_text, target_characters=900)
-        audio_bytes = await client.synthesize(narration)
+
+        async def _run_pipeline() -> bytes:
+            narration = await client.optimize(raw_text, target_characters=900)
+            return await client.synthesize(narration)
+
+        audio_bytes = await track_cf_action(
+            client, state, "TTS Announcer (briefing)", _run_pipeline()
+        )
         return audio_bytes, None
     except OrangeEchoError as e:
         logger.warning("Cloudflare Workers AI TTS announcer failed: %s", e)

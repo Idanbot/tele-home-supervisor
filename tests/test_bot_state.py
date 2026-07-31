@@ -433,3 +433,21 @@ class TestBotStateAudit:
         state.clear_audit_entries(123)
         entries = state.get_audit_entries(123, limit=10)
         assert len(entries) == 0
+
+    def test_cf_run_logging(self, tmp_path) -> None:
+        state = BotState()
+        state._state_file = tmp_path / "state.json"
+        state._database_file = tmp_path / "state.sqlite3"
+
+        state.add_cf_run_log("TTS (/cftts)", 50, 150)
+        state.add_cf_run_log("TTS (/cftts)", 70, 220)
+        state.add_cf_run_log("ImageGen (/cfimagegen)", 1500, 1720)
+        state.add_cf_run_log("TTS Announcer (briefing)", 100, 1820)
+
+        logs = state.get_recent_cf_run_logs(5)
+        assert len(logs) == 4
+
+        averages = state.get_cf_command_averages(5)
+        assert averages["TTS (/cftts)"] == (60.0, 2)
+        assert averages["ImageGen (/cfimagegen)"] == (1500.0, 1)
+        assert averages["TTS Announcer (briefing)"] == (100.0, 1)

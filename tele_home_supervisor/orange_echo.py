@@ -6,8 +6,12 @@ import base64
 import html
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from .models.bot_state import BotState
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +28,10 @@ class OrangeEchoError(RuntimeError):
         if self.code == "quota_exceeded":
             return (
                 "⚠️ <b>Cloudflare AI Daily Quota Exceeded</b>\n"
-                f"The daily free-tier limit for this operation has been reached.\n<i>{escaped_msg}</i>"
+                "The daily free-tier limit of 10,000 Neurons has been reached (resets daily at 00:00 UTC).\n"
+                f"<i>{escaped_msg}</i>"
             )
+
         elif self.code in ("unauthorized", "invalid_api_key"):
             return (
                 "❌ <b>Cloudflare AI Authentication Failed</b>\n"
@@ -146,3 +152,66 @@ class OrangeEchoClient:
             code = "orange_echo_error"
             message = f"Orange Echo returned HTTP {response.status_code}"
         raise OrangeEchoError(response.status_code, code, message)
+
+
+def extract_total_neurons(data: dict[str, object]) -> int:
+    """Extract total used neurons count from Cloudflare allowance JSON."""
+    if not isinstance(data, dict):
+        return 0
+    for k in ("daily_neurons", "neurons", "usage", "allowance"):
+        v = data.get(k)
+        if isinstance(v, dict):
+            used = v.get("used")
+            if used is not None:
+                try:
+                    return int(used)
+                except TypeError, ValueError:
+                    pass
+    if "used" in data:
+        try:
+            return int(data["used"])
+        except TypeError, ValueError:
+            pass
+    for v in data.values():
+        if isinstance(v, dict) and "used" in v:
+            try:
+                return int(v["used"])
+            except TypeError, ValueError:
+                pass
+    return 0
+
+
+async def track_cf_action(
+    client: OrangeEchoClient,
+    state: BotState | None,
+    action_name: str,
+    action_coro: Any,
+) -> Any:
+    """Execute a Cloudflare AI action, checking allowance before and after to log consumed neurons."""
+    neurons_before = 0
+    try:
+        allow_before = await client.get_allowances()
+        neurons_before = extract_total_neurons(allow_before)
+    except Exception as exc:
+        logger.debug("Failed to fetch allowances before %s: %s", action_name, exc)
+
+    result = await action_coro
+
+    neurons_after = neurons_before
+    try:
+        allow_after = await client.get_allowances()
+        neurons_after = extract_total_neurons(allow_after)
+    except Exception as exc:
+        logger.debug("Failed to fetch allowances after %s: %s", action_name, exc)
+
+    consumed = max(0, neurons_after - neurons_before)
+    logger.info(
+        "CF Action '%s' executed: used %d neurons (total today: %d)",
+        action_name,
+        consumed,
+        neurons_after,
+    )
+    if state is not None:
+        state.add_cf_run_log(action_name, consumed, neurons_after)
+
+    return result

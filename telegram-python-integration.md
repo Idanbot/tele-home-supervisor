@@ -362,9 +362,7 @@ Recommended sequence:
 8. optionally generate one image;
 9. delete local temporary files according to the bot's retention policy.
 
-Do not blindly retry a `429 quota_exceeded`. The current service claims a daily operation
-before invoking its model. A transient failure can therefore consume that operation's
-allowance even when no output is returned.
+Do not blindly retry a `429 quota_exceeded`. Cloudflare Workers AI free tier provides 10,000 Neurons per day across all inference operations, resetting daily at 00:00 UTC. If the limit is reached, requests will fail with `quota_exceeded` until the next 00:00 UTC reset.
 
 It is safe to retry Telegram delivery from a locally saved OGG or image because that does
 not call Orange Echo again.
@@ -377,9 +375,10 @@ not call Orange Echo again.
 |  401 | `authentication_failed`         | Stop and repair `ORANGE_ECHO_API_KEY`                     |
 |  403 | `insufficient_scope`            | Stop and update the API-client scopes                     |
 |  413 | `source_too_large`              | Trim input before retrying                                |
-|  429 | `quota_exceeded`                | Do not retry until after 00:00 UTC                        |
+|  429 | `quota_exceeded`                | 10k daily Neurons reached; retry after 00:00 UTC          |
 |  500 | `internal_error`                | Alert; check Worker logs before retrying                  |
-|  502 | model-specific invalid response | Alert; the daily allowance may already be used            |
+|  502 | model-specific invalid response | Alert; check model status before retrying                 |
+
 
 Never log:
 

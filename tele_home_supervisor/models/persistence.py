@@ -47,6 +47,7 @@ def serialize(state: BotState) -> dict:
         "disabled_tts_sections": {
             str(k): list(v) for k, v in state.disabled_tts_sections.items()
         },
+        "cf_run_logs": [r.to_dict() for r in state.cf_run_logs],
         "reddit_briefing_settings": {
             str(chat_id): settings.to_dict()
             for chat_id, settings in state.reddit_briefing_settings.items()
@@ -153,6 +154,18 @@ def _deserialize_core(state: BotState, data: dict) -> None:
                 state.disabled_tts_sections[int(k)] = set(v)
             except TypeError, ValueError:
                 continue
+
+    from .bot_state import CFRunRecord
+
+    state.cf_run_logs = []
+    raw_cf_logs = data.get("cf_run_logs") or []
+    if isinstance(raw_cf_logs, list):
+        for item in raw_cf_logs:
+            if isinstance(item, dict):
+                try:
+                    state.cf_run_logs.append(CFRunRecord.from_dict(item))
+                except TypeError, ValueError:
+                    continue
 
     state.reddit_briefing_settings = {}
 

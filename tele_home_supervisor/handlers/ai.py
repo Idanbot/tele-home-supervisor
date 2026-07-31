@@ -19,7 +19,8 @@ from telegram.ext import ContextTypes
 from .. import config
 from ..ai_delivery import build_streaming_delivery
 from ..ai_service import GenerationTarget, create_text_provider
-from ..orange_echo import OrangeEchoClient, OrangeEchoError
+from ..models.bot_state import CFRunRecord
+from ..orange_echo import OrangeEchoClient, OrangeEchoError, track_cf_action
 from ..utils import split_telegram_message
 from .common import get_state, guard, tracked_reply_photo, tracked_reply_voice
 
@@ -696,11 +697,13 @@ async def cmd_cftts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         api_key=config.ORANGE_ECHO_API_KEY,
     )
     try:
-        audio_bytes = await client.synthesize(prompt)
+        state = get_state(context.application)
+        audio_bytes = await track_cf_action(
+            client, state, "TTS (/cftts)", client.synthesize(prompt)
+        )
         voice_file = BytesIO(audio_bytes)
         voice_file.name = "speech.ogg"
 
-        state = get_state(context.application)
         if status_msg:
             try:
                 await status_msg.delete()
@@ -762,7 +765,10 @@ async def cmd_cfimagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         api_key=config.ORANGE_ECHO_API_KEY,
     )
     try:
-        generated = await client.generate_image(prompt)
+        state = get_state(context.application)
+        generated = await track_cf_action(
+            client, state, "ImageGen (/cfimagegen)", client.generate_image(prompt)
+        )
         suffix = {
             "image/jpeg": "jpg",
             "image/png": "png",
@@ -805,9 +811,16 @@ async def cmd_cfimagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await client.close()
 
 
-def _format_allowances_json(data: dict[str, object]) -> str:
-    """Format allowances dictionary into a readable Telegram HTML message."""
-    lines = ["📊 <b>Cloudflare Workers AI Allowances & Usage</b>\n"]
+def _format_allowances_json(
+    data: dict[str, object],
+    recent_logs: list[CFRunRecord] | None = None,
+    averages: dict[str, tuple[float, int]] | None = None,
+) -> str:
+    """Format allowances dictionary into a readable Telegram HTML message with averages and local run logs."""
+    lines = [
+        "📊 <b>Cloudflare Workers AI Allowances & Usage</b>",
+        "<i>Free tier provides 10,000 Neurons daily (resets 00:00 UTC).</i>\n",
+    ]
 
     for key, value in data.items():
         label = html.escape(key.replace("_", " ").title())
@@ -817,11 +830,11 @@ def _format_allowances_json(data: dict[str, object]) -> str:
             remaining = value.get("remaining")
             details = []
             if used is not None and limit is not None:
-                details.append(f"{used}/{limit} used")
+                details.append(f"{used:,} / {limit:,} neurons used")
             elif used is not None:
-                details.append(f"used: {used}")
+                details.append(f"used: {used:,} neurons")
             if remaining is not None:
-                details.append(f"remaining: {remaining}")
+                details.append(f"remaining: {remaining:,} neurons")
 
             if not details:
                 details = [f"{k}: {v}" for k, v in value.items()]
@@ -832,8 +845,23 @@ def _format_allowances_json(data: dict[str, object]) -> str:
         else:
             lines.append(f"• <b>{label}</b>: <code>{html.escape(str(value))}</code>")
 
-    if len(lines) == 1:
-        lines.append("No allowance information available.")
+    if len(lines) <= 2:
+        lines.append("No detailed allowance breakdown returned by Worker.")
+
+    if averages:
+        lines.append("\n📈 <b>Average Neurons per Command (Last 5 Runs):</b>")
+        for action, (avg, count) in averages.items():
+            lines.append(
+                f"• <b>{html.escape(action)}</b>: <code>~{avg:,.1f} neurons/run</code> ({count} samples)"
+            )
+
+    if recent_logs:
+        lines.append("\n🕒 <b>Recent Cloudflare Runs (Last 5):</b>")
+        for rec in reversed(recent_logs[-5:]):
+            lines.append(
+                f"• <b>{rec.timestamp}</b> — {html.escape(rec.action)}: "
+                f"<code>+{rec.neurons_used:,} neurons</code> (Total: {rec.total_used_after:,})"
+            )
 
     return "\n".join(lines)
 
@@ -858,10 +886,16 @@ async def cmd_cfusage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         api_key=config.ORANGE_ECHO_API_KEY,
     )
     try:
+        state = get_state(context.application)
         data = await client.get_allowances()
-        message_text = _format_allowances_json(data)
+        recent_logs = state.get_recent_cf_run_logs(5)
+        averages = state.get_cf_command_averages(5)
+        message_text = _format_allowances_json(
+            data, recent_logs=recent_logs, averages=averages
+        )
         if status_msg:
             await status_msg.edit_text(message_text, parse_mode=ParseMode.HTML)
+
         else:
             await update.message.reply_text(message_text, parse_mode=ParseMode.HTML)
     except OrangeEchoError as e:
