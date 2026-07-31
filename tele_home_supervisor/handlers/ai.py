@@ -822,19 +822,29 @@ def _format_allowances_json(
         "<i>Free tier provides 10,000 Neurons daily (resets 00:00 UTC).</i>\n",
     ]
 
-    for key, value in data.items():
+    reset_info = ""
+    reset_in = data.get("reset_in")
+    if isinstance(reset_in, dict) and "formatted" in reset_in:
+        reset_info = f"Resets in: {html.escape(str(reset_in['formatted']))}"
+
+    target_dict = data
+    if "allowances" in data and isinstance(data["allowances"], dict):
+        target_dict = data["allowances"]
+
+    for key, value in target_dict.items():
         label = html.escape(key.replace("_", " ").title())
         if isinstance(value, dict):
             used = value.get("used")
             limit = value.get("limit")
             remaining = value.get("remaining")
+            unit = "neurons" if key == "neurons" else "uses"
             details = []
             if used is not None and limit is not None:
-                details.append(f"{used:,} / {limit:,} neurons used")
+                details.append(f"{used:,} / {limit:,} {unit}")
             elif used is not None:
-                details.append(f"used: {used:,} neurons")
+                details.append(f"used: {used:,} {unit}")
             if remaining is not None:
-                details.append(f"remaining: {remaining:,} neurons")
+                details.append(f"remaining: {remaining:,} {unit}")
 
             if not details:
                 details = [f"{k}: {v}" for k, v in value.items()]
@@ -842,8 +852,11 @@ def _format_allowances_json(
             lines.append(
                 f"• <b>{label}</b>: {html.escape(', '.join(str(d) for d in details))}"
             )
-        else:
+        elif key not in ("date", "reset_at", "reset_in"):
             lines.append(f"• <b>{label}</b>: <code>{html.escape(str(value))}</code>")
+
+    if reset_info:
+        lines.append(f"\n⏳ <b>Reset Window</b>: <code>{reset_info}</code>")
 
     if len(lines) <= 2:
         lines.append("No detailed allowance breakdown returned by Worker.")

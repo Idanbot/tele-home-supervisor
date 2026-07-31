@@ -158,6 +158,9 @@ def extract_total_neurons(data: dict[str, object]) -> int:
     """Extract total used neurons count from Cloudflare allowance JSON."""
     if not isinstance(data, dict):
         return 0
+    allowances = data.get("allowances")
+    if isinstance(allowances, dict):
+        data = allowances
     for k in ("daily_neurons", "neurons", "usage", "allowance"):
         v = data.get(k)
         if isinstance(v, dict):
