@@ -32,7 +32,7 @@ async def test_cmd_cf_tts_success(monkeypatch):
     update = DummyUpdate(chat_id=1, user_id=1)
     context = DummyContext(args=["Hello", "world", "speech", "test"])
 
-    await ai.cmd_cf_tts(update, context)
+    await ai.cmd_cftts(update, context)
 
     mock_synthesize.assert_called_once_with("Hello world speech test")
     assert len(update.message.voices) == 1
@@ -66,7 +66,7 @@ async def test_cmd_cf_tts_from_reply_file(monkeypatch):
     )
     context.bot.get_file = AsyncMock(return_value=fake_tg_file)
 
-    await ai.cmd_cf_tts(update, context)
+    await ai.cmd_cftts(update, context)
 
     context.bot.get_file.assert_called_once_with("doc123")
     mock_synthesize.assert_called_once_with("Narration text from file attachment")
@@ -90,7 +90,7 @@ async def test_cmd_cf_imagegen_success(monkeypatch):
     update = DummyUpdate(chat_id=1, user_id=1)
     context = DummyContext(args=["Cyberpunk", "city", "sunset"])
 
-    await ai.cmd_cf_imagegen(update, context)
+    await ai.cmd_cfimagegen(update, context)
 
     mock_gen_img.assert_called_once_with("Cyberpunk city sunset")
     assert len(update.message.photos) == 1

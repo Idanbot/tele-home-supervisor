@@ -36,7 +36,8 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 
 ### 🧠 Local & Cloud AI Integration
 *   **Ollama Support**: Chat with local LLMs (Llama 3, Mistral, etc.) directly in Telegram.
-*   **Cloudflare Workers AI**: Text-to-speech audio (`/cf-tts`) and image generation (`/cf-imagegen`) using Flux-2-dev.
+*   **Cloudflare Workers AI**: Text-to-speech audio (`/cftts`), image generation (`/cfimagegen`) using Flux-2-dev, and usage statistics (`/cfusage`).
+
 *   **Smart Splitting**: Automatically handles long responses by splitting them into multiple readable messages.
 *   **Model Management**: List, pull, and switch models on the fly.
 
@@ -104,7 +105,8 @@ docker compose up -d
 | `OLLAMA_HOST` | URL for Ollama API (e.g., `http://172.17.0.1:11434` for host access). |
 | `OLLAMA_MODEL` | Default model to use (default: `llama2`). |
 | `ORANGE_ECHO_BASE_URL` | Base URL for Cloudflare Workers AI service (default: `https://orange-echo.botbolidan.workers.dev`). |
-| `ORANGE_ECHO_API_KEY` | API key for Cloudflare Workers AI service (enables `/cf-tts` and `/cf-imagegen`). |
+| `ORANGE_ECHO_API_KEY` | API key for Cloudflare Workers AI service (enables `/cftts`, `/cfimagegen`, `/cfusage`). |
+
 | `QBT_HOST` | qBittorrent hostname/IP. |
 
 | `QBT_PORT` | qBittorrent WebUI port (default: `8080`). |
@@ -276,9 +278,10 @@ the `telebot_data` Docker volume.
 | :--- | :--- |
 | `/ask <question>` | ask a question, flags: --temp|-t 0.4 --top-k|-k 40 --top-p|-p 0.9 --num-predict|-n 640 |
 | `/askreset` | reset custom AI generation parameters |
-| `/cf-tts <prompt>` | generate speech audio via Cloudflare Workers AI (or reply to text file/message) |
-| `/cf-imagegen <prompt>` | generate image via Cloudflare Workers AI Flux-2-dev (or reply to text file/message) |
-| `/cf-usage` | show Cloudflare Workers AI usage and daily allowances |
+| `/cftts <prompt>` | generate speech audio via Cloudflare Workers AI (or reply to text file/message) |
+| `/cfimagegen <prompt>` | generate image via Cloudflare Workers AI Flux-2-dev (or reply to text file/message) |
+| `/cfusage` | show Cloudflare Workers AI usage and daily allowances |
+
 
 | `/ollamahost <http://host:port>` | set Ollama host target |
 

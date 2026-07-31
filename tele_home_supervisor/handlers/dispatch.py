@@ -103,9 +103,9 @@ cmd_ollamalist = rate_limit(ai.cmd_ollamalist, name="ollamalist")
 cmd_ollamapull = rate_limit(ai.cmd_ollamapull, name="ollamapull")
 cmd_ollamastatus = rate_limit(ai.cmd_ollamastatus, name="ollamastatus")
 cmd_ollamacancel = rate_limit(ai.cmd_ollamacancel, name="ollamacancel")
-cmd_cf_tts = rate_limit(ai.cmd_cf_tts, name="cf_tts")
-cmd_cf_imagegen = rate_limit(ai.cmd_cf_imagegen, name="cf_imagegen")
-cmd_cf_usage = rate_limit(ai.cmd_cf_usage, name="cf_usage")
+cmd_cftts = rate_limit(ai.cmd_cftts, name="cftts")
+cmd_cfimagegen = rate_limit(ai.cmd_cfimagegen, name="cfimagegen")
+cmd_cfusage = rate_limit(ai.cmd_cfusage, name="cfusage")
 
 
 # Media

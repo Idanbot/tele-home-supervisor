@@ -665,10 +665,8 @@ async def extract_text_prompt(
         if reply.caption:
             return reply.caption.strip()
 
-    return ""
 
-
-async def cmd_cf_tts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_cftts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Generate speech audio via Cloudflare Workers AI."""
     if not await guard(update, context):
         return
@@ -676,7 +674,7 @@ async def cmd_cf_tts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     prompt = await extract_text_prompt(update, context)
     if not prompt:
         await update.message.reply_text(
-            "Usage: /cf-tts <prompt> (or reply to a text message or file)"
+            "Usage: /cftts <prompt> (or reply to a text message or file)"
         )
         return
 
@@ -733,7 +731,7 @@ async def cmd_cf_tts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await client.close()
 
 
-async def cmd_cf_imagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_cfimagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Generate image via Cloudflare Workers AI (Flux-2-dev)."""
     if not await guard(update, context):
         return
@@ -741,7 +739,7 @@ async def cmd_cf_imagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     prompt = await extract_text_prompt(update, context)
     if not prompt:
         await update.message.reply_text(
-            "Usage: /cf-imagegen <prompt> (or reply to a text message or file)"
+            "Usage: /cfimagegen <prompt> (or reply to a text message or file)"
         )
         return
 
@@ -838,7 +836,7 @@ def _format_allowances_json(data: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-async def cmd_cf_usage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_cfusage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check Cloudflare Workers AI usage and daily allowances."""
     if not await guard(update, context):
         return

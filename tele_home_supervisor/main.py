@@ -60,6 +60,7 @@ async def register_bot_commands(app: Application) -> None:
             bot_commands.append(BotCommand(spec.name, spec.description))
 
         await app.bot.set_my_commands(bot_commands)
+
         logger.info(f"Registered {len(bot_commands)} commands for autocomplete")
     except Exception as e:
         logger.warning(f"Failed to register bot commands: {e}")
