@@ -8,6 +8,7 @@ import logging
 import tempfile
 import time
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -436,48 +437,78 @@ async def _game_offers_scheduler(app: Application) -> None:
 
 
 async def _intel_briefing_scheduler(app: Application) -> None:
-    """Schedule Intel Briefing at 8 AM Israel time daily."""
-    logger.info("Starting Intel Briefing scheduler (8 AM Israel time)")
+    """Schedule Intel Briefing based on per-chat configured fire time (Israel time)."""
+    logger.info("Starting Intel Briefing scheduler")
 
     while not _shutdown_requested:
         try:
-            wait_seconds = _seconds_until_time(8, 0)
-            logger.info(
-                "Intel Briefing: waiting %.1f seconds until next run", wait_seconds
-            )
-            if await _interruptible_sleep(wait_seconds):
-                break
-
             state = _get_state(app)
-            now = time.time()
-            if (now - state.last_intel_briefing_run) < (22 * 3600):
-                logger.info("Intel Briefing: already ran recently, skipping")
-                await _interruptible_sleep(300)
-                continue
-
-            if not settings.ALLOWED_CHAT_IDS:
-                logger.warning("No allowed chat IDs configured")
+            allowed_chats = settings.ALLOWED_CHAT_IDS
+            if not allowed_chats:
+                logger.warning("No allowed chat IDs configured for Intel Briefing")
                 await _interruptible_sleep(3600)
                 continue
 
-            for chat_id in settings.ALLOWED_CHAT_IDS:
-                try:
-                    message = await intel.build_intel_briefing(chat_id, state)
-                    await app.bot.send_message(
-                        chat_id=chat_id,
-                        text=message,
-                        parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to send Intel Briefing notification to chat_id=%s",
-                        chat_id,
-                    )
+            # Calculate wait times per chat
+            waits = []
+            for chat_id in allowed_chats:
+                h, m = state.get_intel_fire_time(chat_id)
+                waits.append(_seconds_until_time(h, m))
 
-            state.last_intel_briefing_run = now
-            state.save()
-            await _interruptible_sleep(120)
+            next_wait = min(waits) if waits else 3600
+            # Cap wait to 60s to dynamically pick up setting changes in /intel_settings
+            sleep_time = min(next_wait, 60.0)
+            if sleep_time > 0.5:
+                if await _interruptible_sleep(sleep_time):
+                    break
+
+            now = time.time()
+            for chat_id in allowed_chats:
+                h, m = state.get_intel_fire_time(chat_id)
+                time_until = _seconds_until_time(h, m)
+                # If target time is within 120 seconds or has just arrived (time_until > 23h58m)
+                if time_until < 120 or time_until > (23 * 3600 + 58 * 60):
+                    if (now - state.last_intel_briefing_run) < (20 * 3600):
+                        continue
+
+                    logger.info("Firing Intel Briefing for chat_id=%s", chat_id)
+                    try:
+                        message = await intel.build_intel_briefing(chat_id, state)
+                        await app.bot.send_message(
+                            chat_id=chat_id,
+                            text=message,
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=True,
+                        )
+
+                        # Check if TTS Announcer is enabled for this chat
+                        if state.is_tts_announcer_enabled(chat_id):
+                            logger.info(
+                                "Generating TTS Announcer audio for chat_id=%s",
+                                chat_id,
+                            )
+                            raw_text = await intel.build_tts_announcer_raw_text(
+                                chat_id, state
+                            )
+                            audio_bytes = await intel.generate_tts_announcer_audio(
+                                raw_text
+                            )
+                            if audio_bytes:
+                                voice_file = BytesIO(audio_bytes)
+                                voice_file.name = "intel_narration.ogg"
+                                await app.bot.send_voice(
+                                    chat_id=chat_id,
+                                    voice=voice_file,
+                                    caption="🗣️ Morning Intel Briefing",
+                                )
+                    except Exception:
+                        logger.exception(
+                            "Failed to send Intel Briefing notification to chat_id=%s",
+                            chat_id,
+                        )
+
+                    state.last_intel_briefing_run = now
+                    state.save()
 
         except asyncio.CancelledError:
             raise

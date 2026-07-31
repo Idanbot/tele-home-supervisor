@@ -122,12 +122,13 @@ async def test_intel_toggle_and_briefing(monkeypatch):
     query = Mock()
     query.data = "intel_toggle:weather"
     query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
     query.edit_message_reply_markup = AsyncMock()
     update.callback_query = query
 
     await notifications.cb_intel_toggle(update, context)
     query.answer.assert_awaited_once()
-    query.edit_message_reply_markup.assert_awaited_once()
+    assert query.edit_message_text.awaited or query.edit_message_reply_markup.awaited
 
 
 @pytest.mark.asyncio

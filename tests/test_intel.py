@@ -214,3 +214,123 @@ async def test_build_intel_briefing_all_disabled():
 
     intel_msg = await intel.build_intel_briefing(chat_id, state)
     assert "All intel modules are disabled" in intel_msg
+
+
+def test_clean_text_for_tts():
+    raw = "☀️ <b>Good morning!</b> | • Weather: 22°C *Rain* 🌧️"
+    cleaned = intel.clean_text_for_tts(raw)
+    assert "☀️" not in cleaned
+    assert "<b>" not in cleaned
+    assert "•" not in cleaned
+    assert "Good morning!" in cleaned
+    assert "Weather: 22°C Rain" in cleaned
+
+
+@pytest.mark.asyncio
+async def test_get_weather_for_tts():
+    fake_payloads = [
+        {
+            "daily": {
+                "temperature_2m_max": [30.0],
+                "temperature_2m_min": [20.0],
+                "precipitation_probability_max": [10],
+            }
+        },
+        {
+            "daily": {
+                "temperature_2m_max": [28.0],
+                "temperature_2m_min": [22.0],
+                "precipitation_probability_max": [40],
+            }
+        },
+    ]
+    with patch(
+        "tele_home_supervisor.intel._fetch_weather_payloads",
+        return_value=(fake_payloads, []),
+    ):
+        weather_summary = await intel.get_weather_for_tts()
+        assert "25 degrees Celsius" in weather_summary
+        assert "40 percent chance of rain" in weather_summary
+
+
+@pytest.mark.asyncio
+async def test_build_tts_announcer_raw_text_truncation():
+    state = BotState()
+    chat_id = 999
+
+    with (
+        patch(
+            "tele_home_supervisor.intel.get_global_news",
+            return_value=["Global news headline"],
+        ),
+        patch(
+            "tele_home_supervisor.intel.get_israel_news",
+            return_value=[
+                "Israel headline 1",
+                "Israel headline 2",
+                "Israel headline 3",
+            ],
+        ),
+        patch(
+            "tele_home_supervisor.intel.scheduled_fetchers.fetch_hackernews_top",
+            return_value="Hacker News\n1. HN Story One\n2. HN Story Two",
+        ),
+        patch(
+            "tele_home_supervisor.intel.get_reddit_digest",
+            return_value="Reddit\n1. Reddit Post One\n2. Reddit Post Two",
+        ),
+        patch(
+            "tele_home_supervisor.intel.get_stoic_quote",
+            return_value="Stoic quote test",
+        ),
+        patch(
+            "tele_home_supervisor.intel.get_weather_for_tts",
+            return_value="Weather test summary",
+        ),
+    ):
+        # 1. Normal build under limit
+        text = await intel.build_tts_announcer_raw_text(chat_id, state, max_chars=2000)
+        assert "Greeting:" in text
+        assert "Weather:" in text
+        assert "Israel and World News:" in text
+        assert "Hacker News:" in text
+        assert "Reddit Trends:" in text
+        assert "Stoic Wisdom:" in text
+
+        # 2. Strict limit forces removing Reddit section first
+        text_no_reddit = await intel.build_tts_announcer_raw_text(
+            chat_id, state, max_chars=180
+        )
+        assert "Reddit Trends:" not in text_no_reddit
+        assert "Israel and World News:" in text_no_reddit
+
+        # 3. Very strict limit forces removing Hacker News section second
+        text_no_hn = await intel.build_tts_announcer_raw_text(
+            chat_id, state, max_chars=100
+        )
+        assert "Reddit Trends:" not in text_no_hn
+        assert "Hacker News:" not in text_no_hn
+
+
+@pytest.mark.asyncio
+async def test_bot_state_intel_fire_time_and_tts_toggle():
+    state = BotState()
+    chat_id = 777
+
+    # Test defaults
+    assert state.get_intel_fire_time(chat_id) == (8, 0)
+    assert not state.is_tts_announcer_enabled(chat_id)
+
+    # Test setting fire time
+    with patch.object(state, "save"):
+        state.set_intel_fire_time(chat_id, 9, 30)
+        assert state.get_intel_fire_time(chat_id) == (9, 30)
+
+        # Test toggling TTS announcer
+        enabled = state.toggle_tts_announcer(chat_id)
+        assert enabled is True
+        assert state.is_tts_announcer_enabled(chat_id) is True
+
+        disabled = state.toggle_tts_announcer(chat_id)
+        assert disabled is False
+        assert state.is_tts_announcer_enabled(chat_id) is False

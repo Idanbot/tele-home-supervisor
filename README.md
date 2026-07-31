@@ -241,7 +241,8 @@ unchanged as rollback copies.
 | `/steamfree [n]` | show current Steam free-to-keep games |
 | `/gogfree` | show current GOG free games |
 | `/humblefree` | show current Humble Bundle free games |
-| `/intel_settings` | Intel Briefing module settings |
+| `/intel_settings` | Intel Briefing settings (toggle modules, edit scheduled fire time, toggle TTS Announcer voice narration) |
+
 | `/intel_briefing` | fetch Intel Briefing on demand |
 | `/reddit_settings` | show Reddit briefing groups, custom subreddits, count, and mode |
 | `/reddit_settings group fun\|tech\|devops on\|off` | enable or disable a built-in subreddit group |

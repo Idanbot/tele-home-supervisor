@@ -3,18 +3,22 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+from defusedxml import ElementTree as ET
 
+from . import config, utils
 from . import scheduled as scheduled_fetchers
-from . import utils
 from .models.bot_state import BotState
+from .orange_echo import OrangeEchoClient, OrangeEchoError
 from .reddit_briefing import get_reddit_digest
 
 logger = logging.getLogger(__name__)
+
 
 _ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 
@@ -277,3 +281,239 @@ def _format_fetch_error(exc: Exception) -> str:
     if len(message) > 120:
         return f"{message[:117]}..."
     return message
+
+
+_ISRAEL_NEWS_FEEDS = [
+    "https://www.timesofisrael.com/feed/",
+    "https://www.jpost.com/rss/rssfeedsfrontpage.aspx",
+    "https://www.ynetnews.com/Integration/StoryRss1854.xml",
+]
+
+_GLOBAL_NEWS_FEEDS = [
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+]
+
+
+async def fetch_rss_headlines(urls: list[str], limit: int) -> list[str]:
+    """Fetch headlines from a list of RSS feed URLs."""
+    client = _get_client()
+    titles: list[str] = []
+    for url in urls:
+        try:
+            res = await client.get(url, follow_redirects=True)
+            res.raise_for_status()
+            root = ET.fromstring(res.content)
+            for item in root.findall(".//item"):
+                t = item.find("title")
+                if t is not None and t.text:
+                    cleaned = html.unescape(t.text).strip()
+                    cleaned = re.sub(r"<[^>]+>", "", cleaned).strip()
+                    if cleaned and cleaned not in titles:
+                        titles.append(cleaned)
+                        if len(titles) >= limit:
+                            return titles
+        except Exception as exc:
+            logger.warning("Failed to fetch RSS from %s: %s", url, exc)
+            continue
+    return titles
+
+
+async def get_israel_news(limit: int = 3) -> list[str]:
+    """Fetch top Israel news headlines from RSS sources."""
+    return await fetch_rss_headlines(_ISRAEL_NEWS_FEEDS, limit)
+
+
+async def get_global_news(limit: int = 1) -> list[str]:
+    """Fetch top global news headline from RSS sources."""
+    return await fetch_rss_headlines(_GLOBAL_NEWS_FEEDS, limit)
+
+
+def clean_text_for_tts(text: str) -> str:
+    """Remove HTML, emojis, markdown formatting, and symbols that ruin TTS."""
+    if not text:
+        return ""
+    text = html.unescape(text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(
+        r"[\U00010000-\U0010ffff\u2600-\u27ff\u2300-\u23ff\u2b05\u2934\u2935\u25b6\u25c0]",
+        "",
+        text,
+    )
+    text = re.sub(r"[*_`#~|•]", "", text)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+async def get_weather_for_tts() -> str:
+    """Weather summary formatted for TTS: average temperature and rain probability percentage."""
+    locations = [
+        {"name": "Haifa", "lat": 32.7940, "lon": 34.9896},
+        {"name": "Omer", "lat": 31.2464, "lon": 34.7961},
+        {"name": "Tel Aviv", "lat": 32.0853, "lon": 34.7818},
+    ]
+    data, _ = await _fetch_weather_payloads(locations)
+    temps = []
+    precip_probs = []
+    for payload in data:
+        if not payload:
+            continue
+        daily = payload.get("daily", {})
+        t_max = daily.get("temperature_2m_max", [None])[0]
+        t_min = daily.get("temperature_2m_min", [None])[0]
+        p_prob = daily.get("precipitation_probability_max", [None])[0]
+        if t_max is not None and t_min is not None:
+            temps.append((t_max + t_min) / 2.0)
+        if p_prob is not None:
+            precip_probs.append(p_prob)
+
+    avg_temp = round(sum(temps) / len(temps)) if temps else 25
+    rain_chance = max(precip_probs) if precip_probs else 0
+
+    return (
+        f"The average temperature in Israel today is {avg_temp} degrees Celsius "
+        f"with a {rain_chance} percent chance of rain."
+    )
+
+
+async def build_tts_announcer_raw_text(
+    chat_id: int | None = None,
+    state: BotState | None = None,
+    max_chars: int = 1200,
+) -> str:
+    """Build sectioned, clean text ready for TTS narration optimization.
+
+    Sections included:
+    1. Greeting
+    2. Weather
+    3. Israel and World News (1 global, 3 Israel)
+    4. Hacker News (top 5 titles)
+    5. Reddit Radar + Trending
+    6. Stoic Quote and Author
+
+    Automated character limit enforcement:
+    If total text > max_chars, removes Reddit section first, then Hacker News section second.
+    """
+    disabled = set()
+    if chat_id is not None and state is not None:
+        disabled = state.disabled_intel_modules.get(chat_id, set())
+
+    # 1. Greeting
+    greeting_str = ""
+    if "greeting" not in disabled:
+        greeting_raw = get_greeting("Idan")
+        greeting_str = f"Greeting:\n{clean_text_for_tts(greeting_raw)}"
+
+    # 2. Weather
+    weather_str = ""
+    if "weather" not in disabled:
+        weather_raw = await get_weather_for_tts()
+        weather_str = f"Weather:\n{weather_raw}"
+
+    # 3. News (1 global news, 3 Israel news)
+    news_str = ""
+    if "news" not in disabled:
+        g_news_task = get_global_news(1)
+        i_news_task = get_israel_news(3)
+        g_news, i_news = await asyncio.gather(g_news_task, i_news_task)
+
+        news_lines = []
+        if g_news:
+            news_lines.append(f"Global: {g_news[0]}")
+        for idx, title in enumerate(i_news, 1):
+            news_lines.append(f"Israel {idx}: {title}")
+        if news_lines:
+            news_str = "Israel and World News:\n" + "\n".join(news_lines)
+
+    # 4. Hacker News (top 5)
+    hn_str = ""
+    try:
+        hn_raw = await scheduled_fetchers.fetch_hackernews_top(limit=5)
+        hn_clean = clean_text_for_tts(hn_raw)
+        hn_lines = [
+            line
+            for line in hn_clean.splitlines()
+            if not line.lower().startswith("hacker news") and line.strip()
+        ]
+        if hn_lines:
+            hn_str = "Hacker News:\n" + "\n".join(hn_lines[:5])
+    except Exception as exc:
+        logger.warning("Failed to fetch Hacker News for TTS: %s", exc)
+
+    # 5. Reddit Radar
+    reddit_str = ""
+    if "reddit" not in disabled and state is not None and chat_id is not None:
+        try:
+            r_raw = await get_reddit_digest(state.get_reddit_settings(chat_id))
+            r_clean = clean_text_for_tts(r_raw)
+            r_lines = [
+                line
+                for line in r_clean.splitlines()
+                if not line.lower().startswith("reddit") and line.strip()
+            ]
+            if r_lines:
+                reddit_str = "Reddit Trends:\n" + "\n".join(r_lines[:5])
+        except Exception as exc:
+            logger.warning("Failed to fetch Reddit for TTS: %s", exc)
+
+    # 6. Stoic Quote
+    quote_str = ""
+    if "quote" not in disabled:
+        quote_raw = await get_stoic_quote()
+        quote_clean = clean_text_for_tts(quote_raw)
+        if quote_clean:
+            quote_str = f"Stoic Wisdom:\n{quote_clean}"
+
+    # Section assembly & character limit automation
+    sections = [
+        ("greeting", greeting_str),
+        ("weather", weather_str),
+        ("news", news_str),
+        ("hackernews", hn_str),
+        ("reddit", reddit_str),
+        ("quote", quote_str),
+    ]
+
+    def render(sec_list: list[tuple[str, str]]) -> str:
+        return "\n\n".join(
+            content.strip() for _, content in sec_list if content.strip()
+        )
+
+    current_sections = list(sections)
+    full_text = render(current_sections)
+
+    if len(full_text) > max_chars:
+        current_sections = [s for s in current_sections if s[0] != "reddit"]
+        full_text = render(current_sections)
+
+    if len(full_text) > max_chars:
+        current_sections = [s for s in current_sections if s[0] != "hackernews"]
+        full_text = render(current_sections)
+
+    return full_text
+
+
+async def generate_tts_announcer_audio(raw_text: str) -> bytes | None:
+    """Send raw TTS text to Cloudflare Workers AI (Orange Echo) optimize & speech pipeline."""
+    if not config.ORANGE_ECHO_API_KEY:
+        logger.warning(
+            "ORANGE_ECHO_API_KEY not configured, skipping TTS announcer audio generation."
+        )
+        return None
+
+    client = OrangeEchoClient(
+        base_url=config.ORANGE_ECHO_BASE_URL,
+        api_key=config.ORANGE_ECHO_API_KEY,
+    )
+    try:
+        narration = await client.optimize(raw_text, target_characters=900)
+        audio_bytes = await client.synthesize(narration)
+        return audio_bytes
+    except OrangeEchoError as e:
+        logger.warning("Cloudflare Workers AI TTS announcer failed: %s - %s", e.code, e)
+        return None
+    except Exception as e:
+        logger.exception("Failed to generate TTS announcer audio: %s", e)
+        return None
+    finally:
+        await client.close()

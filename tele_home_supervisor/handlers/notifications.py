@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import html
+import inspect
 import logging
+from datetime import datetime
+from io import BytesIO
+from zoneinfo import ZoneInfo
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -19,7 +23,7 @@ from ..models.reddit_settings import (
     normalize_subreddit,
 )
 from ..state import BOT_STATE_KEY, BotState
-from .common import guard, tracked_reply_photo, tracked_reply_video
+from .common import guard, tracked_reply_photo, tracked_reply_video, tracked_reply_voice
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +315,72 @@ async def cmd_humblefree_now(
         await msg.edit_text(f"❌ Error: {e}")
 
 
+def build_intel_settings_view(
+    chat_id: int, state: BotState
+) -> tuple[str, InlineKeyboardMarkup]:
+    now_israel = datetime.now(ZoneInfo("Asia/Jerusalem")).strftime("%H:%M")
+    fire_h, fire_m = state.get_intel_fire_time(chat_id)
+    fire_str = f"{fire_h:02d}:{fire_m:02d}"
+    tts_on = state.is_tts_announcer_enabled(chat_id)
+    tts_status = "✅ ON" if tts_on else "❌ OFF"
+    disabled = state.disabled_intel_modules.get(chat_id, set())
+
+    msg = (
+        "⚙️ <b>Intel Briefing Settings</b>\n\n"
+        f"🕒 <b>Current Israel Time:</b> {now_israel}\n"
+        f"⏰ <b>Scheduled Fire Time:</b> {fire_str} Israel time\n"
+        f"🎙️ <b>TTS Announcer:</b> {tts_status}\n\n"
+        "Configure modules, scheduled fire time, or TTS audio below:"
+    )
+
+    keyboard = []
+    # Module toggles (2 per row)
+    mod_row = []
+    for mid, label in intel.INTEL_MODULES:
+        status = "❌" if mid in disabled else "✅"
+        mod_row.append(
+            InlineKeyboardButton(
+                f"{status} {label}", callback_data=f"intel_toggle:{mid}"
+            )
+        )
+        if len(mod_row) == 2:
+            keyboard.append(mod_row)
+            mod_row = []
+    if mod_row:
+        keyboard.append(mod_row)
+
+    # TTS Announcer Toggle
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                f"🎙️ TTS Announcer: {tts_status}", callback_data="intel_toggle_tts"
+            )
+        ]
+    )
+
+    # Time Adjustments
+    keyboard.append(
+        [
+            InlineKeyboardButton("➖ 1h", callback_data="intel_time:-60"),
+            InlineKeyboardButton("➖ 15m", callback_data="intel_time:-15"),
+            InlineKeyboardButton("➕ 15m", callback_data="intel_time:+15"),
+            InlineKeyboardButton("➕ 1h", callback_data="intel_time:+60"),
+        ]
+    )
+
+    # Time Presets
+    keyboard.append(
+        [
+            InlineKeyboardButton("07:00", callback_data="intel_time_set:07:00"),
+            InlineKeyboardButton("08:00 (Def)", callback_data="intel_time_set:08:00"),
+            InlineKeyboardButton("09:00", callback_data="intel_time_set:09:00"),
+            InlineKeyboardButton("20:00", callback_data="intel_time_set:20:00"),
+        ]
+    )
+
+    return msg, InlineKeyboardMarkup(keyboard)
+
+
 async def cmd_intel_settings(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -321,65 +391,56 @@ async def cmd_intel_settings(
     state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
     chat_id = update.effective_chat.id
 
-    disabled = state.disabled_intel_modules.get(chat_id, set())
-
-    keyboard = []
-    for mod_id, label in intel.INTEL_MODULES:
-        status = "❌" if mod_id in disabled else "✅"
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    f"{status} {label}", callback_data=f"intel_toggle:{mod_id}"
-                )
-            ]
-        )
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    msg = (
-        "⚙️ <b>Intel Briefing Settings</b>\n\n"
-        "Configure which modules appear in your 8 AM daily report.\n"
-        "Click a button to toggle a module."
-    )
-
+    msg, reply_markup = build_intel_settings_view(chat_id, state)
     await update.message.reply_text(
         msg, parse_mode=ParseMode.HTML, reply_markup=reply_markup
     )
 
 
 async def cb_intel_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle module toggle from the settings keyboard."""
+    """Handle module toggle, fire time adjustment, or TTS toggle from settings keyboard."""
     query = update.callback_query
     await query.answer()
 
     data = query.data
-    if not data or not data.startswith("intel_toggle:"):
+    if not data or not data.startswith("intel_"):
         return
 
-    mod_id = data.split(":", 1)[1]
     chat_id = update.effective_chat.id
     state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
 
-    disabled = state.disabled_intel_modules.setdefault(chat_id, set())
-    if mod_id in disabled:
-        disabled.remove(mod_id)
-    else:
-        disabled.add(mod_id)
+    if data.startswith("intel_toggle:"):
+        mod_id = data.split(":", 1)[1]
+        disabled = state.disabled_intel_modules.setdefault(chat_id, set())
+        if mod_id in disabled:
+            disabled.remove(mod_id)
+        else:
+            disabled.add(mod_id)
+        state.save()
+    elif data == "intel_toggle_tts":
+        state.toggle_tts_announcer(chat_id)
+    elif data.startswith("intel_time:"):
+        delta_m = int(data.split(":", 1)[1])
+        h, m = state.get_intel_fire_time(chat_id)
+        total_m = (h * 60 + m + delta_m) % (24 * 60)
+        state.set_intel_fire_time(chat_id, total_m // 60, total_m % 60)
+    elif data.startswith("intel_time_set:"):
+        time_part = data.split(":", 1)[1]
+        parts = time_part.split(":")
+        state.set_intel_fire_time(chat_id, int(parts[0]), int(parts[1]))
 
-    # Refresh keyboard
-    keyboard = []
-    for mid, label in intel.INTEL_MODULES:
-        status = "❌" if mid in disabled else "✅"
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    f"{status} {label}", callback_data=f"intel_toggle:{mid}"
-                )
-            ]
+    msg, reply_markup = build_intel_settings_view(chat_id, state)
+    try:
+        res = query.edit_message_text(
+            msg, parse_mode=ParseMode.HTML, reply_markup=reply_markup
         )
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_reply_markup(reply_markup=reply_markup)
-    state.save()
+        if inspect.isawaitable(res):
+            await res
+    except AttributeError, TypeError:
+        if hasattr(query, "edit_message_reply_markup"):
+            res = query.edit_message_reply_markup(reply_markup=reply_markup)
+            if inspect.isawaitable(res):
+                await res
 
 
 async def cmd_intel_briefing(
@@ -401,6 +462,31 @@ async def cmd_intel_briefing(
         await msg.edit_text(
             result, parse_mode=ParseMode.HTML, disable_web_page_preview=True
         )
+
+        # Check if TTS announcer is enabled for this chat
+        if state.is_tts_announcer_enabled(chat_id):
+            tts_status = await update.message.reply_text(
+                "🎙️ Generating TTS narration audio via Cloudflare AI..."
+            )
+            raw_text = await intel.build_tts_announcer_raw_text(chat_id, state)
+            audio_bytes = await intel.generate_tts_announcer_audio(raw_text)
+            if audio_bytes:
+                voice_file = BytesIO(audio_bytes)
+                voice_file.name = "intel_narration.ogg"
+                if tts_status:
+                    try:
+                        await tts_status.delete()
+                    except Exception as exc:
+                        logger.debug("Failed to delete tts status: %s", exc)
+                await tracked_reply_voice(
+                    update.message,
+                    state,
+                    voice=voice_file,
+                    caption="🗣️ Morning Intel Briefing",
+                )
+            else:
+                if tts_status:
+                    await tts_status.edit_text("❌ Failed to generate TTS audio.")
     except Exception as e:
         logger.exception("Intel Briefing fetch failed")
         await msg.edit_text(f"❌ Error: {html.escape(str(e))}")

@@ -67,6 +67,8 @@ class BotState:
 
     # Intel Briefing module settings (chat_id -> set of disabled module IDs)
     disabled_intel_modules: dict[int, set[str]] = field(default_factory=dict)
+    intel_fire_time: dict[int, tuple[int, int]] = field(default_factory=dict)
+    intel_tts_announcer: set[int] = field(default_factory=set)
     reddit_briefing_settings: dict[int, RedditBriefingSettings] = field(
         default_factory=dict
     )
@@ -531,6 +533,29 @@ class BotState:
 
     def is_hackernews_muted(self, chat_id: int) -> bool:
         return chat_id in self.hackernews_muted
+
+    def get_intel_fire_time(self, chat_id: int) -> tuple[int, int]:
+        """Get (hour, minute) fire time for chat, defaulting to (8, 0)."""
+        return self.intel_fire_time.get(chat_id, (8, 0))
+
+    def set_intel_fire_time(self, chat_id: int, hour: int, minute: int) -> None:
+        """Set (hour, minute) fire time for chat."""
+        self.intel_fire_time[chat_id] = (hour % 24, minute % 60)
+        self.save()
+
+    def is_tts_announcer_enabled(self, chat_id: int) -> bool:
+        """Check if TTS announcer is enabled for chat."""
+        return chat_id in self.intel_tts_announcer
+
+    def toggle_tts_announcer(self, chat_id: int) -> bool:
+        """Toggle TTS announcer for chat. Returns True if enabled."""
+        if chat_id in self.intel_tts_announcer:
+            self.intel_tts_announcer.discard(chat_id)
+            self.save()
+            return False
+        self.intel_tts_announcer.add(chat_id)
+        self.save()
+        return True
 
     def grant_auth(
         self,

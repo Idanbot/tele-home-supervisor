@@ -381,14 +381,15 @@ async def handle_callback_query(update, context) -> None:
                 data,
                 notifications.handle_reddit_fetch_callback(update, context),
             )
-        elif data.startswith("intel_toggle:"):
+        elif data.startswith("intel_"):
             await _run_audit_action(
                 update,
                 context,
-                "intel_toggle",
-                data.split(":", 1)[1],
+                "intel_setting",
+                data,
                 notifications.cb_intel_toggle(update, context),
             )
+
         else:
             await _safe_edit_message_text(query, "❓ Unknown action")
     except Exception as e:
