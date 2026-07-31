@@ -715,18 +715,19 @@ async def cmd_cftts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     except OrangeEchoError as e:
         logger.warning("Cloudflare TTS API error: %s", e)
-        error_text = f"❌ Cloudflare TTS failed: {e.code} - {e}"
+        error_text = e.user_friendly_message()
         if status_msg:
-            await status_msg.edit_text(error_text)
+            await status_msg.edit_text(error_text, parse_mode=ParseMode.HTML)
         else:
-            await update.message.reply_text(error_text)
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.exception("Cloudflare TTS failed: %s", e)
-        error_text = f"❌ Cloudflare TTS failed: {e}"
+        error_text = f"❌ <b>Cloudflare TTS failed</b>: {html.escape(str(e))}"
         if status_msg:
-            await status_msg.edit_text(error_text)
+            await status_msg.edit_text(error_text, parse_mode=ParseMode.HTML)
         else:
-            await update.message.reply_text(error_text)
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
+
     finally:
         await client.close()
 
@@ -787,18 +788,19 @@ async def cmd_cfimagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except OrangeEchoError as e:
         logger.warning("Cloudflare ImageGen API error: %s", e)
-        error_text = f"❌ Cloudflare ImageGen failed: {e.code} - {e}"
+        error_text = e.user_friendly_message()
         if status_msg:
-            await status_msg.edit_text(error_text)
+            await status_msg.edit_text(error_text, parse_mode=ParseMode.HTML)
         else:
-            await update.message.reply_text(error_text)
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.exception("Cloudflare ImageGen failed: %s", e)
-        error_text = f"❌ Cloudflare ImageGen failed: {e}"
+        error_text = f"❌ <b>Cloudflare ImageGen failed</b>: {html.escape(str(e))}"
         if status_msg:
-            await status_msg.edit_text(error_text)
+            await status_msg.edit_text(error_text, parse_mode=ParseMode.HTML)
         else:
-            await update.message.reply_text(error_text)
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
+
     finally:
         await client.close()
 
@@ -864,17 +866,18 @@ async def cmd_cfusage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text(message_text, parse_mode=ParseMode.HTML)
     except OrangeEchoError as e:
         logger.warning("Cloudflare allowances API error: %s", e)
-        error_text = f"❌ Failed to fetch allowances: {e.code} - {e}"
+        error_text = e.user_friendly_message()
         if status_msg:
-            await status_msg.edit_text(error_text)
+            await status_msg.edit_text(error_text, parse_mode=ParseMode.HTML)
         else:
-            await update.message.reply_text(error_text)
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.exception("Failed to fetch Cloudflare allowances: %s", e)
-        error_text = f"❌ Failed to fetch allowances: {e}"
+        error_text = f"❌ <b>Failed to fetch allowances</b>: {html.escape(str(e))}"
         if status_msg:
-            await status_msg.edit_text(error_text)
+            await status_msg.edit_text(error_text, parse_mode=ParseMode.HTML)
         else:
-            await update.message.reply_text(error_text)
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
+
     finally:
         await client.close()

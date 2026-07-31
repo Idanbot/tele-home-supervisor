@@ -504,13 +504,14 @@ async def build_tts_announcer_raw_text(
     return full_text
 
 
-async def generate_tts_announcer_audio(raw_text: str) -> bytes | None:
+async def generate_tts_announcer_audio(
+    raw_text: str,
+) -> tuple[bytes | None, str | None]:
     """Send raw TTS text to Cloudflare Workers AI (Orange Echo) optimize & speech pipeline."""
     if not config.ORANGE_ECHO_API_KEY:
-        logger.warning(
-            "ORANGE_ECHO_API_KEY not configured, skipping TTS announcer audio generation."
-        )
-        return None
+        err_msg = "ORANGE_ECHO_API_KEY environment variable is not configured."
+        logger.warning(err_msg)
+        return None, err_msg
 
     client = OrangeEchoClient(
         base_url=config.ORANGE_ECHO_BASE_URL,
@@ -519,12 +520,12 @@ async def generate_tts_announcer_audio(raw_text: str) -> bytes | None:
     try:
         narration = await client.optimize(raw_text, target_characters=900)
         audio_bytes = await client.synthesize(narration)
-        return audio_bytes
+        return audio_bytes, None
     except OrangeEchoError as e:
-        logger.warning("Cloudflare Workers AI TTS announcer failed: %s - %s", e.code, e)
-        return None
+        logger.warning("Cloudflare Workers AI TTS announcer failed: %s", e)
+        return None, e.user_friendly_message()
     except Exception as e:
         logger.exception("Failed to generate TTS announcer audio: %s", e)
-        return None
+        return None, f"❌ Cloudflare Workers AI error: {html.escape(str(e))}"
     finally:
         await client.close()

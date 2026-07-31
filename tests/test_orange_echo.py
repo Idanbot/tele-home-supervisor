@@ -159,5 +159,22 @@ async def test_orange_echo_client_methods():
     assert exc_info.value.status == 429
     assert exc_info.value.code == "quota_exceeded"
     assert "Daily limit reached" in str(exc_info.value)
+    assert (
+        "Cloudflare AI Daily Quota Exceeded" in exc_info.value.user_friendly_message()
+    )
 
     await client.close()
+
+
+def test_orange_echo_error_user_friendly_message():
+    err_quota = OrangeEchoError(429, "quota_exceeded", "Limit reached")
+    assert "Daily Quota Exceeded" in err_quota.user_friendly_message()
+
+    err_auth = OrangeEchoError(401, "unauthorized", "Bad token")
+    assert "Authentication Failed" in err_auth.user_friendly_message()
+
+    err_rate = OrangeEchoError(429, "rate_limit", "Slow down")
+    assert "Rate Limit Reached" in err_rate.user_friendly_message()
+
+    err_generic = OrangeEchoError(500, "internal_error", "Server crashed")
+    assert "Cloudflare AI Error (internal_error)" in err_generic.user_friendly_message()

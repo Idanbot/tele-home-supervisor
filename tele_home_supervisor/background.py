@@ -490,9 +490,10 @@ async def _intel_briefing_scheduler(app: Application) -> None:
                             raw_text = await intel.build_tts_announcer_raw_text(
                                 chat_id, state
                             )
-                            audio_bytes = await intel.generate_tts_announcer_audio(
-                                raw_text
-                            )
+                            (
+                                audio_bytes,
+                                error_reason,
+                            ) = await intel.generate_tts_announcer_audio(raw_text)
                             if audio_bytes:
                                 voice_file = BytesIO(audio_bytes)
                                 voice_file.name = "intel_narration.ogg"
@@ -501,6 +502,16 @@ async def _intel_briefing_scheduler(app: Application) -> None:
                                     voice=voice_file,
                                     caption="🗣️ Morning Intel Briefing",
                                 )
+                            else:
+                                await app.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=(
+                                        "⚠️ <b>TTS Announcer Voice Generation Failed</b>\n"
+                                        f"{error_reason or 'Unknown error'}"
+                                    ),
+                                    parse_mode=ParseMode.HTML,
+                                )
+
                     except Exception:
                         logger.exception(
                             "Failed to send Intel Briefing notification to chat_id=%s",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import logging
 from dataclasses import dataclass
 
@@ -16,6 +17,30 @@ class OrangeEchoError(RuntimeError):
         super().__init__(f"{code}: {message}")
         self.status = status
         self.code = code
+        self.raw_message = message
+
+    def user_friendly_message(self) -> str:
+        escaped_msg = html.escape(self.raw_message)
+        if self.code == "quota_exceeded":
+            return (
+                "⚠️ <b>Cloudflare AI Daily Quota Exceeded</b>\n"
+                f"The daily free-tier limit for this operation has been reached.\n<i>{escaped_msg}</i>"
+            )
+        elif self.code in ("unauthorized", "invalid_api_key"):
+            return (
+                "❌ <b>Cloudflare AI Authentication Failed</b>\n"
+                f"Please check your ORANGE_ECHO_API_KEY.\n<i>{escaped_msg}</i>"
+            )
+        elif self.code == "rate_limit":
+            return (
+                "⚠️ <b>Cloudflare AI Rate Limit Reached</b>\n"
+                f"Too many requests. Please try again shortly.\n<i>{escaped_msg}</i>"
+            )
+        else:
+            return (
+                f"❌ <b>Cloudflare AI Error ({html.escape(self.code)})</b>\n"
+                f"<i>{escaped_msg}</i>"
+            )
 
 
 @dataclass(frozen=True)

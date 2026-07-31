@@ -543,7 +543,9 @@ async def cmd_intel_briefing(
                 "🎙️ Generating TTS narration audio via Cloudflare AI..."
             )
             raw_text = await intel.build_tts_announcer_raw_text(chat_id, state)
-            audio_bytes = await intel.generate_tts_announcer_audio(raw_text)
+            audio_bytes, error_reason = await intel.generate_tts_announcer_audio(
+                raw_text
+            )
             if audio_bytes:
                 voice_file = BytesIO(audio_bytes)
                 voice_file.name = "intel_narration.ogg"
@@ -559,8 +561,14 @@ async def cmd_intel_briefing(
                     caption="🗣️ Morning Intel Briefing",
                 )
             else:
+                err_text = (
+                    "⚠️ <b>TTS Announcer Voice Generation Failed</b>\n"
+                    f"{error_reason or 'Unknown error'}"
+                )
                 if tts_status:
-                    await tts_status.edit_text("❌ Failed to generate TTS audio.")
+                    await tts_status.edit_text(err_text, parse_mode=ParseMode.HTML)
+                else:
+                    await update.message.reply_text(err_text, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.exception("Intel Briefing fetch failed")
         await msg.edit_text(f"❌ Error: {html.escape(str(e))}")
