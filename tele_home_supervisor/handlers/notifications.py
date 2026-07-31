@@ -345,16 +345,13 @@ def build_intel_settings_view(
         )
         if len(mod_row) == 2:
             keyboard.append(mod_row)
-            mod_row = []
-    if mod_row:
-        keyboard.append(mod_row)
-
-    # TTS Announcer Toggle
+        # TTS Announcer Toggle & TTS Section Settings Nav
     keyboard.append(
         [
             InlineKeyboardButton(
                 f"🎙️ TTS Announcer: {tts_status}", callback_data="intel_toggle_tts"
-            )
+            ),
+            InlineKeyboardButton("🗣️ TTS Sections", callback_data="intel_nav_tts"),
         ]
     )
 
@@ -381,6 +378,53 @@ def build_intel_settings_view(
     return msg, InlineKeyboardMarkup(keyboard)
 
 
+def build_tts_settings_view(
+    chat_id: int, state: BotState
+) -> tuple[str, InlineKeyboardMarkup]:
+    disabled = state.get_disabled_tts_sections(chat_id)
+    tts_enabled = state.is_tts_announcer_enabled(chat_id)
+    tts_status = "✅ Enabled" if tts_enabled else "❌ Disabled"
+
+    msg = (
+        "🎙️ <b>TTS Announcer Settings</b>\n\n"
+        f"<b>Global TTS Announcer:</b> {tts_status}\n\n"
+        "Toggle which sections are included when building speech narration for text-to-speech audio:"
+    )
+
+    keyboard = []
+    sec_row = []
+    for sec_id, label in intel.TTS_SECTIONS:
+        status = "❌" if sec_id in disabled else "✅"
+        sec_row.append(
+            InlineKeyboardButton(
+                f"{status} {label}", callback_data=f"tts_sec_toggle:{sec_id}"
+            )
+        )
+        if len(sec_row) == 2:
+            keyboard.append(sec_row)
+            sec_row = []
+    if sec_row:
+        keyboard.append(sec_row)
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                f"🎙️ Toggle TTS Announcer: {tts_status}",
+                callback_data="intel_toggle_tts",
+            )
+        ]
+    )
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                "⚙️ Back to Intel Settings", callback_data="intel_nav_settings"
+            )
+        ]
+    )
+
+    return msg, InlineKeyboardMarkup(keyboard)
+
+
 async def cmd_intel_settings(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -397,17 +441,35 @@ async def cmd_intel_settings(
     )
 
 
+async def cmd_tts_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show TTS Announcer speech section settings."""
+    if not await guard(update, context):
+        return
+
+    state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
+    chat_id = update.effective_chat.id
+
+    msg, reply_markup = build_tts_settings_view(chat_id, state)
+    await update.message.reply_text(
+        msg, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+    )
+
+
 async def cb_intel_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle module toggle, fire time adjustment, or TTS toggle from settings keyboard."""
     query = update.callback_query
     await query.answer()
 
     data = query.data
-    if not data or not data.startswith("intel_"):
+    if not data or (
+        not data.startswith("intel_") and not data.startswith("tts_sec_toggle:")
+    ):
         return
 
     chat_id = update.effective_chat.id
     state: BotState = context.application.bot_data.setdefault(BOT_STATE_KEY, BotState())
+
+    view_mode = "intel"
 
     if data.startswith("intel_toggle:"):
         mod_id = data.split(":", 1)[1]
@@ -419,6 +481,14 @@ async def cb_intel_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         state.save()
     elif data == "intel_toggle_tts":
         state.toggle_tts_announcer(chat_id)
+    elif data.startswith("tts_sec_toggle:"):
+        sec_id = data.split(":", 1)[1]
+        state.toggle_tts_section(chat_id, sec_id)
+        view_mode = "tts"
+    elif data == "intel_nav_tts":
+        view_mode = "tts"
+    elif data == "intel_nav_settings":
+        view_mode = "intel"
     elif data.startswith("intel_time:"):
         delta_m = int(data.split(":", 1)[1])
         h, m = state.get_intel_fire_time(chat_id)
@@ -429,7 +499,11 @@ async def cb_intel_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         parts = time_part.split(":")
         state.set_intel_fire_time(chat_id, int(parts[0]), int(parts[1]))
 
-    msg, reply_markup = build_intel_settings_view(chat_id, state)
+    if view_mode == "tts":
+        msg, reply_markup = build_tts_settings_view(chat_id, state)
+    else:
+        msg, reply_markup = build_intel_settings_view(chat_id, state)
+
     try:
         res = query.edit_message_text(
             msg, parse_mode=ParseMode.HTML, reply_markup=reply_markup

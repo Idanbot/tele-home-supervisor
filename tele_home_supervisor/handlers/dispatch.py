@@ -106,6 +106,7 @@ cmd_ollamacancel = rate_limit(ai.cmd_ollamacancel, name="ollamacancel")
 cmd_cftts = rate_limit(ai.cmd_cftts, name="cftts")
 cmd_cfimagegen = rate_limit(ai.cmd_cfimagegen, name="cfimagegen")
 cmd_cfusage = rate_limit(ai.cmd_cfusage, name="cfusage")
+cmd_tts_settings = rate_limit(notifications.cmd_tts_settings, name="tts_settings")
 
 
 # Media

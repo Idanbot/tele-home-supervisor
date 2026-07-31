@@ -44,6 +44,9 @@ def serialize(state: BotState) -> dict:
         },
         "intel_fire_time": {str(k): list(v) for k, v in state.intel_fire_time.items()},
         "intel_tts_announcer": list(state.intel_tts_announcer),
+        "disabled_tts_sections": {
+            str(k): list(v) for k, v in state.disabled_tts_sections.items()
+        },
         "reddit_briefing_settings": {
             str(chat_id): settings.to_dict()
             for chat_id, settings in state.reddit_briefing_settings.items()
@@ -142,7 +145,17 @@ def _deserialize_core(state: BotState, data: dict) -> None:
 
     state.intel_tts_announcer = set(data.get("intel_tts_announcer", []))
 
+    state.disabled_tts_sections = {}
+    raw_disabled_tts = data.get("disabled_tts_sections") or {}
+    if isinstance(raw_disabled_tts, dict):
+        for k, v in raw_disabled_tts.items():
+            try:
+                state.disabled_tts_sections[int(k)] = set(v)
+            except TypeError, ValueError:
+                continue
+
     state.reddit_briefing_settings = {}
+
     raw_reddit_settings = data.get("reddit_briefing_settings") or {}
     if isinstance(raw_reddit_settings, dict):
         for chat_id, raw_settings in raw_reddit_settings.items():

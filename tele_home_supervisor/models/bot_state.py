@@ -69,6 +69,7 @@ class BotState:
     disabled_intel_modules: dict[int, set[str]] = field(default_factory=dict)
     intel_fire_time: dict[int, tuple[int, int]] = field(default_factory=dict)
     intel_tts_announcer: set[int] = field(default_factory=set)
+    disabled_tts_sections: dict[int, set[str]] = field(default_factory=dict)
     reddit_briefing_settings: dict[int, RedditBriefingSettings] = field(
         default_factory=dict
     )
@@ -556,6 +557,25 @@ class BotState:
         self.intel_tts_announcer.add(chat_id)
         self.save()
         return True
+
+    def get_disabled_tts_sections(self, chat_id: int) -> set[str]:
+        """Get set of disabled TTS section IDs for chat."""
+        return self.disabled_tts_sections.get(chat_id, set())
+
+    def is_tts_section_enabled(self, chat_id: int, section_id: str) -> bool:
+        """Check if a specific TTS section is enabled for chat."""
+        return section_id not in self.disabled_tts_sections.get(chat_id, set())
+
+    def toggle_tts_section(self, chat_id: int, section_id: str) -> bool:
+        """Toggle a TTS section for chat. Returns True if enabled."""
+        disabled = self.disabled_tts_sections.setdefault(chat_id, set())
+        if section_id in disabled:
+            disabled.remove(section_id)
+            self.save()
+            return True
+        disabled.add(section_id)
+        self.save()
+        return False
 
     def grant_auth(
         self,

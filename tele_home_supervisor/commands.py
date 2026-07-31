@@ -544,6 +544,14 @@ _AI_COMMANDS = (
         "show Cloudflare Workers AI usage and allowances",
         "cmd_cfusage",
     ),
+    CommandSpec(
+        "tts_settings",
+        "AI",
+        "/tts_settings",
+        "configure TTS Announcer speech sections",
+        "cmd_tts_settings",
+        aliases=("ttssettings", "intel_tts_settings"),
+    ),
 )
 
 

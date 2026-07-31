@@ -31,6 +31,16 @@ INTEL_MODULES = [
     ("reddit", "👽 Reddit Radar"),
 ]
 
+TTS_SECTIONS = [
+    ("greeting", "👋 Greeting"),
+    ("weather", "🌡️ Weather"),
+    ("news", "📰 Israel & World News"),
+    ("hackernews", "⚙️ Hacker News"),
+    ("reddit", "👽 Reddit Trends"),
+    ("quote", "🏛️ Stoic Quote"),
+]
+
+
 _WEATHER_TIMEOUT = httpx.Timeout(12.0, connect=3.5)
 _WEATHER_RETRIES = 3  # per-location attempts in the fallback path
 
@@ -394,25 +404,25 @@ async def build_tts_announcer_raw_text(
     Automated character limit enforcement:
     If total text > max_chars, removes Reddit section first, then Hacker News section second.
     """
-    disabled = set()
+    disabled_tts = set()
     if chat_id is not None and state is not None:
-        disabled = state.disabled_intel_modules.get(chat_id, set())
+        disabled_tts = state.get_disabled_tts_sections(chat_id)
 
     # 1. Greeting
     greeting_str = ""
-    if "greeting" not in disabled:
+    if "greeting" not in disabled_tts:
         greeting_raw = get_greeting("Idan")
         greeting_str = f"Greeting:\n{clean_text_for_tts(greeting_raw)}"
 
     # 2. Weather
     weather_str = ""
-    if "weather" not in disabled:
+    if "weather" not in disabled_tts:
         weather_raw = await get_weather_for_tts()
         weather_str = f"Weather:\n{weather_raw}"
 
     # 3. News (1 global news, 3 Israel news)
     news_str = ""
-    if "news" not in disabled:
+    if "news" not in disabled_tts:
         g_news_task = get_global_news(1)
         i_news_task = get_israel_news(3)
         g_news, i_news = await asyncio.gather(g_news_task, i_news_task)
@@ -427,22 +437,23 @@ async def build_tts_announcer_raw_text(
 
     # 4. Hacker News (top 5)
     hn_str = ""
-    try:
-        hn_raw = await scheduled_fetchers.fetch_hackernews_top(limit=5)
-        hn_clean = clean_text_for_tts(hn_raw)
-        hn_lines = [
-            line
-            for line in hn_clean.splitlines()
-            if not line.lower().startswith("hacker news") and line.strip()
-        ]
-        if hn_lines:
-            hn_str = "Hacker News:\n" + "\n".join(hn_lines[:5])
-    except Exception as exc:
-        logger.warning("Failed to fetch Hacker News for TTS: %s", exc)
+    if "hackernews" not in disabled_tts:
+        try:
+            hn_raw = await scheduled_fetchers.fetch_hackernews_top(limit=5)
+            hn_clean = clean_text_for_tts(hn_raw)
+            hn_lines = [
+                line
+                for line in hn_clean.splitlines()
+                if not line.lower().startswith("hacker news") and line.strip()
+            ]
+            if hn_lines:
+                hn_str = "Hacker News:\n" + "\n".join(hn_lines[:5])
+        except Exception as exc:
+            logger.warning("Failed to fetch Hacker News for TTS: %s", exc)
 
     # 5. Reddit Radar
     reddit_str = ""
-    if "reddit" not in disabled and state is not None and chat_id is not None:
+    if "reddit" not in disabled_tts and state is not None and chat_id is not None:
         try:
             r_raw = await get_reddit_digest(state.get_reddit_settings(chat_id))
             r_clean = clean_text_for_tts(r_raw)
@@ -458,7 +469,7 @@ async def build_tts_announcer_raw_text(
 
     # 6. Stoic Quote
     quote_str = ""
-    if "quote" not in disabled:
+    if "quote" not in disabled_tts:
         quote_raw = await get_stoic_quote()
         quote_clean = clean_text_for_tts(quote_raw)
         if quote_clean:

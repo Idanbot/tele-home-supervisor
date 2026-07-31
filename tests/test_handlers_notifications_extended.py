@@ -163,3 +163,25 @@ async def test_reddit_settings_commands(monkeypatch, tmp_path):
     )
     await notifications.cmd_intel_briefing(update, context)
     assert "briefing" in update.message.replies[-1]
+
+
+@pytest.mark.asyncio
+async def test_cmd_tts_settings_and_callback(monkeypatch):
+    monkeypatch.setattr(notifications, "guard", allow_guard)
+    update = DummyUpdate(chat_id=1, user_id=1)
+    context = DummyContext()
+
+    await notifications.cmd_tts_settings(update, context)
+    assert "TTS Announcer Settings" in update.message.replies[-1]
+
+    # Test toggling section via callback
+    query = Mock()
+    query.data = "tts_sec_toggle:weather"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    query.edit_message_reply_markup = AsyncMock()
+    update.callback_query = query
+
+    await notifications.cb_intel_toggle(update, context)
+    query.answer.assert_awaited_once()
+    assert query.edit_message_text.awaited or query.edit_message_reply_markup.awaited

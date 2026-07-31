@@ -334,3 +334,44 @@ async def test_bot_state_intel_fire_time_and_tts_toggle():
         disabled = state.toggle_tts_announcer(chat_id)
         assert disabled is False
         assert state.is_tts_announcer_enabled(chat_id) is False
+
+
+@pytest.mark.asyncio
+async def test_tts_section_toggle_and_builder_filtering():
+    state = BotState()
+    chat_id = 888
+
+    # Default: all sections enabled
+    assert state.is_tts_section_enabled(chat_id, "weather")
+
+    # Disable weather and greeting
+    with patch.object(state, "save"):
+        state.toggle_tts_section(chat_id, "weather")
+        state.toggle_tts_section(chat_id, "greeting")
+
+    assert not state.is_tts_section_enabled(chat_id, "weather")
+    assert not state.is_tts_section_enabled(chat_id, "greeting")
+    assert state.is_tts_section_enabled(chat_id, "news")
+
+    with (
+        patch(
+            "tele_home_supervisor.intel.get_global_news",
+            return_value=["Global news headline"],
+        ),
+        patch(
+            "tele_home_supervisor.intel.get_israel_news",
+            return_value=["Israel headline 1"],
+        ),
+        patch(
+            "tele_home_supervisor.intel.get_stoic_quote",
+            return_value="Stoic quote test",
+        ),
+        patch(
+            "tele_home_supervisor.intel.get_weather_for_tts",
+            return_value="Weather summary test",
+        ),
+    ):
+        text = await intel.build_tts_announcer_raw_text(chat_id, state)
+        assert "Greeting:" not in text
+        assert "Weather:" not in text
+        assert "Israel and World News:" in text

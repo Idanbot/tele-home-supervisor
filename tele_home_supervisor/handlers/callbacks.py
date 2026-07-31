@@ -381,7 +381,7 @@ async def handle_callback_query(update, context) -> None:
                 data,
                 notifications.handle_reddit_fetch_callback(update, context),
             )
-        elif data.startswith("intel_"):
+        elif data.startswith(("intel_", "tts_sec_toggle:")):
             await _run_audit_action(
                 update,
                 context,
