@@ -6,10 +6,30 @@ import pytest
 from conftest import DummyContext, DummyUpdate
 
 from tele_home_supervisor.handlers import notifications
+from tele_home_supervisor.models.bot_state import BotState
 
 
 async def allow_guard(update, context):
     return True
+
+
+def test_intel_settings_view_contains_every_module() -> None:
+    _, markup = notifications.build_intel_settings_view(1, BotState())
+    module_rows = [
+        row
+        for row in markup.inline_keyboard
+        if any(
+            button.callback_data and button.callback_data.startswith("intel_toggle:")
+            for button in row
+        )
+    ]
+    callbacks = {button.callback_data for row in module_rows for button in row}
+
+    assert [len(row) for row in module_rows] == [2, 2, 2]
+    assert callbacks == {
+        f"intel_toggle:{module_id}"
+        for module_id, _ in notifications.intel.INTEL_MODULES
+    }
 
 
 @pytest.mark.asyncio

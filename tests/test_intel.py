@@ -253,6 +253,12 @@ async def test_get_weather_for_tts():
         assert "40 percent chance of rain" in weather_summary
 
 
+def test_weather_url_requests_tts_rain_probability() -> None:
+    url = intel._build_weather_url([{"name": "Haifa", "lat": 32.794, "lon": 34.9896}])
+
+    assert "precipitation_probability_max" in url
+
+
 @pytest.mark.asyncio
 async def test_build_tts_announcer_raw_text_truncation():
     state = BotState()

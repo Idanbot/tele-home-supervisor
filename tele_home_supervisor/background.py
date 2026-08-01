@@ -355,6 +355,15 @@ def _seconds_until_time(target_hour: int, target_minute: int = 0) -> float:
     return max(0.0, delta)
 
 
+def _intel_briefing_due(state: BotState, chat_id: int, now: float) -> bool:
+    """Return whether a chat is inside its fire window and has not run recently."""
+    hour, minute = state.get_intel_fire_time(chat_id)
+    time_until = _seconds_until_time(hour, minute)
+    in_fire_window = time_until < 120 or time_until > (23 * 3600 + 58 * 60)
+    last_run = state.get_last_intel_briefing_run(chat_id)
+    return in_fire_window and (now - last_run) >= (20 * 3600)
+
+
 async def _game_offers_scheduler(app: Application) -> None:
     """Schedule combined Game Offers notification at 8 PM Israel time daily."""
     logger.info("Starting Game Offers scheduler (8 PM Israel time)")
@@ -464,13 +473,7 @@ async def _intel_briefing_scheduler(app: Application) -> None:
 
             now = time.time()
             for chat_id in allowed_chats:
-                h, m = state.get_intel_fire_time(chat_id)
-                time_until = _seconds_until_time(h, m)
-                # If target time is within 120 seconds or has just arrived (time_until > 23h58m)
-                if time_until < 120 or time_until > (23 * 3600 + 58 * 60):
-                    if (now - state.last_intel_briefing_run) < (20 * 3600):
-                        continue
-
+                if _intel_briefing_due(state, chat_id, now):
                     logger.info("Firing Intel Briefing for chat_id=%s", chat_id)
                     try:
                         message = await intel.build_intel_briefing(chat_id, state)
@@ -480,6 +483,7 @@ async def _intel_briefing_scheduler(app: Application) -> None:
                             parse_mode=ParseMode.HTML,
                             disable_web_page_preview=True,
                         )
+                        state.mark_intel_briefing_run(chat_id, now)
 
                         # Check if TTS Announcer is enabled for this chat
                         if state.is_tts_announcer_enabled(chat_id):
@@ -520,9 +524,6 @@ async def _intel_briefing_scheduler(app: Application) -> None:
                             "Failed to send Intel Briefing notification to chat_id=%s",
                             chat_id,
                         )
-
-                    state.last_intel_briefing_run = now
-                    state.save()
 
         except asyncio.CancelledError:
             raise

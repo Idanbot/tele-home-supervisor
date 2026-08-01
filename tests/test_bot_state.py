@@ -188,6 +188,7 @@ class TestBotStatePersistence:
             state.set_reddit_mode(123, "top")
             watch = state.add_release_watch(123, "movie", "Dune Part Two", "1080p")
             assert watch is not None
+            state.last_intel_briefing_runs = {123: 10.0, 456: 20.0}
             state.last_release_watch_run = 42.0
 
             # Save
@@ -215,6 +216,7 @@ class TestBotStatePersistence:
             assert reddit.post_count == 5
             assert reddit.mode == "top"
             assert state2.release_watches[0].query == "Dune Part Two"
+            assert state2.last_intel_briefing_runs == {123: 10.0, 456: 20.0}
             assert state2.last_release_watch_run == 42.0
 
     def test_reddit_and_release_watch_mutators(self, tmp_path) -> None:

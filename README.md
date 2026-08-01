@@ -36,7 +36,7 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 
 ### 🧠 Local & Cloud AI Integration
 *   **Ollama Support**: Chat with local LLMs (Llama 3, Mistral, etc.) directly in Telegram.
-*   **Cloudflare Workers AI**: Text-to-speech audio (`/cftts`), image generation (`/cfimagegen`) using Flux-2-dev, and usage statistics (`/cfusage`).
+*   **Cloudflare Workers AI**: Text-to-speech audio (`/cftts`), image generation (`/cfimagegen`), and usage statistics (`/cfusage`).
 
 *   **Smart Splitting**: Automatically handles long responses by splitting them into multiple readable messages.
 *   **Model Management**: List, pull, and switch models on the fly.
@@ -282,7 +282,7 @@ the `telebot_data` Docker volume.
 | `/ask <question>` | ask a question, flags: --temp|-t 0.4 --top-k|-k 40 --top-p|-p 0.9 --num-predict|-n 640 |
 | `/askreset` | reset custom AI generation parameters |
 | `/cftts <prompt>` | generate speech audio via Cloudflare Workers AI (or reply to text file/message) |
-| `/cfimagegen <prompt>` | generate image via Cloudflare Workers AI Flux-2-dev (or reply to text file/message) |
+| `/cfimagegen <prompt>` | generate image via Cloudflare Workers AI (or reply to text file/message) |
 | `/cfusage` | show Cloudflare Workers AI usage and daily allowances |
 
 

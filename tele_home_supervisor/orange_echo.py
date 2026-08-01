@@ -191,7 +191,7 @@ async def track_cf_action(
     action_coro: Any,
 ) -> Any:
     """Execute a Cloudflare AI action, checking allowance before and after to log consumed neurons."""
-    neurons_before = 0
+    neurons_before: int | None = None
     try:
         allow_before = await client.get_allowances()
         neurons_before = extract_total_neurons(allow_before)
@@ -200,12 +200,19 @@ async def track_cf_action(
 
     result = await action_coro
 
-    neurons_after = neurons_before
+    neurons_after: int | None = None
     try:
         allow_after = await client.get_allowances()
         neurons_after = extract_total_neurons(allow_after)
     except Exception as exc:
         logger.debug("Failed to fetch allowances after %s: %s", action_name, exc)
+
+    if neurons_before is None or neurons_after is None:
+        logger.info(
+            "CF Action '%s' executed; neuron usage unavailable because allowance sampling failed",
+            action_name,
+        )
+        return result
 
     consumed = max(0, neurons_after - neurons_before)
     logger.info(

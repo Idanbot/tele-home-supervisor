@@ -154,6 +154,7 @@ class BotState:
     # Persistence of last run times for scheduled tasks
     last_game_offers_run: float = 0.0
     last_intel_briefing_run: float = 0.0
+    last_intel_briefing_runs: dict[int, float] = field(default_factory=dict)
     last_release_watch_run: float = 0.0
 
     # Heartbeat for container health checks
@@ -572,6 +573,20 @@ class BotState:
     def set_intel_fire_time(self, chat_id: int, hour: int, minute: int) -> None:
         """Set (hour, minute) fire time for chat."""
         self.intel_fire_time[chat_id] = (hour % 24, minute % 60)
+        self.save()
+
+    def get_last_intel_briefing_run(self, chat_id: int) -> float:
+        """Get the last scheduled briefing time for a chat."""
+        if chat_id in self.last_intel_briefing_runs:
+            return self.last_intel_briefing_runs[chat_id]
+        if self.last_intel_briefing_runs:
+            return 0.0
+        return self.last_intel_briefing_run
+
+    def mark_intel_briefing_run(self, chat_id: int, timestamp: float) -> None:
+        """Persist a successful scheduled briefing delivery for a chat."""
+        self.last_intel_briefing_runs[chat_id] = timestamp
+        self.last_intel_briefing_run = max(self.last_intel_briefing_run, timestamp)
         self.save()
 
     def is_tts_announcer_enabled(self, chat_id: int) -> bool:

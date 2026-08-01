@@ -216,3 +216,40 @@ async def test_track_cf_action():
     assert state.cf_run_logs[0].action == "Test Action"
     assert state.cf_run_logs[0].neurons_used == 150
     assert state.cf_run_logs[0].total_used_after == 250
+
+
+@pytest.mark.asyncio
+async def test_track_cf_action_skips_log_when_allowance_sample_fails():
+    from tele_home_supervisor.models.bot_state import BotState
+    from tele_home_supervisor.orange_echo import track_cf_action
+
+    client = Mock()
+    client.get_allowances = AsyncMock(
+        side_effect=[
+            RuntimeError("allowance endpoint unavailable"),
+            {"allowances": {"neurons": {"used": 250}}},
+        ]
+    )
+    state = BotState()
+
+    result = await track_cf_action(client, state, "Test Action", _result("ok"))
+
+    assert result == "ok"
+    assert state.cf_run_logs == []
+
+
+async def _result(value):
+    return value
+
+
+def test_format_allowances_accepts_string_counts():
+    text = ai._format_allowances_json(
+        {
+            "allowances": {
+                "neurons": {"used": "1200", "limit": "10000", "remaining": "8800"}
+            }
+        }
+    )
+
+    assert "1,200 / 10,000 neurons" in text
+    assert "remaining: 8,800 neurons" in text

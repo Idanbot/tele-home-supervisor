@@ -279,7 +279,8 @@ def _build_weather_url(locations: list[dict[str, float | str]]) -> str:
         "https://api.open-meteo.com/v1/forecast?"
         f"latitude={lats}&longitude={lons}&"
         "current=temperature_2m,relative_humidity_2m,weather_code&"
-        "daily=temperature_2m_max,temperature_2m_min,precipitation_sum&"
+        "daily=temperature_2m_max,temperature_2m_min,precipitation_sum,"
+        "precipitation_probability_max&"
         "forecast_days=1&timezone=auto"
     )
 

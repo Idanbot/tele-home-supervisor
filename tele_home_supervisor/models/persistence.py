@@ -83,6 +83,10 @@ def serialize(state: BotState) -> dict:
         "reminders": state.reminders,
         "last_game_offers_run": state.last_game_offers_run,
         "last_intel_briefing_run": state.last_intel_briefing_run,
+        "last_intel_briefing_runs": {
+            str(chat_id): timestamp
+            for chat_id, timestamp in state.last_intel_briefing_runs.items()
+        },
         "last_release_watch_run": state.last_release_watch_run,
     }
 
@@ -200,6 +204,14 @@ def _deserialize_core(state: BotState, data: dict) -> None:
 
     state.last_game_offers_run = float(data.get("last_game_offers_run") or 0.0)
     state.last_intel_briefing_run = float(data.get("last_intel_briefing_run") or 0.0)
+    state.last_intel_briefing_runs = {}
+    raw_intel_runs = data.get("last_intel_briefing_runs") or {}
+    if isinstance(raw_intel_runs, dict):
+        for chat_id, timestamp in raw_intel_runs.items():
+            try:
+                state.last_intel_briefing_runs[int(chat_id)] = float(timestamp)
+            except TypeError, ValueError:
+                continue
     state.last_release_watch_run = float(data.get("last_release_watch_run") or 0.0)
 
     if "audit_log" in data:

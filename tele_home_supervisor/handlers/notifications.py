@@ -345,7 +345,11 @@ def build_intel_settings_view(
         )
         if len(mod_row) == 2:
             keyboard.append(mod_row)
-        # TTS Announcer Toggle & TTS Section Settings Nav
+            mod_row = []
+    if mod_row:
+        keyboard.append(mod_row)
+
+    # TTS Announcer Toggle & TTS Section Settings Nav
     keyboard.append(
         [
             InlineKeyboardButton(

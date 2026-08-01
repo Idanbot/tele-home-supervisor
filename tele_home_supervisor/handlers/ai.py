@@ -736,7 +736,7 @@ async def cmd_cftts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_cfimagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Generate image via Cloudflare Workers AI (Flux-2-dev)."""
+    """Generate an image via Cloudflare Workers AI."""
     if not await guard(update, context):
         return
 
@@ -757,7 +757,7 @@ async def cmd_cfimagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         prompt = prompt[:2048]
 
     status_msg = await update.message.reply_text(
-        "🎨 Generating image via Cloudflare AI (Flux-2-dev)..."
+        "🎨 Generating image via Cloudflare AI..."
     )
 
     client = OrangeEchoClient(
@@ -837,14 +837,19 @@ def _format_allowances_json(
             used = value.get("used")
             limit = value.get("limit")
             remaining = value.get("remaining")
-            unit = "neurons" if key == "neurons" else "uses"
+            unit = "neurons" if "neuron" in key.lower() else "uses"
             details = []
             if used is not None and limit is not None:
-                details.append(f"{used:,} / {limit:,} {unit}")
+                details.append(
+                    f"{_format_allowance_count(used)} / "
+                    f"{_format_allowance_count(limit)} {unit}"
+                )
             elif used is not None:
-                details.append(f"used: {used:,} {unit}")
+                details.append(f"used: {_format_allowance_count(used)} {unit}")
             if remaining is not None:
-                details.append(f"remaining: {remaining:,} {unit}")
+                details.append(
+                    f"remaining: {_format_allowance_count(remaining)} {unit}"
+                )
 
             if not details:
                 details = [f"{k}: {v}" for k, v in value.items()]
@@ -877,6 +882,20 @@ def _format_allowances_json(
             )
 
     return "\n".join(lines)
+
+
+def _format_allowance_count(value: object) -> str:
+    """Format numeric API values while tolerating string-valued JSON fields."""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float):
+        return f"{value:,.2f}".rstrip("0").rstrip(".")
+    try:
+        return f"{int(str(value)):,}"
+    except ValueError:
+        return str(value)
 
 
 async def cmd_cfusage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

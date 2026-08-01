@@ -1,7 +1,9 @@
+from tele_home_supervisor import background
 from tele_home_supervisor.background import (
     _format_completion_message,
     _get_torrent_hash,
 )
+from tele_home_supervisor.models.bot_state import BotState
 from tele_home_supervisor.models.torrent_snapshot import TorrentSnapshot
 
 
@@ -88,3 +90,14 @@ class TestFormatCompletionMessage:
         msg = _format_completion_message(t)
         assert "Small" in msg
         assert "GB" not in msg
+
+
+def test_intel_briefing_due_is_tracked_per_chat(monkeypatch) -> None:
+    state = BotState()
+    now = 100_000.0
+    state.last_intel_briefing_run = now - 60
+    state.last_intel_briefing_runs = {1: now - 60}
+    monkeypatch.setattr(background, "_seconds_until_time", lambda *_args: 30.0)
+
+    assert background._intel_briefing_due(state, 1, now) is False
+    assert background._intel_briefing_due(state, 2, now) is True

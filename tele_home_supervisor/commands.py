@@ -534,7 +534,7 @@ _AI_COMMANDS = (
         "cfimagegen",
         "AI",
         "/cfimagegen <prompt>",
-        "generate image via Cloudflare Workers AI (Flux-2-dev)",
+        "generate image via Cloudflare Workers AI",
         "cmd_cfimagegen",
     ),
     CommandSpec(
