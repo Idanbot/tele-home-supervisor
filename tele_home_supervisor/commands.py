@@ -545,6 +545,20 @@ _AI_COMMANDS = (
         "cmd_cfusage",
     ),
     CommandSpec(
+        "cfmodels",
+        "AI",
+        "/cfmodels",
+        "select Cloudflare speech and image models",
+        "cmd_cfmodels",
+    ),
+    CommandSpec(
+        "cfvoice",
+        "AI",
+        "/cfvoice",
+        "select an Aura news voice, accent, and matching model",
+        "cmd_cfvoice",
+    ),
+    CommandSpec(
         "tts_settings",
         "AI",
         "/tts_settings",

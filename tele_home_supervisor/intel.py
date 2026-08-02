@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -131,6 +132,20 @@ async def get_news() -> str:
 
 async def get_stoic_quote() -> str:
     """Quote Module - 1 Stoic Quote with retry."""
+    quote, error = await fetch_stoic_quote()
+    if quote is None:
+        return f"🏛️ <b>Stoic Wisdom</b>\n❌ Wisdom unavailable today: {html.escape(error or 'unknown error')}"
+    return f'🏛️ <b>Stoic Wisdom</b>\n<i>"{html.escape(quote.text)}"</i> — {html.escape(quote.author)}'
+
+
+@dataclass(frozen=True)
+class StoicQuote:
+    text: str
+    author: str
+
+
+async def fetch_stoic_quote() -> tuple[StoicQuote | None, str | None]:
+    """Fetch structured quote data so narration can preserve it verbatim."""
     url = "https://www.stoic-quotes.com/api/quote"
     data = None
     last_error = None
@@ -147,12 +162,13 @@ async def get_stoic_quote() -> str:
             logger.warning("Stoic quote fetch attempt %d failed: %s", attempt + 1, e)
 
     if not data:
-        return f"🏛️ <b>Stoic Wisdom</b>\n❌ Wisdom unavailable today: {html.escape(str(last_error))}"
+        return None, str(last_error)
 
-    quote = data.get("text", "No quote found")
-    author = data.get("author", "Unknown")
-
-    return f'🏛️ <b>Stoic Wisdom</b>\n<i>"{quote}"</i> — {author}'
+    quote = str(data.get("text") or "").strip()
+    author = str(data.get("author") or "Unknown").strip()
+    if not quote:
+        return None, "No quote found"
+    return StoicQuote(text=quote, author=author), None
 
 
 async def get_system_health() -> str:
@@ -391,6 +407,7 @@ async def build_tts_announcer_raw_text(
     chat_id: int | None = None,
     state: BotState | None = None,
     max_chars: int = 1200,
+    include_quote: bool = True,
 ) -> str:
     """Build sectioned, clean text ready for TTS narration optimization.
 
@@ -470,7 +487,7 @@ async def build_tts_announcer_raw_text(
 
     # 6. Stoic Quote
     quote_str = ""
-    if "quote" not in disabled_tts:
+    if include_quote and "quote" not in disabled_tts:
         quote_raw = await get_stoic_quote()
         quote_clean = clean_text_for_tts(quote_raw)
         if quote_clean:
@@ -508,6 +525,7 @@ async def build_tts_announcer_raw_text(
 async def generate_tts_announcer_audio(
     raw_text: str,
     state: BotState | None = None,
+    chat_id: int | None = None,
 ) -> tuple[bytes | None, str | None]:
     """Send raw TTS text to Cloudflare Workers AI (Orange Echo) optimize & speech pipeline."""
     if not config.ORANGE_ECHO_API_KEY:
@@ -524,8 +542,34 @@ async def generate_tts_announcer_audio(
     try:
 
         async def _run_pipeline() -> bytes:
-            narration = await client.optimize(raw_text, target_characters=900)
-            return await client.synthesize(narration)
+            quote_payload = None
+            quote_enabled = (
+                chat_id is None
+                or state is None
+                or state.is_tts_section_enabled(chat_id, "quote")
+            )
+            if quote_enabled:
+                quote, quote_error = await fetch_stoic_quote()
+                if quote:
+                    quote_payload = {"text": quote.text, "author": quote.author}
+                elif quote_error:
+                    logger.warning("Stoic quote omitted from TTS: %s", quote_error)
+            narration = await client.optimize(
+                raw_text,
+                target_characters=1400,
+                stoic_quote=quote_payload,
+            )
+            model = (
+                state.get_cf_model(chat_id, "speech")
+                if state and chat_id
+                else "premium"
+            )
+            voice_preset = state.get_cf_voice(chat_id) if state and chat_id else "luna"
+            return await client.synthesize(
+                narration,
+                model=model,
+                voice_preset=voice_preset,
+            )
 
         audio_bytes = await track_cf_action(
             client, state, "TTS Announcer (briefing)", _run_pipeline()

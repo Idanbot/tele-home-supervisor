@@ -36,7 +36,7 @@ It unifies system monitoring, Docker management, torrenting, AI interaction, and
 
 ### 🧠 Local & Cloud AI Integration
 *   **Ollama Support**: Chat with local LLMs (Llama 3, Mistral, etc.) directly in Telegram.
-*   **Cloudflare Workers AI**: Text-to-speech audio (`/cftts`), image generation (`/cfimagegen`), and usage statistics (`/cfusage`).
+*   **Cloudflare Workers AI**: Text-to-speech audio (`/cftts`), image generation (`/cfimagegen`), persistent speech/image model selection (`/cfmodels`), Aura-2 news voice presets (`/cfvoice`), and usage statistics (`/cfusage`).
 
 *   **Smart Splitting**: Automatically handles long responses by splitting them into multiple readable messages.
 *   **Model Management**: List, pull, and switch models on the fly.
@@ -105,7 +105,7 @@ docker compose up -d
 | `OLLAMA_HOST` | URL for Ollama API (e.g., `http://172.17.0.1:11434` for host access). |
 | `OLLAMA_MODEL` | Default model to use (default: `llama2`). |
 | `ORANGE_ECHO_BASE_URL` | Base URL for Cloudflare Workers AI service (default: `https://orange-echo.botbolidan.workers.dev`). |
-| `ORANGE_ECHO_API_KEY` | API key for Cloudflare Workers AI service (enables `/cftts`, `/cfimagegen`, `/cfusage`). |
+| `ORANGE_ECHO_API_KEY` | API key for Cloudflare Workers AI service (enables `/cftts`, `/cfimagegen`, `/cfmodels`, `/cfvoice`, `/cfusage`). |
 
 | `QBT_HOST` | qBittorrent hostname/IP. |
 
@@ -283,6 +283,8 @@ the `telebot_data` Docker volume.
 | `/askreset` | reset custom AI generation parameters |
 | `/cftts <prompt>` | generate speech audio via Cloudflare Workers AI (or reply to text file/message) |
 | `/cfimagegen <prompt>` | generate image via Cloudflare Workers AI (or reply to text file/message) |
+| `/cfmodels` | select persistent speech and image models with high-limit neuron estimates and relative quality ratings |
+| `/cfvoice` | select an Aura news voice preset, including British and Australian accents; changes the matching speech model |
 | `/cfusage` | show Cloudflare Workers AI usage and daily allowances |
 
 

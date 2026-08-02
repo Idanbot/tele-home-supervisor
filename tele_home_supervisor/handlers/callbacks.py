@@ -13,10 +13,9 @@ import logging
 
 from telegram.constants import ParseMode
 
-from . import alerts as alerts_handler
-
 # Sub-module handlers
-from . import cb_docker, cb_media, cb_torrents, notifications
+from . import ai, cb_docker, cb_media, cb_torrents, notifications
+from . import alerts as alerts_handler
 
 # ---------------------------------------------------------------------------
 # Re-exports for backward compatibility – other modules import these names
@@ -372,6 +371,22 @@ async def handle_callback_query(update, context) -> None:
                 "protondbinfo",
                 data,
                 cb_media.handle_protondb_info(query, context, data),
+            )
+        elif data.startswith("cfvoice:"):
+            await _run_audit_action(
+                update,
+                context,
+                "cf_voice",
+                data,
+                ai.handle_cf_voice_callback(update, context),
+            )
+        elif data.startswith("cfmodel:"):
+            await _run_audit_action(
+                update,
+                context,
+                "cf_model",
+                data,
+                ai.handle_cf_model_callback(update, context),
             )
         elif data.startswith("reddit_fetch:"):
             await _run_audit_action(

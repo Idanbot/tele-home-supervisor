@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from conftest import DummyContext, DummyMessage, DummyUpdate
@@ -34,7 +34,9 @@ async def test_cmd_cf_tts_success(monkeypatch):
 
     await ai.cmd_cftts(update, context)
 
-    mock_synthesize.assert_called_once_with("Hello world speech test")
+    mock_synthesize.assert_called_once_with(
+        "Hello world speech test", model="premium", voice_preset="luna"
+    )
     assert len(update.message.voices) == 1
     voice, caption = update.message.voices[0]
     assert voice.read() == fake_ogg
@@ -69,7 +71,11 @@ async def test_cmd_cf_tts_from_reply_file(monkeypatch):
     await ai.cmd_cftts(update, context)
 
     context.bot.get_file.assert_called_once_with("doc123")
-    mock_synthesize.assert_called_once_with("Narration text from file attachment")
+    mock_synthesize.assert_called_once_with(
+        "Narration text from file attachment",
+        model="premium",
+        voice_preset="luna",
+    )
     assert len(update.message.voices) == 1
 
 
@@ -92,7 +98,7 @@ async def test_cmd_cf_imagegen_success(monkeypatch):
 
     await ai.cmd_cfimagegen(update, context)
 
-    mock_gen_img.assert_called_once_with("Cyberpunk city sunset")
+    mock_gen_img.assert_called_once_with("Cyberpunk city sunset", model="fast")
     assert len(update.message.photos) == 1
     photo, caption = update.message.photos[0]
     assert photo.read() == b"fake_jpeg_bytes"
@@ -117,8 +123,15 @@ async def test_orange_echo_client_methods():
     }
     client.client.post = AsyncMock(return_value=resp_opt)
 
-    narration = await client.optimize("Intel text", target_characters=500)
+    narration = await client.optimize(
+        "Intel text",
+        target_characters=500,
+        stoic_quote={"text": "Keep the quote exact.", "author": "Tester"},
+    )
     assert narration == "Optimized narration text"
+    assert client.client.post.call_args.kwargs["json"]["stoic_quote"]["text"] == (
+        "Keep the quote exact."
+    )
 
     # Test synthesize
     resp_speech = MagicMock()
@@ -127,8 +140,12 @@ async def test_orange_echo_client_methods():
     resp_speech.content = b"OggS_audio_data"
     client.client.post = AsyncMock(return_value=resp_speech)
 
-    audio = await client.synthesize("Narration text")
+    audio = await client.synthesize(
+        "Narration text", model="balanced", voice_preset="draco"
+    )
     assert audio == b"OggS_audio_data"
+    assert client.client.post.call_args.kwargs["json"]["model"] == "balanced"
+    assert client.client.post.call_args.kwargs["json"]["voice_preset"] == "draco"
 
     # Test generate_image
     resp_img = MagicMock()
@@ -140,10 +157,11 @@ async def test_orange_echo_client_methods():
     }
     client.client.post = AsyncMock(return_value=resp_img)
 
-    img = await client.generate_image("A cat", seed=42)
+    img = await client.generate_image("A cat", seed=42, model="quality")
     assert img.content == b"image_content"
     assert img.mime_type == "image/png"
     assert img.model == "@cf/black-forest-labs/flux-2-klein-4b"
+    assert client.client.post.call_args.kwargs["json"]["model"] == "quality"
 
     # Test error raising
     resp_err = MagicMock()
@@ -164,6 +182,142 @@ async def test_orange_echo_client_methods():
     )
 
     await client.close()
+
+
+def test_cf_model_preferences_are_persistent(tmp_path):
+    from tele_home_supervisor.models.bot_state import BotState
+
+    database = tmp_path / "state.sqlite3"
+    state = BotState(_database_file=database)
+    assert state.get_cf_model(7, "speech") == "premium"
+    assert state.get_cf_model(7, "image") == "fast"
+
+    state.set_cf_model(7, "speech", "balanced")
+    state.set_cf_model(7, "image", "quality")
+
+    restored = BotState(_database_file=database)
+    restored.load_state()
+    assert restored.get_cf_model(7, "speech") == "balanced"
+    assert restored.get_cf_model(7, "image") == "quality"
+
+    state.set_cf_voice_preset(7, "athena", "balanced")
+    restored = BotState(_database_file=database)
+    restored.load_state()
+    assert restored.get_cf_voice(7) == "athena"
+    assert restored.get_cf_model(7, "speech") == "balanced"
+
+
+def test_cf_model_keyboard_uses_shared_relative_ratings():
+    from tele_home_supervisor.models.bot_state import BotState
+    from tele_home_supervisor.orange_echo import FALLBACK_MODELS
+
+    keyboard = ai.build_cf_models_keyboard(BotState(), 1, FALLBACK_MODELS)
+    labels = [row[0].text for row in keyboard.inline_keyboard]
+
+    assert any("Aura-1 Angus · ~2,182 neurons · 1Q" in label for label in labels)
+    assert any("Aura-2 Luna · ~4,364 neurons · 1.3Q" in label for label in labels)
+    assert any("FLUX.2 Klein 4B · ~104 neurons · 1.3Q" in label for label in labels)
+
+
+@pytest.mark.asyncio
+async def test_cf_model_callback_persists_valid_selection(monkeypatch):
+    from tele_home_supervisor.models.bot_state import BotState
+    from tele_home_supervisor.orange_echo import FALLBACK_MODELS
+
+    state = BotState()
+    monkeypatch.setattr(ai, "get_state", lambda application: state)
+    monkeypatch.setattr(
+        ai, "_load_cf_model_catalog", AsyncMock(return_value=FALLBACK_MODELS)
+    )
+    monkeypatch.setattr(OrangeEchoClient, "close", AsyncMock())
+
+    update = DummyUpdate(chat_id=1, user_id=1)
+    update.callback_query = MagicMock()
+    update.callback_query.data = "cfmodel:image:quality"
+    update.callback_query.edit_message_text = AsyncMock()
+    context = DummyContext()
+
+    with patch.object(state, "save") as save:
+        await ai.handle_cf_model_callback(update, context)
+
+    assert state.get_cf_model(1, "image") == "quality"
+    save.assert_called_once_with(force=True)
+    update.callback_query.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_speech_model_callback_resets_to_matching_voice(monkeypatch):
+    from tele_home_supervisor.models.bot_state import BotState
+    from tele_home_supervisor.orange_echo import FALLBACK_MODELS
+
+    state = BotState()
+    with patch.object(state, "save"):
+        state.set_cf_voice(1, "draco")
+    monkeypatch.setattr(ai, "get_state", lambda application: state)
+    monkeypatch.setattr(
+        ai, "_load_cf_model_catalog", AsyncMock(return_value=FALLBACK_MODELS)
+    )
+    monkeypatch.setattr(OrangeEchoClient, "close", AsyncMock())
+
+    update = DummyUpdate(chat_id=1, user_id=1)
+    update.callback_query = MagicMock()
+    update.callback_query.data = "cfmodel:speech:balanced"
+    update.callback_query.edit_message_text = AsyncMock()
+
+    with patch.object(state, "save"):
+        await ai.handle_cf_model_callback(update, DummyContext())
+
+    assert state.get_cf_model(1, "speech") == "balanced"
+    assert state.get_cf_voice(1) == "angus"
+
+
+@pytest.mark.asyncio
+async def test_cf_voice_callback_persists_valid_selection(monkeypatch):
+    from tele_home_supervisor.models.bot_state import BotState
+    from tele_home_supervisor.orange_echo import FALLBACK_VOICE_PRESETS
+
+    state = BotState()
+    monkeypatch.setattr(ai, "get_state", lambda application: state)
+    monkeypatch.setattr(
+        ai, "_load_cf_voice_presets", AsyncMock(return_value=FALLBACK_VOICE_PRESETS)
+    )
+    monkeypatch.setattr(OrangeEchoClient, "close", AsyncMock())
+
+    update = DummyUpdate(chat_id=1, user_id=1)
+    update.callback_query = MagicMock()
+    update.callback_query.data = "cfvoice:draco"
+    update.callback_query.edit_message_text = AsyncMock()
+
+    with patch.object(state, "save") as save:
+        await ai.handle_cf_voice_callback(update, DummyContext())
+
+    assert state.get_cf_voice(1) == "draco"
+    assert state.get_cf_model(1, "speech") == "premium"
+    save.assert_called_once_with(force=True)
+
+
+@pytest.mark.asyncio
+async def test_aura1_cf_voice_callback_switches_to_balanced(monkeypatch):
+    from tele_home_supervisor.models.bot_state import BotState
+    from tele_home_supervisor.orange_echo import FALLBACK_VOICE_PRESETS
+
+    state = BotState()
+    monkeypatch.setattr(ai, "get_state", lambda application: state)
+    monkeypatch.setattr(
+        ai, "_load_cf_voice_presets", AsyncMock(return_value=FALLBACK_VOICE_PRESETS)
+    )
+    monkeypatch.setattr(OrangeEchoClient, "close", AsyncMock())
+
+    update = DummyUpdate(chat_id=1, user_id=1)
+    update.callback_query = MagicMock()
+    update.callback_query.data = "cfvoice:athena"
+    update.callback_query.edit_message_text = AsyncMock()
+
+    with patch.object(state, "save"):
+        await ai.handle_cf_voice_callback(update, DummyContext())
+
+    assert state.get_cf_voice(1) == "athena"
+    assert state.get_cf_model(1, "speech") == "balanced"
 
 
 def test_orange_echo_error_user_friendly_message():

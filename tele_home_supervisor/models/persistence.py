@@ -48,6 +48,13 @@ def serialize(state: BotState) -> dict:
             str(k): list(v) for k, v in state.disabled_tts_sections.items()
         },
         "cf_run_logs": [r.to_dict() for r in state.cf_run_logs],
+        "cf_model_preferences": {
+            str(chat_id): preferences
+            for chat_id, preferences in state.cf_model_preferences.items()
+        },
+        "cf_voice_preferences": {
+            str(chat_id): alias for chat_id, alias in state.cf_voice_preferences.items()
+        },
         "reddit_briefing_settings": {
             str(chat_id): settings.to_dict()
             for chat_id, settings in state.reddit_briefing_settings.items()
@@ -170,6 +177,30 @@ def _deserialize_core(state: BotState, data: dict) -> None:
                     state.cf_run_logs.append(CFRunRecord.from_dict(item))
                 except TypeError, ValueError:
                     continue
+
+    state.cf_model_preferences = {}
+    raw_model_preferences = data.get("cf_model_preferences") or {}
+    if isinstance(raw_model_preferences, dict):
+        for chat_id, preferences in raw_model_preferences.items():
+            if not isinstance(preferences, dict):
+                continue
+            try:
+                state.cf_model_preferences[int(chat_id)] = {
+                    str(kind): str(alias)
+                    for kind, alias in preferences.items()
+                    if kind in {"speech", "image"}
+                }
+            except TypeError, ValueError:
+                continue
+
+    state.cf_voice_preferences = {}
+    raw_voice_preferences = data.get("cf_voice_preferences") or {}
+    if isinstance(raw_voice_preferences, dict):
+        for chat_id, alias in raw_voice_preferences.items():
+            try:
+                state.cf_voice_preferences[int(chat_id)] = str(alias)
+            except TypeError, ValueError:
+                continue
 
     state.reddit_briefing_settings = {}
 

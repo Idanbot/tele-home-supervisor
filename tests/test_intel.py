@@ -381,3 +381,56 @@ async def test_tts_section_toggle_and_builder_filtering():
         assert "Greeting:" not in text
         assert "Weather:" not in text
         assert "Israel and World News:" in text
+
+
+@pytest.mark.asyncio
+async def test_tts_pipeline_keeps_quote_separate_and_uses_chat_model(monkeypatch):
+    state = BotState()
+    chat_id = 42
+    with patch.object(state, "save"):
+        state.set_cf_model(chat_id, "speech", "balanced")
+
+    optimize = AsyncMock(return_value="Structured narration with exact quote")
+    synthesize = AsyncMock(return_value=b"OggS-test")
+    monkeypatch.setattr(intel.config, "ORANGE_ECHO_API_KEY", "oe_live_test")
+    monkeypatch.setattr(intel.OrangeEchoClient, "optimize", optimize)
+    monkeypatch.setattr(intel.OrangeEchoClient, "synthesize", synthesize)
+    monkeypatch.setattr(intel.OrangeEchoClient, "close", AsyncMock())
+    monkeypatch.setattr(
+        intel,
+        "fetch_stoic_quote",
+        AsyncMock(
+            return_value=(
+                intel.StoicQuote("Do what is right, not what is easy.", "Tester"),
+                None,
+            )
+        ),
+    )
+
+    async def run_without_usage_tracking(client, current_state, action, operation):
+        return await operation
+
+    monkeypatch.setattr(
+        "tele_home_supervisor.orange_echo.track_cf_action",
+        run_without_usage_tracking,
+    )
+
+    audio, error = await intel.generate_tts_announcer_audio(
+        "Weather and news only.", state, chat_id
+    )
+
+    assert audio == b"OggS-test"
+    assert error is None
+    optimize.assert_awaited_once_with(
+        "Weather and news only.",
+        target_characters=1400,
+        stoic_quote={
+            "text": "Do what is right, not what is easy.",
+            "author": "Tester",
+        },
+    )
+    synthesize.assert_awaited_once_with(
+        "Structured narration with exact quote",
+        model="balanced",
+        voice_preset="luna",
+    )

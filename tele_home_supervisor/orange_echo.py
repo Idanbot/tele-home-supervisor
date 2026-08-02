@@ -56,6 +56,96 @@ class GeneratedImage:
     model: str
 
 
+@dataclass(frozen=True)
+class ModelChoice:
+    alias: str
+    label: str
+    estimated_neurons_at_limit: int
+    relative_quality: float
+    description: str
+    default: bool
+
+
+@dataclass(frozen=True)
+class VoicePreset:
+    alias: str
+    label: str
+    accent: str
+    description: str
+    model_alias: str
+
+
+FALLBACK_MODELS: dict[str, list[ModelChoice]] = {
+    "speech": [
+        ModelChoice(
+            "balanced",
+            "Aura-1 Angus",
+            2_182,
+            1.0,
+            "Lower-cost natural English voice",
+            False,
+        ),
+        ModelChoice(
+            "premium",
+            "Aura-2 Luna",
+            4_364,
+            1.3,
+            "More expressive English voice",
+            True,
+        ),
+    ],
+    "image": [
+        ModelChoice(
+            "fast", "FLUX.1 Schnell", 58, 1.0, "Fast, economical generation", True
+        ),
+        ModelChoice(
+            "quality",
+            "FLUX.2 Klein 4B",
+            104,
+            1.3,
+            "Better prompt fidelity and detail",
+            False,
+        ),
+    ],
+}
+
+FALLBACK_VOICE_PRESETS = [
+    VoicePreset(
+        "angus", "Angus", "Irish", "Warm, natural economical briefing", "balanced"
+    ),
+    VoicePreset(
+        "athena",
+        "Athena",
+        "British",
+        "Calm, smooth professional newsreader",
+        "balanced",
+    ),
+    VoicePreset(
+        "helios",
+        "Helios",
+        "British",
+        "Clear, confident professional newsreader",
+        "balanced",
+    ),
+    VoicePreset(
+        "luna", "Luna", "American", "Friendly, natural daily briefing", "premium"
+    ),
+    VoicePreset(
+        "draco", "Draco", "British", "Warm, trustworthy baritone news anchor", "premium"
+    ),
+    VoicePreset(
+        "pandora", "Pandora", "British", "Calm, smooth informative briefing", "premium"
+    ),
+    VoicePreset(
+        "theia",
+        "Theia",
+        "Australian",
+        "Clear, expressive news desk delivery",
+        "premium",
+    ),
+]
+
+
 class OrangeEchoClient:
     def __init__(
         self,
@@ -89,27 +179,79 @@ class OrangeEchoClient:
         result = response.json()
         return result if isinstance(result, dict) else {"data": result}
 
+    async def get_models(self) -> dict[str, list[ModelChoice]]:
+        response = await self.client.get("/v1/models")
+        self._raise_for_api_error(response)
+        result = response.json()
+        catalog: dict[str, list[ModelChoice]] = {}
+        for kind in ("speech", "image"):
+            choices = result.get(kind, []) if isinstance(result, dict) else []
+            catalog[kind] = [
+                ModelChoice(
+                    alias=str(item["alias"]),
+                    label=str(item["label"]),
+                    estimated_neurons_at_limit=int(item["estimated_neurons_at_limit"]),
+                    relative_quality=float(item["relative_quality"]),
+                    description=str(item.get("description", "")),
+                    default=bool(item.get("default", False)),
+                )
+                for item in choices
+                if isinstance(item, dict)
+            ]
+        return catalog
+
+    async def get_voice_presets(self) -> list[VoicePreset]:
+        response = await self.client.get("/v1/models")
+        self._raise_for_api_error(response)
+        result = response.json()
+        choices = result.get("voice_presets", []) if isinstance(result, dict) else []
+        return [
+            VoicePreset(
+                alias=str(item["alias"]),
+                label=str(item["label"]),
+                accent=str(item["accent"]),
+                description=str(item["description"]),
+                model_alias=str(item["model_alias"]),
+            )
+            for item in choices
+            if isinstance(item, dict)
+        ]
+
     async def optimize(
         self,
         intel: str,
         *,
         target_characters: int = 900,
+        stoic_quote: dict[str, str] | None = None,
     ) -> str:
+        payload: dict[str, object] = {
+            "intel": intel,
+            "target_characters": target_characters,
+        }
+        if stoic_quote:
+            payload["stoic_quote"] = stoic_quote
         response = await self.client.post(
             "/v1/inference/optimize",
-            json={
-                "intel": intel,
-                "target_characters": target_characters,
-            },
+            json=payload,
         )
         self._raise_for_api_error(response)
         result = response.json()
         return result["narration"]
 
-    async def synthesize(self, narration: str) -> bytes:
+    async def synthesize(
+        self,
+        narration: str,
+        *,
+        model: str = "premium",
+        voice_preset: str = "luna",
+    ) -> bytes:
         response = await self.client.post(
             "/v1/inference/speech",
-            json={"text": narration},
+            json={
+                "text": narration,
+                "model": model,
+                "voice_preset": voice_preset,
+            },
         )
         self._raise_for_api_error(response)
         content_type = response.headers.get("content-type", "").split(";", 1)[0].strip()
@@ -124,8 +266,9 @@ class OrangeEchoClient:
         prompt: str,
         *,
         seed: int | None = None,
+        model: str = "fast",
     ) -> GeneratedImage:
-        payload: dict[str, object] = {"prompt": prompt}
+        payload: dict[str, object] = {"prompt": prompt, "model": model}
         if seed is not None:
             payload["seed"] = seed
         response = await self.client.post(

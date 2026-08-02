@@ -11,7 +11,7 @@ from io import BytesIO
 from typing import Any
 
 import httpx
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import RetryAfter
 from telegram.ext import ContextTypes
@@ -20,7 +20,15 @@ from .. import config
 from ..ai_delivery import build_streaming_delivery
 from ..ai_service import GenerationTarget, create_text_provider
 from ..models.bot_state import CFRunRecord
-from ..orange_echo import OrangeEchoClient, OrangeEchoError, track_cf_action
+from ..orange_echo import (
+    FALLBACK_MODELS,
+    FALLBACK_VOICE_PRESETS,
+    ModelChoice,
+    OrangeEchoClient,
+    OrangeEchoError,
+    VoicePreset,
+    track_cf_action,
+)
 from ..utils import split_telegram_message
 from .common import get_state, guard, tracked_reply_photo, tracked_reply_voice
 
@@ -698,8 +706,13 @@ async def cmd_cftts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     try:
         state = get_state(context.application)
+        model = state.get_cf_model(update.effective_chat.id, "speech")
+        voice_preset = state.get_cf_voice(update.effective_chat.id)
         audio_bytes = await track_cf_action(
-            client, state, "TTS (/cftts)", client.synthesize(prompt)
+            client,
+            state,
+            "TTS (/cftts)",
+            client.synthesize(prompt, model=model, voice_preset=voice_preset),
         )
         voice_file = BytesIO(audio_bytes)
         voice_file.name = "speech.ogg"
@@ -714,7 +727,7 @@ async def cmd_cftts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             update.message,
             state,
             voice=voice_file,
-            caption=f"🗣️ Cloudflare TTS ({len(prompt)} chars)",
+            caption=f"🗣️ Cloudflare TTS · {model}/{voice_preset} ({len(prompt)} chars)",
         )
     except OrangeEchoError as e:
         logger.warning("Cloudflare TTS API error: %s", e)
@@ -766,8 +779,12 @@ async def cmd_cfimagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     try:
         state = get_state(context.application)
+        model = state.get_cf_model(update.effective_chat.id, "image")
         generated = await track_cf_action(
-            client, state, "ImageGen (/cfimagegen)", client.generate_image(prompt)
+            client,
+            state,
+            "ImageGen (/cfimagegen)",
+            client.generate_image(prompt, model=model),
         )
         suffix = {
             "image/jpeg": "jpg",
@@ -807,6 +824,181 @@ async def cmd_cfimagegen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
 
+    finally:
+        await client.close()
+
+
+def _relative_rating(value: float) -> str:
+    return f"{value:g}"
+
+
+def build_cf_models_keyboard(
+    state, chat_id: int, catalog: dict[str, list[ModelChoice]]
+) -> InlineKeyboardMarkup:
+    """Build both model selectors through one shared renderer."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for kind, icon in (("speech", "🗣️"), ("image", "🎨")):
+        selected = state.get_cf_model(chat_id, kind)
+        for choice in catalog.get(kind, []):
+            marker = "✅" if choice.alias == selected else icon
+            quality = _relative_rating(choice.relative_quality)
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"{marker} {choice.label} · "
+                        f"~{choice.estimated_neurons_at_limit:,} neurons · {quality}Q",
+                        callback_data=f"cfmodel:{kind}:{choice.alias}",
+                    )
+                ]
+            )
+    return InlineKeyboardMarkup(rows)
+
+
+async def _load_cf_model_catalog(
+    client: OrangeEchoClient,
+) -> dict[str, list[ModelChoice]]:
+    try:
+        catalog = await client.get_models()
+        if catalog.get("speech") and catalog.get("image"):
+            return catalog
+    except Exception as exc:
+        logger.warning("Using fallback Cloudflare model catalog: %s", exc)
+    return FALLBACK_MODELS
+
+
+async def _load_cf_voice_presets(client: OrangeEchoClient) -> list[VoicePreset]:
+    try:
+        presets = await client.get_voice_presets()
+        if presets:
+            return presets
+    except Exception as exc:
+        logger.warning("Using fallback Cloudflare voice presets: %s", exc)
+    return FALLBACK_VOICE_PRESETS
+
+
+def build_cf_voice_keyboard(
+    state, chat_id: int, presets: list[VoicePreset]
+) -> InlineKeyboardMarkup:
+    selected = state.get_cf_voice(chat_id)
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    f"{'✅' if preset.alias == selected else '🗣️'} "
+                    f"{preset.label} · {preset.accent}",
+                    callback_data=f"cfvoice:{preset.alias}",
+                )
+            ]
+            for preset in presets
+        ]
+    )
+
+
+async def cmd_cfmodels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Select persistent Cloudflare speech and image models."""
+    if not await guard(update, context):
+        return
+    state = get_state(context.application)
+    client = OrangeEchoClient(
+        base_url=config.ORANGE_ECHO_BASE_URL,
+        api_key=config.ORANGE_ECHO_API_KEY,
+    )
+    try:
+        catalog = await _load_cf_model_catalog(client)
+        await update.message.reply_text(
+            "Cloudflare AI models\nNeurons = estimated use at limit · Q = relative quality",
+            reply_markup=build_cf_models_keyboard(
+                state, update.effective_chat.id, catalog
+            ),
+        )
+    finally:
+        await client.close()
+
+
+async def cmd_cfvoice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Select a persistent Aura news voice preset and matching model."""
+    if not await guard(update, context):
+        return
+    state = get_state(context.application)
+    client = OrangeEchoClient(
+        base_url=config.ORANGE_ECHO_BASE_URL,
+        api_key=config.ORANGE_ECHO_API_KEY,
+    )
+    try:
+        presets = await _load_cf_voice_presets(client)
+        await update.message.reply_text(
+            "Aura news voice\nSelecting a preset also selects its matching model.",
+            reply_markup=build_cf_voice_keyboard(
+                state, update.effective_chat.id, presets
+            ),
+        )
+    finally:
+        await client.close()
+
+
+async def handle_cf_model_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    parts = (query.data or "").split(":", 2)
+    if len(parts) != 3 or parts[1] not in {"speech", "image"}:
+        await query.edit_message_text("Invalid Cloudflare model selection.")
+        return
+    _, kind, alias = parts
+    state = get_state(context.application)
+    client = OrangeEchoClient(
+        base_url=config.ORANGE_ECHO_BASE_URL,
+        api_key=config.ORANGE_ECHO_API_KEY,
+    )
+    try:
+        catalog = await _load_cf_model_catalog(client)
+        choices = catalog.get(kind, [])
+        if alias not in {choice.alias for choice in choices}:
+            await query.edit_message_text("That model is no longer available.")
+            return
+        if kind == "speech":
+            default_voice = "angus" if alias == "balanced" else "luna"
+            state.set_cf_voice_preset(update.effective_chat.id, default_voice, alias)
+        else:
+            state.set_cf_model(update.effective_chat.id, kind, alias)
+        await query.edit_message_text(
+            "Cloudflare AI models\nNeurons = estimated use at limit · Q = relative quality",
+            reply_markup=build_cf_models_keyboard(
+                state, update.effective_chat.id, catalog
+            ),
+        )
+    finally:
+        await client.close()
+
+
+async def handle_cf_voice_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    _, _, alias = (query.data or "").partition(":")
+    if not alias:
+        await query.edit_message_text("Invalid Cloudflare voice selection.")
+        return
+    state = get_state(context.application)
+    client = OrangeEchoClient(
+        base_url=config.ORANGE_ECHO_BASE_URL,
+        api_key=config.ORANGE_ECHO_API_KEY,
+    )
+    try:
+        presets = await _load_cf_voice_presets(client)
+        if alias not in {preset.alias for preset in presets}:
+            await query.edit_message_text("That voice preset is no longer available.")
+            return
+        preset = next(preset for preset in presets if preset.alias == alias)
+        state.set_cf_voice_preset(
+            update.effective_chat.id, preset.alias, preset.model_alias
+        )
+        await query.edit_message_text(
+            "Aura news voice\nSelecting a preset also selects its matching model.",
+            reply_markup=build_cf_voice_keyboard(
+                state, update.effective_chat.id, presets
+            ),
+        )
     finally:
         await client.close()
 

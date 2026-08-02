@@ -100,6 +100,8 @@ class BotState:
     intel_tts_announcer: set[int] = field(default_factory=set)
     disabled_tts_sections: dict[int, set[str]] = field(default_factory=dict)
     cf_run_logs: list[CFRunRecord] = field(default_factory=list)
+    cf_model_preferences: dict[int, dict[str, str]] = field(default_factory=dict)
+    cf_voice_preferences: dict[int, str] = field(default_factory=dict)
     reddit_briefing_settings: dict[int, RedditBriefingSettings] = field(
         default_factory=dict
     )
@@ -637,6 +639,28 @@ class BotState:
         if len(self.cf_run_logs) > 50:
             self.cf_run_logs = self.cf_run_logs[-50:]
         self.save()
+
+    def get_cf_model(self, chat_id: int, kind: str) -> str:
+        defaults = {"speech": "premium", "image": "fast"}
+        return self.cf_model_preferences.get(chat_id, {}).get(kind, defaults[kind])
+
+    def set_cf_model(self, chat_id: int, kind: str, alias: str) -> None:
+        if kind not in {"speech", "image"}:
+            raise ValueError("Unknown Cloudflare model kind")
+        self.cf_model_preferences.setdefault(chat_id, {})[kind] = alias
+        self.save(force=True)
+
+    def get_cf_voice(self, chat_id: int) -> str:
+        return self.cf_voice_preferences.get(chat_id, "luna")
+
+    def set_cf_voice(self, chat_id: int, alias: str) -> None:
+        self.cf_voice_preferences[chat_id] = alias
+        self.save(force=True)
+
+    def set_cf_voice_preset(self, chat_id: int, alias: str, model_alias: str) -> None:
+        self.cf_voice_preferences[chat_id] = alias
+        self.cf_model_preferences.setdefault(chat_id, {})["speech"] = model_alias
+        self.save(force=True)
 
     def get_recent_cf_run_logs(self, limit: int = 5) -> list[CFRunRecord]:
         """Get recent Cloudflare run records (default: last 5)."""

@@ -299,7 +299,9 @@ async def fetch_reddit_post(subreddit: str, mode: str = "trending") -> dict[str,
     if not posts:
         raise LookupError(f"No posts found in r/{normalized}")
     if normalized_mode == "random":
-        return dict(random.choice(posts))  # noqa: S311 - content selection, not security
+        return dict(
+            random.choice(posts)  # noqa: S311  # nosec B311
+        )
     return dict(posts[0])
 
 
