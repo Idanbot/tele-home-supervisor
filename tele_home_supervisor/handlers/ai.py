@@ -983,6 +983,8 @@ async def handle_cf_voice_callback(
         await query.edit_message_text("Invalid Cloudflare voice selection.")
         return
     state = get_state(context.application)
+    if state.get_cf_voice(update.effective_chat.id) == alias:
+        return
     client = OrangeEchoClient(
         base_url=config.ORANGE_ECHO_BASE_URL,
         api_key=config.ORANGE_ECHO_API_KEY,

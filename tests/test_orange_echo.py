@@ -328,6 +328,31 @@ async def test_cf_voice_callback_persists_valid_selection(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cf_voice_callback_ignores_already_selected_preset(monkeypatch):
+    from tele_home_supervisor.models.bot_state import BotState
+    from tele_home_supervisor.orange_echo import FALLBACK_VOICE_PRESETS
+
+    state = BotState()
+    with patch.object(state, "save"):
+        state.set_cf_voice_preset(1, "draco", "premium")
+    load_presets = AsyncMock(return_value=FALLBACK_VOICE_PRESETS)
+    monkeypatch.setattr(ai, "get_state", lambda application: state)
+    monkeypatch.setattr(ai, "_load_cf_voice_presets", load_presets)
+
+    update = DummyUpdate(chat_id=1, user_id=1)
+    update.callback_query = MagicMock()
+    update.callback_query.data = "cfvoice:draco"
+    update.callback_query.edit_message_text = AsyncMock()
+
+    with patch.object(state, "save") as save:
+        await ai.handle_cf_voice_callback(update, DummyContext())
+
+    load_presets.assert_not_awaited()
+    save.assert_not_called()
+    update.callback_query.edit_message_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_aura1_cf_voice_callback_switches_to_balanced(monkeypatch):
     from tele_home_supervisor.models.bot_state import BotState
     from tele_home_supervisor.orange_echo import FALLBACK_VOICE_PRESETS
