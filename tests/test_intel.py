@@ -243,13 +243,22 @@ async def test_get_weather_for_tts():
                 "precipitation_probability_max": [40],
             }
         },
+        {
+            "daily": {
+                "temperature_2m_max": [32.0],
+                "temperature_2m_min": [24.0],
+                "precipitation_probability_max": [20],
+            }
+        },
     ]
     with patch(
         "tele_home_supervisor.intel._fetch_weather_payloads",
         return_value=(fake_payloads, []),
     ):
         weather_summary = await intel.get_weather_for_tts()
-        assert "25 degrees Celsius" in weather_summary
+        assert "Haifa averages 25 degrees Celsius" in weather_summary
+        assert "Omer averages 25 degrees Celsius" in weather_summary
+        assert "Tel Aviv averages 28 degrees Celsius" in weather_summary
         assert "40 percent chance of rain" in weather_summary
 
 

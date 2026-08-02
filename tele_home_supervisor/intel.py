@@ -373,32 +373,37 @@ def clean_text_for_tts(text: str) -> str:
 
 
 async def get_weather_for_tts() -> str:
-    """Weather summary formatted for TTS: average temperature and rain probability percentage."""
+    """Weather summary formatted for TTS with a daily average for each city."""
     locations = [
         {"name": "Haifa", "lat": 32.7940, "lon": 34.9896},
         {"name": "Omer", "lat": 31.2464, "lon": 34.7961},
         {"name": "Tel Aviv", "lat": 32.0853, "lon": 34.7818},
     ]
     data, _ = await _fetch_weather_payloads(locations)
-    temps = []
+    city_temperatures = []
     precip_probs = []
-    for payload in data:
+    for index, location in enumerate(locations):
+        city_name = str(location["name"])
+        payload = data[index] if index < len(data) else None
         if not payload:
+            city_temperatures.append(f"{city_name} is unavailable")
             continue
         daily = payload.get("daily", {})
         t_max = daily.get("temperature_2m_max", [None])[0]
         t_min = daily.get("temperature_2m_min", [None])[0]
         p_prob = daily.get("precipitation_probability_max", [None])[0]
         if t_max is not None and t_min is not None:
-            temps.append((t_max + t_min) / 2.0)
+            average = round((t_max + t_min) / 2.0)
+            city_temperatures.append(f"{city_name} averages {average} degrees Celsius")
+        else:
+            city_temperatures.append(f"{city_name} is unavailable")
         if p_prob is not None:
             precip_probs.append(p_prob)
 
-    avg_temp = round(sum(temps) / len(temps)) if temps else 25
     rain_chance = max(precip_probs) if precip_probs else 0
 
     return (
-        f"The average temperature in Israel today is {avg_temp} degrees Celsius "
+        f"Today's average temperatures: {'; '.join(city_temperatures)}. "
         f"with a {rain_chance} percent chance of rain."
     )
 
