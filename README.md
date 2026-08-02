@@ -106,9 +106,7 @@ docker compose up -d
 | `OLLAMA_MODEL` | Default model to use (default: `llama2`). |
 | `ORANGE_ECHO_BASE_URL` | Base URL for Cloudflare Workers AI service (default: `https://orange-echo.botbolidan.workers.dev`). |
 | `ORANGE_ECHO_API_KEY` | API key for Cloudflare Workers AI service (enables `/cftts`, `/cfimagegen`, `/cfmodels`, `/cfvoice`, `/cfusage`). |
-
 | `QBT_HOST` | qBittorrent hostname/IP. |
-
 | `QBT_PORT` | qBittorrent WebUI port (default: `8080`). |
 | `QBT_USER` | qBittorrent username. |
 | `QBT_PASS` | qBittorrent password. |
@@ -122,6 +120,73 @@ Built-in briefing groups are `fun` (`funny`, `memes`, `videos`), `tech`
 (`programming`, `technology`), and `devops` (`devops`, `cloudcomputing`,
 `artificial`). They and the `/reddit_fetch` curated picker are defined in
 `tele_home_supervisor/models/reddit_settings.py`.
+
+### TTS announcer contract
+
+When the scheduled or on-demand Intel Briefing has TTS enabled, the bot makes
+two requests to the Orange Echo Worker. The first request is sent to the
+briefing optimizer (the LLM agent); the second synthesizes its response into an
+OGG voice message. The optimizer receives no Telegram identifiers, credentials,
+or raw API responses.
+
+`$RAW_BRIEFING` is clean, sectioned plaintext assembled in this fixed order:
+`Greeting`, `Weather`, `Israel and World News`, `Hacker News`, and `Reddit
+Trends`. It is capped at 1,200 characters before optimization; Reddit is
+removed first and Hacker News second if it exceeds that limit. Disabled TTS
+sections are omitted.
+
+The Stoic quote is intentionally excluded from `$RAW_BRIEFING`. When available,
+it is supplied separately as `$STOIC_QUOTE` so the optimizer can retain the
+quote and author exactly rather than paraphrasing them.
+
+```http
+POST ${ORANGE_ECHO_BASE_URL}/v1/inference/optimize
+Authorization: Bearer ${ORANGE_ECHO_API_KEY}
+Content-Type: application/json
+```
+
+```json
+{
+  "intel": "$RAW_BRIEFING",
+  "target_characters": 1400,
+  "stoic_quote": {
+    "text": "$STOIC_QUOTE_TEXT",
+    "author": "$STOIC_QUOTE_AUTHOR"
+  }
+}
+```
+
+`stoic_quote` is omitted when the quote TTS section is disabled or the quote
+source is unavailable. The optimizer returns:
+
+```json
+{
+  "narration": "$OPTIMIZED_NARRATION"
+}
+```
+
+The bot then sends that value to speech synthesis. `$SPEECH_MODEL` and
+`$VOICE_PRESET` are the per-chat selections from `/cfmodels` and `/cfvoice`.
+
+```http
+POST ${ORANGE_ECHO_BASE_URL}/v1/inference/speech
+Authorization: Bearer ${ORANGE_ECHO_API_KEY}
+Content-Type: application/json
+```
+
+```json
+{
+  "text": "$OPTIMIZED_NARRATION",
+  "model": "$SPEECH_MODEL",
+  "voice_preset": "$VOICE_PRESET"
+}
+```
+
+The expected response is `audio/ogg` beginning with the OGG `OggS` container
+header. For an older deployed Worker that rejects `model` or `voice_preset`,
+the bot retries once with `{ "text": "$OPTIMIZED_NARRATION" }`; this keeps
+announcements working but uses that Worker’s default voice. Deploy the current
+Orange Echo Worker to enable the selected model and accent.
 
 ### Customization
 | Variable | Default | Description |
