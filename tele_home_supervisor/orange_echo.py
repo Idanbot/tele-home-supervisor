@@ -253,7 +253,19 @@ class OrangeEchoClient:
                 "voice_preset": voice_preset,
             },
         )
-        self._raise_for_api_error(response)
+        try:
+            self._raise_for_api_error(response)
+        except OrangeEchoError as exc:
+            if exc.code != "invalid_request":
+                raise
+            logger.info(
+                "Orange Echo worker rejected voice settings; retrying legacy speech payload"
+            )
+            response = await self.client.post(
+                "/v1/inference/speech",
+                json={"text": narration},
+            )
+            self._raise_for_api_error(response)
         content_type = response.headers.get("content-type", "").split(";", 1)[0].strip()
         if content_type != "audio/ogg":
             raise RuntimeError("Orange Echo returned an unexpected audio type")

@@ -184,6 +184,37 @@ async def test_orange_echo_client_methods():
     await client.close()
 
 
+@pytest.mark.asyncio
+async def test_synthesize_retries_legacy_payload_for_old_worker():
+    client = OrangeEchoClient(base_url="https://example.test", api_key="test_api_key")
+    rejected = MagicMock()
+    rejected.is_success = False
+    rejected.status_code = 400
+    rejected.json.return_value = {
+        "error": {"code": "invalid_request", "message": "Unknown field"}
+    }
+    accepted = MagicMock()
+    accepted.is_success = True
+    accepted.headers = {"content-type": "audio/ogg"}
+    accepted.content = b"OggS_legacy_audio"
+    client.client.post = AsyncMock(side_effect=[rejected, accepted])
+
+    audio = await client.synthesize(
+        "Morning briefing", model="premium", voice_preset="draco"
+    )
+
+    assert audio == b"OggS_legacy_audio"
+    assert client.client.post.await_args_list[0].kwargs["json"] == {
+        "text": "Morning briefing",
+        "model": "premium",
+        "voice_preset": "draco",
+    }
+    assert client.client.post.await_args_list[1].kwargs["json"] == {
+        "text": "Morning briefing"
+    }
+    await client.close()
+
+
 def test_cf_model_preferences_are_persistent(tmp_path):
     from tele_home_supervisor.models.bot_state import BotState
 

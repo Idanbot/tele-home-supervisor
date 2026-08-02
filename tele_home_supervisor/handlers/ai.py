@@ -872,7 +872,10 @@ async def _load_cf_voice_presets(client: OrangeEchoClient) -> list[VoicePreset]:
         if presets:
             return presets
     except Exception as exc:
-        logger.warning("Using fallback Cloudflare voice presets: %s", exc)
+        if isinstance(exc, OrangeEchoError) and exc.code == "not_found":
+            logger.info("Cloudflare worker has no voice preset catalog yet")
+        else:
+            logger.warning("Using fallback Cloudflare voice presets: %s", exc)
     return FALLBACK_VOICE_PRESETS
 
 
