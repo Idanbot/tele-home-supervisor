@@ -165,6 +165,11 @@ source is unavailable. The optimizer returns:
 }
 ```
 
+Before synthesis, the bot verifies that the narration still contains enough
+briefing content and includes the exact Stoic quote and author. A sparse or
+quote-altering optimizer response is replaced with a bounded fallback assembled
+from every enabled source section, followed by the verbatim quote.
+
 The bot then sends that value to speech synthesis. `$SPEECH_MODEL` and
 `$VOICE_PRESET` are the per-chat selections from `/cfmodels` and `/cfvoice`.
 

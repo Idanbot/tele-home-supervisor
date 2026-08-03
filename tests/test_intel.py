@@ -399,7 +399,12 @@ async def test_tts_pipeline_keeps_quote_separate_and_uses_chat_model(monkeypatch
     with patch.object(state, "save"):
         state.set_cf_model(chat_id, "speech", "balanced")
 
-    optimize = AsyncMock(return_value="Structured narration with exact quote")
+    optimized_narration = (
+        "Structured weather and news for the day ahead, with useful context and "
+        "a practical focus for today. To close, today's Stoic thought. "
+        '"Do what is right, not what is easy." - Tester.'
+    )
+    optimize = AsyncMock(return_value=optimized_narration)
     synthesize = AsyncMock(return_value=b"OggS-test")
     monkeypatch.setattr(intel.config, "ORANGE_ECHO_API_KEY", "oe_live_test")
     monkeypatch.setattr(intel.OrangeEchoClient, "optimize", optimize)
@@ -439,7 +444,73 @@ async def test_tts_pipeline_keeps_quote_separate_and_uses_chat_model(monkeypatch
         },
     )
     synthesize.assert_awaited_once_with(
-        "Structured narration with exact quote",
+        optimized_narration,
         model="balanced",
         voice_preset="luna",
     )
+
+
+@pytest.mark.asyncio
+async def test_tts_pipeline_rejects_sparse_quote_altering_narration(monkeypatch):
+    state = BotState()
+    chat_id = 42
+    raw_text = (
+        "Greeting:\nGood morning, Idan!\n\n"
+        "Weather:\nHaifa averages 28 degrees Celsius. Omer averages 30 degrees "
+        "Celsius. Tel Aviv averages 29 degrees Celsius.\n\n"
+        "Israel and World News:\nGlobal: A major headline.\n"
+        "Israel 1: An important local development."
+    )
+    quote_text = "Destroy desire completely for the present."
+    sparse_narration = (
+        "Your focus for today. Choose one useful task. To close, today's Stoic "
+        "thought. Destroy term desire for the present. Epictetus."
+    )
+    optimize = AsyncMock(return_value=sparse_narration)
+    synthesize = AsyncMock(return_value=b"OggS-test")
+    monkeypatch.setattr(intel.config, "ORANGE_ECHO_API_KEY", "oe_live_test")
+    monkeypatch.setattr(intel.OrangeEchoClient, "optimize", optimize)
+    monkeypatch.setattr(intel.OrangeEchoClient, "synthesize", synthesize)
+    monkeypatch.setattr(intel.OrangeEchoClient, "close", AsyncMock())
+    monkeypatch.setattr(
+        intel,
+        "fetch_stoic_quote",
+        AsyncMock(return_value=(intel.StoicQuote(quote_text, "Epictetus"), None)),
+    )
+
+    async def run_without_usage_tracking(client, current_state, action, operation):
+        return await operation
+
+    monkeypatch.setattr(
+        "tele_home_supervisor.orange_echo.track_cf_action",
+        run_without_usage_tracking,
+    )
+
+    audio, error = await intel.generate_tts_announcer_audio(raw_text, state, chat_id)
+
+    assert audio == b"OggS-test"
+    assert error is None
+    narration = synthesize.await_args.args[0]
+    assert "Haifa averages 28 degrees Celsius" in narration
+    assert "An important local development" in narration
+    assert quote_text in narration
+    assert "Destroy term desire" not in narration
+
+
+def test_tts_fallback_retains_all_section_headings_within_limit():
+    headings = [
+        "Greeting:",
+        "Weather:",
+        "Israel and World News:",
+        "Hacker News:",
+        "Reddit Trends:",
+    ]
+    raw_text = "\n\n".join(f"{heading}\n{'detail ' * 100}" for heading in headings)
+    quote = intel.StoicQuote("The obstacle is the way.", "Marcus Aurelius")
+
+    narration = intel._fallback_tts_narration(raw_text, quote)
+
+    assert len(narration) <= 1400
+    assert all(heading in narration for heading in headings)
+    assert quote.text in narration
+    assert quote.author in narration

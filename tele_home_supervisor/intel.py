@@ -527,6 +527,61 @@ async def build_tts_announcer_raw_text(
     return full_text
 
 
+def _fit_tts_sections(text: str, limit: int) -> str:
+    """Fit sectioned source into a limit while retaining every section heading."""
+    normalized = text.strip()
+    if len(normalized) <= limit:
+        return normalized
+
+    sections = [
+        section.strip() for section in normalized.split("\n\n") if section.strip()
+    ]
+    parsed: list[tuple[str, str]] = []
+    for section in sections:
+        heading, separator, content = section.partition("\n")
+        parsed.append((heading, content if separator else ""))
+
+    fixed_length = sum(len(heading) + 2 for heading, _ in parsed)
+    fixed_length += max(0, len(parsed) - 1) * 2
+    content_budget = max(0, limit - fixed_length)
+    total_content = sum(len(content) for _, content in parsed)
+    fitted = []
+    for heading, content in parsed:
+        if not content or total_content == 0:
+            fitted.append(heading)
+            continue
+        allowance = max(1, int(content_budget * len(content) / total_content))
+        shortened = content[:allowance].rsplit(" ", 1)[0].rstrip(".,;: ")
+        fitted.append(f"{heading}\n{shortened}.")
+    return "\n\n".join(fitted)[:limit].rstrip()
+
+
+def _fallback_tts_narration(
+    raw_text: str, quote: StoicQuote | None, limit: int = 1400
+) -> str:
+    closing = ""
+    if quote:
+        closing = f' To close, today\'s Stoic thought. "{quote.text}" - {quote.author}.'
+    body = _fit_tts_sections(raw_text, max(0, limit - len(closing)))
+    return f"{body}{closing}".strip()
+
+
+def _optimizer_narration_is_complete(
+    raw_text: str, narration: str, quote: StoicQuote | None
+) -> bool:
+    normalized = narration.strip()
+    if not normalized:
+        return False
+    if quote and (quote.text not in normalized or quote.author not in normalized):
+        return False
+
+    briefing_only = normalized
+    if quote:
+        briefing_only = briefing_only.replace(quote.text, "").replace(quote.author, "")
+    minimum_briefing = min(500, max(120, round(len(raw_text.strip()) * 0.45)))
+    return len(briefing_only.strip()) >= minimum_briefing
+
+
 async def generate_tts_announcer_audio(
     raw_text: str,
     state: BotState | None = None,
@@ -547,6 +602,7 @@ async def generate_tts_announcer_audio(
     try:
 
         async def _run_pipeline() -> bytes:
+            quote: StoicQuote | None = None
             quote_payload = None
             quote_enabled = (
                 chat_id is None
@@ -559,11 +615,19 @@ async def generate_tts_announcer_audio(
                     quote_payload = {"text": quote.text, "author": quote.author}
                 elif quote_error:
                     logger.warning("Stoic quote omitted from TTS: %s", quote_error)
-            narration = await client.optimize(
-                raw_text,
-                target_characters=1400,
-                stoic_quote=quote_payload,
-            )
+            if raw_text.strip():
+                narration = await client.optimize(
+                    raw_text,
+                    target_characters=1400,
+                    stoic_quote=quote_payload,
+                )
+            else:
+                narration = ""
+            if not _optimizer_narration_is_complete(raw_text, narration, quote):
+                logger.warning(
+                    "Optimizer returned incomplete TTS narration; using structured fallback"
+                )
+                narration = _fallback_tts_narration(raw_text, quote)
             model = (
                 state.get_cf_model(chat_id, "speech")
                 if state and chat_id
