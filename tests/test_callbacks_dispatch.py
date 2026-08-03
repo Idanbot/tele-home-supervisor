@@ -169,21 +169,27 @@ async def test_dispatch_reddit_fetch_callback(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_dispatch_unauthorized(monkeypatch) -> None:
     monkeypatch.setattr(callbacks, "allowed", lambda *_: False)
+    notifier = AsyncMock()
+    monkeypatch.setattr(callbacks, "notify_owner_unauthorized_attempt", notifier)
     update = _DummyUpdate("docker:refresh")
     ctx = _DummyContext()
     await callbacks.handle_callback_query(update, ctx)
     assert "Not authorized" in update.callback_query._edited_texts[0]
+    notifier.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_dispatch_silently_ignores_blocked_user(monkeypatch) -> None:
     monkeypatch.setattr(callbacks, "allowed", lambda *_: True)
     monkeypatch.setattr(callbacks, "is_blocked_user_id", lambda *_: True)
+    notifier = AsyncMock()
+    monkeypatch.setattr(callbacks, "notify_owner_unauthorized_attempt", notifier)
     update = _DummyUpdate("docker:refresh")
     ctx = _DummyContext()
     await callbacks.handle_callback_query(update, ctx)
     assert update.callback_query._answered is False
     assert update.callback_query._edited_texts == []
+    notifier.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

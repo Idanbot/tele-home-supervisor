@@ -60,6 +60,7 @@ Create a `.env` file with your secrets. **Do not commit this file.**
 ```bash
 # Telegram (Required)
 BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+OWNER_ID=12345678
 ALLOWED_CHAT_IDS=12345678,87654321
 
 # Docker (Required for permissions)
@@ -95,6 +96,7 @@ docker compose up -d
 | Variable | Required | Description |
 |:---|:---:|:---|
 | `BOT_TOKEN` | ✅ | Your Telegram Bot API Token. |
+| `OWNER_ID` | ❌ | Owner's private Telegram user/chat ID. Required for owner-only commands and unauthorized-interaction alerts. |
 | `ALLOWED_CHAT_IDS` | ✅ | Comma-separated list of user IDs allowed to interact with the bot. |
 | `BOT_AUTH_TOTP_SECRET` | ❌ | Base32 secret for 2FA (`/auth`). Use if you want extra security for critical commands. |
 | `DOCKER_GID` | ❌ | Group ID of the docker group on the host (enables `/docker` commands). |

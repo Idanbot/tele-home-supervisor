@@ -8,13 +8,20 @@ from __future__ import annotations
 import logging
 
 from telegram import BotCommand
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 from . import config
 from .background import cancel_tasks, ensure_started
 from .commands import COMMANDS
 from .handlers import dispatch
 from .handlers.callbacks import handle_callback_query
+from .handlers.common import guard_unhandled_message
 from .logger import setup_logging
 from .runtime import STARTUP_TIME
 from .state import BOT_STATE_KEY, BotState
@@ -46,6 +53,8 @@ def build_application() -> Application:
 
     # Register callback query handler for inline keyboards
     app.add_handler(CallbackQueryHandler(handle_callback_query))
+    # Catch unknown commands and non-command messages for unauthorized-attempt alerts.
+    app.add_handler(MessageHandler(filters.ALL, guard_unhandled_message))
 
     return app
 

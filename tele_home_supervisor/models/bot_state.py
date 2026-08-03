@@ -152,6 +152,9 @@ class BotState:
     _last_command_ts: dict[tuple[int, str], float] = field(
         default_factory=dict, init=False, repr=False
     )
+    _last_unauthorized_notice_ts: dict[tuple[int | None, int | None], float] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     # Persistence of last run times for scheduled tasks
     last_game_offers_run: float = 0.0

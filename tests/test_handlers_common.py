@@ -1,6 +1,7 @@
 """Tests for common handler utilities."""
 
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import DummyContext, DummyUpdate
@@ -55,20 +56,66 @@ class TestGuard:
     @pytest.mark.asyncio
     async def test_guard_blocks_invalid_user(self, monkeypatch) -> None:
         monkeypatch.setattr(config, "ALLOWED", {123})
+        monkeypatch.setattr(config, "OWNER_ID", 123)
         update = DummyUpdate(chat_id=999, user_id=999)
+        update.effective_user.username = "intruder"
+        update.message.text = "/status secret-argument"
         context = DummyContext()
         result = await common.guard(update, context)
         assert result is False
+        assert "Not authorized" in update.effective_chat.sent[0]
+        assert len(context.application.bot.sent_messages) == 1
+        owner_id, notice = context.application.bot.sent_messages[0]
+        assert owner_id == 123
+        assert "Unauthorized Bot Interaction" in notice
+        assert "999" in notice
+        assert "@intruder" in notice
+        assert "/status" in notice
+        assert "secret-argument" not in notice
+
+        await common.guard(update, context)
+        assert len(context.application.bot.sent_messages) == 1
 
     @pytest.mark.asyncio
     async def test_guard_silently_blocks_blocked_user(self, monkeypatch) -> None:
         monkeypatch.setattr(config, "ALLOWED", {123})
         monkeypatch.setattr(config, "BLOCKED_IDS", {123})
+        monkeypatch.setattr(config, "OWNER_ID", 999)
         update = DummyUpdate(chat_id=123, user_id=123)
         context = DummyContext()
         result = await common.guard(update, context)
         assert result is False
         assert update.effective_chat.sent == []
+        assert context.application.bot.sent_messages[0][0] == 999
+
+    @pytest.mark.asyncio
+    async def test_owner_notification_failure_does_not_break_guard(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(config, "ALLOWED", {123})
+        monkeypatch.setattr(config, "OWNER_ID", 123)
+        update = DummyUpdate(chat_id=999, user_id=999)
+        context = DummyContext()
+
+        async def fail_to_send(**_kwargs):
+            raise RuntimeError("Telegram unavailable")
+
+        context.application.bot.send_message = fail_to_send
+        assert await common.guard(update, context) is False
+        assert "Not authorized" in update.effective_chat.sent[0]
+
+    @pytest.mark.asyncio
+    async def test_unhandled_message_uses_authorization_guard(
+        self, monkeypatch
+    ) -> None:
+        guard = AsyncMock(return_value=False)
+        monkeypatch.setattr(common, "guard", guard)
+        update = DummyUpdate(chat_id=999, user_id=999)
+        context = DummyContext()
+
+        await common.guard_unhandled_message(update, context)
+
+        guard.assert_awaited_once_with(update, context)
 
 
 class TestGuardSensitive:

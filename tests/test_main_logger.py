@@ -42,12 +42,16 @@ def test_build_application_registers_handlers(monkeypatch, tmp_path):
         main, "CommandHandler", lambda triggers, fn: ("cmd", triggers, fn)
     )
     monkeypatch.setattr(main, "CallbackQueryHandler", lambda fn: ("cb", fn))
+    monkeypatch.setattr(
+        main, "MessageHandler", lambda message_filter, fn: ("msg", message_filter, fn)
+    )
 
     result = main.build_application()
 
     assert result is app
     assert BOT_STATE_KEY in app.bot_data
-    assert len(app.handlers) == len(main.COMMANDS) + 1
+    assert len(app.handlers) == len(main.COMMANDS) + 2
+    assert app.handlers[-1][0] == "msg"
 
 
 def test_build_application_requires_token(monkeypatch):

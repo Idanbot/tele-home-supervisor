@@ -54,7 +54,13 @@ from .cb_torrents import (  # noqa: F401
     normalize_torrent_page,
     paginate_torrents,
 )
-from .common import allowed, get_state, guard_sensitive, is_blocked_user_id
+from .common import (
+    allowed,
+    get_state,
+    guard_sensitive,
+    is_blocked_user_id,
+    notify_owner_unauthorized_attempt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +98,7 @@ async def handle_callback_query(update, context) -> None:
     user = getattr(update, "effective_user", None)
     user_id = getattr(user, "id", None)
     if is_blocked_user_id(user_id, state):
+        await notify_owner_unauthorized_attempt(update, context, state)
         return
 
     await query.answer()
@@ -100,6 +107,7 @@ async def handle_callback_query(update, context) -> None:
 
     if not _allowed_for_callback(update, state):
         await _safe_edit_message_text(query, "⛔ Not authorized")
+        await notify_owner_unauthorized_attempt(update, context, state)
         return
 
     try:

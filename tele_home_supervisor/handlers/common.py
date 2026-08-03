@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 _AUTH_FLAG_KEY = "_auth_ok"
 _AUDIT_TARGET_KEY = "_audit_target"
 _OWNER_ONLY_MSG = messages.MSG_OWNER_ONLY
+_UNAUTHORIZED_NOTICE_COOLDOWN_S = 300.0
+_MAX_UNAUTHORIZED_NOTICE_KEYS = 512
 MAX_ARG_LEN = 512
 
 
@@ -178,6 +180,81 @@ def _format_user_name(user) -> str:
     return str(user_id) if user_id is not None else "unknown"
 
 
+def _unauthorized_interaction_name(update) -> str:
+    query = getattr(update, "callback_query", None)
+    callback_data = getattr(query, "data", None)
+    if callback_data:
+        return f"callback: {str(callback_data)[:120]}"
+
+    message = getattr(update, "effective_message", None) or getattr(
+        update, "message", None
+    )
+    text = getattr(message, "text", None) or getattr(message, "caption", None)
+    if text:
+        command = str(text).strip().split(maxsplit=1)[0]
+        return command[:120]
+    return "non-text message"
+
+
+async def notify_owner_unauthorized_attempt(
+    update,
+    context,
+    state: BotState | None = None,
+) -> None:
+    """Notify the configured owner about a rate-limited unauthorized interaction."""
+    owner_id = config.OWNER_ID
+    if owner_id is None:
+        return
+    app = getattr(context, "application", None)
+    bot = getattr(app, "bot", None)
+    send_message = getattr(bot, "send_message", None)
+    if not callable(send_message):
+        return
+
+    chat = getattr(update, "effective_chat", None)
+    user = getattr(update, "effective_user", None)
+    chat_id = getattr(chat, "id", None)
+    user_id = getattr(user, "id", None)
+    if state is None and app is not None:
+        state = get_state(app)
+    if state is not None:
+        key = (chat_id, user_id)
+        now = time.time()
+        notices = state._last_unauthorized_notice_ts
+        last_notice = notices.get(key, 0.0)
+        if now - last_notice < _UNAUTHORIZED_NOTICE_COOLDOWN_S:
+            return
+        if len(notices) >= _MAX_UNAUTHORIZED_NOTICE_KEYS:
+            cutoff = now - _UNAUTHORIZED_NOTICE_COOLDOWN_S
+            notices = {item: ts for item, ts in notices.items() if ts >= cutoff}
+            if len(notices) >= _MAX_UNAUTHORIZED_NOTICE_KEYS:
+                oldest = min(notices, key=notices.get)
+                notices.pop(oldest, None)
+            state._last_unauthorized_notice_ts = notices
+        notices[key] = now
+
+    username = getattr(user, "username", None)
+    display_name = _format_user_name(user)
+    chat_type = getattr(chat, "type", None) or "unknown"
+    username_text = f"@{username}" if username else "not set"
+    lines = [
+        "🚨 <b>Unauthorized Bot Interaction</b>",
+        f"User: <b>{html.escape(display_name)}</b>",
+        f"User ID: <code>{html.escape(str(user_id))}</code>",
+        f"Username: {html.escape(username_text)}",
+        f"Chat: <code>{html.escape(str(chat_id))}</code> ({html.escape(str(chat_type))})",
+        f"Attempt: <code>{html.escape(_unauthorized_interaction_name(update))}</code>",
+    ]
+    try:
+        await send_message(
+            chat_id=owner_id,
+            text="\n".join(lines),
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as exc:
+        logger.warning("Failed to notify owner about unauthorized interaction: %s", exc)
+
+
 def _mask_sensitive(value: str | None) -> str | None:
     if not value:
         return value
@@ -269,6 +346,7 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = getattr(update, "effective_user", None)
     user_id = getattr(user, "id", None)
     if is_blocked_user_id(user_id, state):
+        await notify_owner_unauthorized_attempt(update, context, state)
         _set_auth_flag(context, False)
         return False
 
@@ -281,8 +359,16 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         return True
     if update and update.effective_chat:
         await update.effective_chat.send_message(messages.MSG_NOT_AUTHORIZED)
+    await notify_owner_unauthorized_attempt(update, context, state)
     _set_auth_flag(context, False)
     return False
+
+
+async def guard_unhandled_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Apply authorization handling to messages not matched by a command handler."""
+    await guard(update, context)
 
 
 async def guard_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -299,6 +385,7 @@ async def guard_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     chat_id = getattr(chat, "id", None)
 
     if is_blocked_user_id(user_id, state):
+        await notify_owner_unauthorized_attempt(update, context, state)
         _set_auth_flag(context, False)
         return False
     if config.OWNER_ID is None:
@@ -309,6 +396,7 @@ async def guard_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     if chat_id != user_id:
         if update and update.effective_chat:
             await update.effective_chat.send_message("⛔ Not authorized")
+        await notify_owner_unauthorized_attempt(update, context, state)
         _set_auth_flag(context, False)
         return False
     if is_owner_user_id(user_id):
