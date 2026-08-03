@@ -5,6 +5,7 @@ import html
 import logging
 import re
 from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -16,7 +17,7 @@ from . import config, utils
 from . import scheduled as scheduled_fetchers
 from .models.bot_state import BotState
 from .orange_echo import OrangeEchoClient, OrangeEchoError
-from .reddit_briefing import get_reddit_digest
+from .reddit_briefing import get_reddit_digest, get_reddit_digest_posts
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,30 @@ async def get_stoic_quote() -> str:
 class StoicQuote:
     text: str
     author: str
+
+
+@dataclass(frozen=True)
+class TTSBriefing:
+    """Structured morning briefing data, independent of Telegram formatting."""
+
+    recipient_name: str = "Idan"
+    include_greeting: bool = True
+    weather: str = ""
+    global_news: tuple[str, ...] = ()
+    israel_news: tuple[str, ...] = ()
+    technology_news: tuple[str, ...] = ()
+    reddit_news: tuple[str, ...] = ()
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "recipient_name": self.recipient_name,
+            "include_greeting": self.include_greeting,
+            "weather": self.weather,
+            "global_news": list(self.global_news),
+            "israel_news": list(self.israel_news),
+            "technology_news": list(self.technology_news),
+            "reddit_news": list(self.reddit_news),
+        }
 
 
 async def fetch_stoic_quote() -> tuple[StoicQuote | None, str | None]:
@@ -408,182 +433,130 @@ async def get_weather_for_tts() -> str:
     )
 
 
+async def build_tts_announcer_briefing(
+    chat_id: int | None = None,
+    state: BotState | None = None,
+    max_chars: int = 1200,
+) -> TTSBriefing:
+    """Build structured source data for a natural morning narration."""
+    disabled_tts = set()
+    if chat_id is not None and state is not None:
+        disabled_tts = state.get_disabled_tts_sections(chat_id)
+
+    weather = ""
+    if "weather" not in disabled_tts:
+        weather = await get_weather_for_tts()
+
+    global_news: list[str] = []
+    israel_news: list[str] = []
+    if "news" not in disabled_tts:
+        global_news, israel_news = await asyncio.gather(
+            get_global_news(1), get_israel_news(3)
+        )
+
+    technology_news: list[str] = []
+    if "hackernews" not in disabled_tts:
+        try:
+            stories = await scheduled_fetchers.fetch_hackernews_stories(limit=3)
+            technology_news = [
+                clean_text_for_tts(str(story.get("title") or ""))
+                for story in stories
+                if story.get("title")
+            ][:3]
+        except Exception as exc:
+            logger.warning("Failed to fetch Hacker News for TTS: %s", exc)
+
+    reddit_news: list[str] = []
+    if "reddit" not in disabled_tts and state is not None and chat_id is not None:
+        try:
+            posts = await get_reddit_digest_posts(state.get_reddit_settings(chat_id))
+            reddit_news = [
+                clean_text_for_tts(str(post.get("title") or ""))
+                for post in posts
+                if post.get("title")
+            ][:3]
+        except Exception as exc:
+            logger.warning("Failed to fetch Reddit for TTS: %s", exc)
+
+    briefing = TTSBriefing(
+        include_greeting="greeting" not in disabled_tts,
+        weather=weather,
+        global_news=tuple(global_news),
+        israel_news=tuple(israel_news),
+        technology_news=tuple(technology_news),
+        reddit_news=tuple(reddit_news),
+    )
+    if len(render_tts_briefing(briefing)) <= max_chars:
+        return briefing
+    briefing = dataclass_replace(briefing, reddit_news=())
+    if len(render_tts_briefing(briefing)) <= max_chars:
+        return briefing
+    return dataclass_replace(briefing, technology_news=())
+
+
 async def build_tts_announcer_raw_text(
     chat_id: int | None = None,
     state: BotState | None = None,
     max_chars: int = 1200,
     include_quote: bool = True,
 ) -> str:
-    """Build sectioned, clean text ready for TTS narration optimization.
-
-    Sections included:
-    1. Greeting
-    2. Weather
-    3. Israel and World News (1 global, 3 Israel)
-    4. Hacker News (top 5 titles)
-    5. Reddit Radar + Trending
-    6. Stoic Quote and Author
-
-    Automated character limit enforcement:
-    If total text > max_chars, removes Reddit section first, then Hacker News section second.
-    """
-    disabled_tts = set()
-    if chat_id is not None and state is not None:
-        disabled_tts = state.get_disabled_tts_sections(chat_id)
-
-    # 1. Greeting
-    greeting_str = ""
-    if "greeting" not in disabled_tts:
-        greeting_raw = get_greeting("Idan")
-        greeting_str = f"Greeting:\n{clean_text_for_tts(greeting_raw)}"
-
-    # 2. Weather
-    weather_str = ""
-    if "weather" not in disabled_tts:
-        weather_raw = await get_weather_for_tts()
-        weather_str = f"Weather:\n{weather_raw}"
-
-    # 3. News (1 global news, 3 Israel news)
-    news_str = ""
-    if "news" not in disabled_tts:
-        g_news_task = get_global_news(1)
-        i_news_task = get_israel_news(3)
-        g_news, i_news = await asyncio.gather(g_news_task, i_news_task)
-
-        news_lines = []
-        if g_news:
-            news_lines.append(f"Global: {g_news[0]}")
-        for idx, title in enumerate(i_news, 1):
-            news_lines.append(f"Israel {idx}: {title}")
-        if news_lines:
-            news_str = "Israel and World News:\n" + "\n".join(news_lines)
-
-    # 4. Hacker News (top 5)
-    hn_str = ""
-    if "hackernews" not in disabled_tts:
-        try:
-            hn_raw = await scheduled_fetchers.fetch_hackernews_top(limit=5)
-            hn_clean = clean_text_for_tts(hn_raw)
-            hn_lines = [
-                line
-                for line in hn_clean.splitlines()
-                if not line.lower().startswith("hacker news") and line.strip()
-            ]
-            if hn_lines:
-                hn_str = "Hacker News:\n" + "\n".join(hn_lines[:5])
-        except Exception as exc:
-            logger.warning("Failed to fetch Hacker News for TTS: %s", exc)
-
-    # 5. Reddit Radar
-    reddit_str = ""
-    if "reddit" not in disabled_tts and state is not None and chat_id is not None:
-        try:
-            r_raw = await get_reddit_digest(state.get_reddit_settings(chat_id))
-            r_clean = clean_text_for_tts(r_raw)
-            r_lines = [
-                line
-                for line in r_clean.splitlines()
-                if not line.lower().startswith("reddit") and line.strip()
-            ]
-            if r_lines:
-                reddit_str = "Reddit Trends:\n" + "\n".join(r_lines[:5])
-        except Exception as exc:
-            logger.warning("Failed to fetch Reddit for TTS: %s", exc)
-
-    # 6. Stoic Quote
-    quote_str = ""
-    if include_quote and "quote" not in disabled_tts:
-        quote_raw = await get_stoic_quote()
-        quote_clean = clean_text_for_tts(quote_raw)
-        if quote_clean:
-            quote_str = f"Stoic Wisdom:\n{quote_clean}"
-
-    # Section assembly & character limit automation
-    sections = [
-        ("greeting", greeting_str),
-        ("weather", weather_str),
-        ("news", news_str),
-        ("hackernews", hn_str),
-        ("reddit", reddit_str),
-        ("quote", quote_str),
-    ]
-
-    def render(sec_list: list[tuple[str, str]]) -> str:
-        return "\n\n".join(
-            content.strip() for _, content in sec_list if content.strip()
-        )
-
-    current_sections = list(sections)
-    full_text = render(current_sections)
-
-    if len(full_text) > max_chars:
-        current_sections = [s for s in current_sections if s[0] != "reddit"]
-        full_text = render(current_sections)
-
-    if len(full_text) > max_chars:
-        current_sections = [s for s in current_sections if s[0] != "hackernews"]
-        full_text = render(current_sections)
-
-    return full_text
+    """Build legacy text for callers that have not moved to structured briefings."""
+    briefing = await build_tts_announcer_briefing(chat_id, state, max_chars)
+    narration = render_tts_briefing(briefing)
+    quote_enabled = (
+        state is None
+        or chat_id is None
+        or state.is_tts_section_enabled(chat_id, "quote")
+    )
+    if include_quote and quote_enabled:
+        quote, _ = await fetch_stoic_quote()
+        narration = _fallback_tts_narration(briefing, quote, max_chars)
+    return narration
 
 
-def _fit_tts_sections(text: str, limit: int) -> str:
-    """Fit sectioned source into a limit while retaining every section heading."""
-    normalized = text.strip()
-    if len(normalized) <= limit:
-        return normalized
-
-    sections = [
-        section.strip() for section in normalized.split("\n\n") if section.strip()
-    ]
-    parsed: list[tuple[str, str]] = []
-    for section in sections:
-        heading, separator, content = section.partition("\n")
-        parsed.append((heading, content if separator else ""))
-
-    fixed_length = sum(len(heading) + 2 for heading, _ in parsed)
-    fixed_length += max(0, len(parsed) - 1) * 2
-    content_budget = max(0, limit - fixed_length)
-    total_content = sum(len(content) for _, content in parsed)
-    fitted = []
-    for heading, content in parsed:
-        if not content or total_content == 0:
-            fitted.append(heading)
-            continue
-        allowance = max(1, int(content_budget * len(content) / total_content))
-        shortened = content[:allowance].rsplit(" ", 1)[0].rstrip(".,;: ")
-        fitted.append(f"{heading}\n{shortened}.")
-    return "\n\n".join(fitted)[:limit].rstrip()
+def render_tts_briefing(briefing: TTSBriefing) -> str:
+    """Render a structured briefing without speaking internal section labels."""
+    parts: list[str] = []
+    if briefing.include_greeting:
+        parts.append(f"Good morning, {briefing.recipient_name}.")
+    if briefing.weather:
+        parts.append(f"Starting with the weather. {briefing.weather}")
+    if briefing.global_news:
+        parts.append(f"In world news. {' '.join(briefing.global_news)}")
+    if briefing.israel_news:
+        parts.append(f"Closer to home. {' '.join(briefing.israel_news)}")
+    if briefing.technology_news:
+        parts.append(f"Turning to technology. {' '.join(briefing.technology_news)}")
+    if briefing.reddit_news:
+        parts.append(f"A quick look at Reddit. {' '.join(briefing.reddit_news)}")
+    return " ".join(parts)
 
 
 def _fallback_tts_narration(
-    raw_text: str, quote: StoicQuote | None, limit: int = 1400
+    source: str | TTSBriefing, quote: StoicQuote | None, limit: int = 1400
 ) -> str:
     closing = ""
     if quote:
         closing = f' To close, today\'s Stoic thought. "{quote.text}" - {quote.author}.'
-    body = _fit_tts_sections(raw_text, max(0, limit - len(closing)))
+    body = render_tts_briefing(source) if isinstance(source, TTSBriefing) else source
+    body_budget = max(0, limit - len(closing))
+    if len(body) > body_budget:
+        body = body[:body_budget].rsplit(" ", 1)[0].rstrip(".,;: ")
     return f"{body}{closing}".strip()
 
 
-def _optimizer_narration_is_complete(
-    raw_text: str, narration: str, quote: StoicQuote | None
-) -> bool:
+def _optimizer_narration_is_complete(narration: str, quote: StoicQuote | None) -> bool:
     normalized = narration.strip()
     if not normalized:
         return False
     if quote and (quote.text not in normalized or quote.author not in normalized):
         return False
 
-    briefing_only = normalized
-    if quote:
-        briefing_only = briefing_only.replace(quote.text, "").replace(quote.author, "")
-    minimum_briefing = min(500, max(120, round(len(raw_text.strip()) * 0.45)))
-    return len(briefing_only.strip()) >= minimum_briefing
+    return True
 
 
 async def generate_tts_announcer_audio(
-    raw_text: str,
+    raw_text: str | TTSBriefing,
     state: BotState | None = None,
     chat_id: int | None = None,
 ) -> tuple[bytes | None, str | None]:
@@ -615,15 +588,28 @@ async def generate_tts_announcer_audio(
                     quote_payload = {"text": quote.text, "author": quote.author}
                 elif quote_error:
                     logger.warning("Stoic quote omitted from TTS: %s", quote_error)
-            if raw_text.strip():
-                narration = await client.optimize(
-                    raw_text,
-                    target_characters=1400,
-                    stoic_quote=quote_payload,
-                )
+            legacy_text = (
+                render_tts_briefing(raw_text)
+                if isinstance(raw_text, TTSBriefing)
+                else raw_text
+            )
+            if legacy_text.strip():
+                if isinstance(raw_text, TTSBriefing):
+                    narration = await client.optimize(
+                        legacy_text,
+                        target_characters=1400,
+                        stoic_quote=quote_payload,
+                        briefing=raw_text.as_payload(),
+                    )
+                else:
+                    narration = await client.optimize(
+                        legacy_text,
+                        target_characters=1400,
+                        stoic_quote=quote_payload,
+                    )
             else:
                 narration = ""
-            if not _optimizer_narration_is_complete(raw_text, narration, quote):
+            if not _optimizer_narration_is_complete(narration, quote):
                 logger.warning(
                     "Optimizer returned incomplete TTS narration; using structured fallback"
                 )

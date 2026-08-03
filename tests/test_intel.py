@@ -287,44 +287,46 @@ async def test_build_tts_announcer_raw_text_truncation():
             ],
         ),
         patch(
-            "tele_home_supervisor.intel.scheduled_fetchers.fetch_hackernews_top",
-            return_value="Hacker News\n1. HN Story One\n2. HN Story Two",
+            "tele_home_supervisor.intel.scheduled_fetchers.fetch_hackernews_stories",
+            return_value=[
+                {"title": "HN Story One"},
+                {"title": "HN Story Two"},
+            ],
         ),
         patch(
-            "tele_home_supervisor.intel.get_reddit_digest",
-            return_value="Reddit\n1. Reddit Post One\n2. Reddit Post Two",
-        ),
-        patch(
-            "tele_home_supervisor.intel.get_stoic_quote",
-            return_value="Stoic quote test",
+            "tele_home_supervisor.intel.get_reddit_digest_posts",
+            return_value=[
+                {"title": "Reddit Post One"},
+                {"title": "Reddit Post Two"},
+            ],
         ),
         patch(
             "tele_home_supervisor.intel.get_weather_for_tts",
             return_value="Weather test summary",
         ),
     ):
-        # 1. Normal build under limit
-        text = await intel.build_tts_announcer_raw_text(chat_id, state, max_chars=2000)
-        assert "Greeting:" in text
-        assert "Weather:" in text
-        assert "Israel and World News:" in text
-        assert "Hacker News:" in text
-        assert "Reddit Trends:" in text
-        assert "Stoic Wisdom:" in text
+        briefing = await intel.build_tts_announcer_briefing(
+            chat_id, state, max_chars=2000
+        )
+        text = intel.render_tts_briefing(briefing)
+        assert text.startswith("Good morning, Idan.")
+        assert "Starting with the weather." in text
+        assert "In world news." in text
+        assert "Turning to technology. HN Story One HN Story Two" in text
+        assert "A quick look at Reddit. Reddit Post One Reddit Post Two" in text
+        assert "Greeting:" not in text
 
-        # 2. Strict limit forces removing Reddit section first
-        text_no_reddit = await intel.build_tts_announcer_raw_text(
+        briefing_no_reddit = await intel.build_tts_announcer_briefing(
             chat_id, state, max_chars=180
         )
-        assert "Reddit Trends:" not in text_no_reddit
-        assert "Israel and World News:" in text_no_reddit
+        assert not briefing_no_reddit.reddit_news
+        assert briefing_no_reddit.global_news
 
-        # 3. Very strict limit forces removing Hacker News section second
-        text_no_hn = await intel.build_tts_announcer_raw_text(
+        briefing_no_hn = await intel.build_tts_announcer_briefing(
             chat_id, state, max_chars=100
         )
-        assert "Reddit Trends:" not in text_no_hn
-        assert "Hacker News:" not in text_no_hn
+        assert not briefing_no_hn.reddit_news
+        assert not briefing_no_hn.technology_news
 
 
 @pytest.mark.asyncio
@@ -386,10 +388,12 @@ async def test_tts_section_toggle_and_builder_filtering():
             return_value="Weather summary test",
         ),
     ):
-        text = await intel.build_tts_announcer_raw_text(chat_id, state)
+        briefing = await intel.build_tts_announcer_briefing(chat_id, state)
+        text = intel.render_tts_briefing(briefing)
+        assert not briefing.include_greeting
+        assert not briefing.weather
+        assert "Global news headline" in text
         assert "Greeting:" not in text
-        assert "Weather:" not in text
-        assert "Israel and World News:" in text
 
 
 @pytest.mark.asyncio
@@ -497,20 +501,22 @@ async def test_tts_pipeline_rejects_sparse_quote_altering_narration(monkeypatch)
     assert "Destroy term desire" not in narration
 
 
-def test_tts_fallback_retains_all_section_headings_within_limit():
-    headings = [
-        "Greeting:",
-        "Weather:",
-        "Israel and World News:",
-        "Hacker News:",
-        "Reddit Trends:",
-    ]
-    raw_text = "\n\n".join(f"{heading}\n{'detail ' * 100}" for heading in headings)
+def test_tts_fallback_uses_natural_transitions_within_limit():
+    briefing = intel.TTSBriefing(
+        weather="Haifa averages 28 degrees Celsius.",
+        global_news=("A global headline.",),
+        israel_news=("A local headline.",),
+        technology_news=("A technology headline.",),
+        reddit_news=("A community headline.",),
+    )
     quote = intel.StoicQuote("The obstacle is the way.", "Marcus Aurelius")
 
-    narration = intel._fallback_tts_narration(raw_text, quote)
+    narration = intel._fallback_tts_narration(briefing, quote)
 
     assert len(narration) <= 1400
-    assert all(heading in narration for heading in headings)
+    assert narration.count("Good morning") == 1
+    assert "Starting with the weather." in narration
+    assert "Turning to technology." in narration
+    assert "Greeting:" not in narration
     assert quote.text in narration
     assert quote.author in narration

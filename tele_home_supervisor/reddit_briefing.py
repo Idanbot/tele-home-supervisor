@@ -305,14 +305,13 @@ async def fetch_reddit_post(subreddit: str, mode: str = "trending") -> dict[str,
     return dict(posts[0])
 
 
-async def get_reddit_digest(settings: RedditBriefingSettings) -> str:
-    """Fetch and format the configured number of Reddit posts."""
+async def get_reddit_digest_posts(
+    settings: RedditBriefingSettings,
+) -> list[dict[str, Any]]:
+    """Fetch configured Reddit posts without Telegram presentation markup."""
     subreddits = settings.subreddits()
     if not subreddits:
-        return (
-            "👽 <b>Reddit</b>\n"
-            "No subreddits configured. Use /reddit_settings to add a group or subreddit."
-        )
+        return []
 
     random.shuffle(subreddits)
     attempts = max(settings.post_count * 3, len(subreddits))
@@ -349,8 +348,24 @@ async def get_reddit_digest(settings: RedditBriefingSettings) -> str:
                 break
 
     if not posts:
-        reason = html.escape(failures[0] if failures else "no matching posts")
-        return f"👽 <b>Reddit</b>\n❌ Reddit unavailable: {reason}"
+        if failures:
+            logger.warning("Reddit digest unavailable: %s", failures[0])
+        return []
+
+    return posts
+
+
+async def get_reddit_digest(settings: RedditBriefingSettings) -> str:
+    """Fetch and format the configured number of Reddit posts."""
+    if not settings.subreddits():
+        return (
+            "👽 <b>Reddit</b>\n"
+            "No subreddits configured. Use /reddit_settings to add a group or subreddit."
+        )
+
+    posts = await get_reddit_digest_posts(settings)
+    if not posts:
+        return "👽 <b>Reddit</b>\n❌ Reddit unavailable: no matching posts"
 
     lines = ["👽 <b>Reddit Radar</b>"]
     lines.extend(_format_post(post, index) for index, post in enumerate(posts, 1))

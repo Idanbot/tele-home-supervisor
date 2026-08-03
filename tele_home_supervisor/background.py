@@ -491,8 +491,8 @@ async def _intel_briefing_scheduler(app: Application) -> None:
                                 "Generating TTS Announcer audio for chat_id=%s",
                                 chat_id,
                             )
-                            raw_text = await intel.build_tts_announcer_raw_text(
-                                chat_id, state, include_quote=False
+                            raw_text = await intel.build_tts_announcer_briefing(
+                                chat_id, state
                             )
                             (
                                 audio_bytes,

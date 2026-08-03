@@ -223,6 +223,7 @@ class OrangeEchoClient:
         *,
         target_characters: int = 900,
         stoic_quote: dict[str, str] | None = None,
+        briefing: dict[str, object] | None = None,
     ) -> str:
         payload: dict[str, object] = {
             "intel": intel,
@@ -230,10 +231,20 @@ class OrangeEchoClient:
         }
         if stoic_quote:
             payload["stoic_quote"] = stoic_quote
+        if briefing:
+            payload["briefing"] = briefing
         response = await self.client.post(
             "/v1/inference/optimize",
             json=payload,
         )
+        if briefing and response.status_code == 400:
+            error = response.json().get("error", {})
+            if error.get("code") == "invalid_request":
+                payload.pop("briefing")
+                response = await self.client.post(
+                    "/v1/inference/optimize",
+                    json=payload,
+                )
         self._raise_for_api_error(response)
         result = response.json()
         return result["narration"]

@@ -306,8 +306,8 @@ async def _fetch_epic_free_games_uncached() -> tuple[str, list[str]]:
         return (f"❌ Failed to fetch Epic Games: {html.escape(str(e))}", [])
 
 
-async def fetch_hackernews_top(limit: int = 10) -> str:
-    """Fetch top stories from Hacker News."""
+async def fetch_hackernews_stories(limit: int = 10) -> list[dict[str, Any]]:
+    """Fetch structured top stories from Hacker News."""
     client = _get_client()
     last_error = None
     for attempt in range(2):
@@ -343,21 +343,9 @@ async def fetch_hackernews_top(limit: int = 10) -> str:
                     continue
 
             if not stories:
-                return "📰 <b>Hacker News</b>\n\nNo stories available."
+                return []
 
-            lines = ["📰 <b>Hacker News - Top Stories</b>\n"]
-            for i, story in enumerate(stories, 1):
-                title = html.escape(story["title"])
-                url = html.escape(story["url"])
-                score = story["score"]
-                comments = story["comments"]
-
-                lines.append(
-                    f"{i}. <a href='{url}'>{title}</a>\n"
-                    f"   ⬆️ {score} points • 💬 {comments} comments\n"
-                )
-
-            return "\n".join(lines)
+            return stories
 
         except Exception as e:
             last_error = e
@@ -365,8 +353,32 @@ async def fetch_hackernews_top(limit: int = 10) -> str:
             if attempt == 0:
                 await asyncio.sleep(5)
 
-    logger.exception("Failed to fetch Hacker News stories after retries")
-    return f"❌ Failed to fetch Hacker News: {html.escape(str(last_error))}"
+    raise RuntimeError(f"Failed to fetch Hacker News: {last_error}")
+
+
+async def fetch_hackernews_top(limit: int = 10) -> str:
+    """Fetch and format top stories from Hacker News."""
+    try:
+        stories = await fetch_hackernews_stories(limit)
+    except Exception as exc:
+        logger.warning("Failed to format Hacker News stories: %s", exc)
+        return f"❌ Failed to fetch Hacker News: {html.escape(str(exc))}"
+    if not stories:
+        return "📰 <b>Hacker News</b>\n\nNo stories available."
+
+    lines = ["📰 <b>Hacker News - Top Stories</b>\n"]
+    for i, story in enumerate(stories, 1):
+        title = html.escape(story["title"])
+        url = html.escape(story["url"])
+        score = story["score"]
+        comments = story["comments"]
+
+        lines.append(
+            f"{i}. <a href='{url}'>{title}</a>\n"
+            f"   ⬆️ {score} points • 💬 {comments} comments\n"
+        )
+
+    return "\n".join(lines)
 
 
 async def fetch_steam_free_games(limit: int = 5) -> tuple[str, list[str]]:
