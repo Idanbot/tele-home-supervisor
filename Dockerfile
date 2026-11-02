@@ -20,7 +20,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 # Compile bytecode for faster startup
 # We use --no-install-project because we don't need to pip-install the bot itself, just its deps
-RUN uv sync --frozen --no-dev --compile-bytecode --no-install-project
+RUN uv sync --frozen --no-dev --compile-bytecode --no-install-project \
+    && rm -rf /usr/local/lib/python3.14/site-packages/pip* /usr/local/bin/pip*
 
 # --------------------------------------------------------
 
@@ -71,6 +72,12 @@ RUN mkdir -p /app/data && chown -R app:app /app
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Remove pip and any vendored internal SBOMs from runtime image
+RUN rm -rf /usr/local/lib/python3.14/site-packages/pip* \
+           /usr/local/lib/python3.14/site-packages/setuptools* \
+           /usr/local/bin/pip* \
+    && find / -name "*bom.cdx.json" -delete 2>/dev/null || true
 
 # Copy source code
 COPY --chown=app:app . .
