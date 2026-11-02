@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import re
 import shutil
 import time
 import uuid
@@ -60,6 +61,83 @@ async def scan_network_inventory(
             timeout_s=timeout_s,
         )
     return summary, devices
+
+
+def normalize_mac(mac: str) -> str | None:
+    """Normalize MAC address to lowercase colon-separated format."""
+    clean_mac = re.sub(r"[^0-9a-fA-F]", "", mac or "")
+    if len(clean_mac) != 12:
+        return None
+    return ":".join(clean_mac[i : i + 2] for i in range(0, 12, 2)).lower()
+
+
+def read_arp_table(arp_path: str = "/proc/net/arp") -> dict[str, str]:
+    """Return mapping of IPv4 -> normalized MAC from system ARP cache."""
+    table: dict[str, str] = {}
+    try:
+        with open(arp_path) as f:
+            for line in f.readlines()[1:]:
+                parts = line.split()
+                if len(parts) >= 4:
+                    ip = parts[0]
+                    mac = parts[3]
+                    if mac != "00:00:00:00:00:00":
+                        norm = normalize_mac(mac)
+                        if norm:
+                            table[ip] = norm
+    except OSError as exc:
+        logger.debug("Failed to read ARP cache from %s: %s", arp_path, exc)
+    return table
+
+
+async def find_device_by_mac(
+    mac: str,
+    targets: list[str],
+    *,
+    nmap_args: list[str] | None = None,
+    timeout_s: int = 45,
+    arp_path: str = "/proc/net/arp",
+) -> tuple[
+    NetworkDeviceScan | None, list[NetworkDeviceScan], NetworkInventoryScanSummary
+]:
+    """Scan targets looking for a device matching the target MAC address."""
+    norm_mac = normalize_mac(mac)
+    if not norm_mac:
+        raise ValueError(f"Invalid MAC address: {mac}")
+
+    summary, devices = await scan_network_inventory(
+        targets,
+        nmap_args=nmap_args if nmap_args is not None else ["-T4", "-F"],
+        timeout_s=timeout_s,
+    )
+
+    # 1. Match directly from scan observations
+    for dev in devices:
+        if normalize_mac(dev.mac) == norm_mac:
+            return dev, devices, summary
+
+    # 2. Check ARP table in case host replied but scanner didn't parse MAC
+    arp_table = read_arp_table(arp_path=arp_path)
+    matched_ips = [ip for ip, m in arp_table.items() if m == norm_mac]
+    if matched_ips:
+        matched_ip = matched_ips[0]
+        for dev in devices:
+            if dev.ip == matched_ip:
+                dev.mac = norm_mac
+                return dev, devices, summary
+
+        # Device is in ARP cache but wasn't in scanned devices list
+        dev = NetworkDeviceScan(
+            scan_id=summary.scan_id,
+            scanned_at=summary.scanned_at,
+            ip=matched_ip,
+            mac=norm_mac,
+            status="up",
+        )
+        devices.append(dev)
+        return dev, devices, summary
+
+    return None, devices, summary
 
 
 def _normalize_targets(targets: list[str]) -> list[str]:

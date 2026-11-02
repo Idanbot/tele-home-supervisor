@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import io
+import ipaddress
 import logging
 import os
 import re
@@ -14,7 +15,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from .. import cli, config, services, view
+from .. import cli, config, network_inventory, services, view
 from ..models.managed_host import ManagedHost
 from .common import (
     get_state,
@@ -76,6 +77,183 @@ async def cmd_netinventory(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if len(latest) > 15:
         lines.append(f"… and {len(latest) - 15} more")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_scanmac(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scan networks for a specific MAC address."""
+    if not await guard_sensitive(update, context):
+        return
+
+    if not context.args:
+        msg = (
+            "🔍 <b>Usage:</b> <code>/scanmac &lt;mac|host&gt; [target_network]</code>\n\n"
+            "Scan the network to locate a device by its MAC address.\n\n"
+            "<b>Examples:</b>\n"
+            "• <code>/scanmac AA:BB:CC:DD:EE:FF</code>\n"
+            "• <code>/scanmac 00:11:22:33:44:55 192.168.1.0/24</code>\n"
+            "• <code>/scanmac desktop</code> <i>(if configured in managed hosts)</i>"
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        return
+
+    raw_target = context.args[0].strip()
+    set_audit_target(context, raw_target)
+
+    # Check if target matches a managed host
+    managed_host = config.get_managed_host(raw_target)
+    host_label = None
+    target_mac = None
+
+    if managed_host and managed_host.mac:
+        target_mac = _normalize_mac(managed_host.mac)
+        host_label = managed_host.name
+    else:
+        target_mac = _normalize_mac(raw_target)
+
+    if not target_mac:
+        if managed_host and not managed_host.mac:
+            err = (
+                f"❌ Host <code>{html.escape(managed_host.name)}</code> has no MAC address "
+                "configured in <code>MANAGED_HOSTS_JSON</code>."
+            )
+        else:
+            err = (
+                f"❌ Invalid MAC address: <code>{html.escape(raw_target)}</code>\n"
+                "Provide a valid MAC address (e.g. <code>AA:BB:CC:DD:EE:FF</code>) "
+                "or a configured managed host name."
+            )
+        await update.message.reply_text(err, parse_mode=ParseMode.HTML)
+        return
+
+    # Determine target networks
+    if len(context.args) > 1:
+        targets = [arg.strip() for arg in context.args[1:] if arg.strip()]
+    elif config.NETWORK_INVENTORY_TARGETS:
+        targets = list(config.NETWORK_INVENTORY_TARGETS)
+    else:
+        # Fall back to deriving subnet from primary LAN IP
+        lan_ip = await services.utils.get_primary_ip()
+        if lan_ip and lan_ip != "unknown" and _looks_like_ipv4(lan_ip):
+            try:
+                targets = [str(ipaddress.ip_network(f"{lan_ip}/24", strict=False))]
+            except ValueError:
+                targets = []
+        else:
+            targets = []
+
+    if not targets:
+        await update.message.reply_text(
+            "❌ No network targets configured.\n"
+            "Please provide a subnet to scan (e.g. <code>/scanmac "
+            f"{html.escape(target_mac.upper())} 192.168.1.0/24</code>) "
+            "or set <code>NETWORK_INVENTORY_TARGETS</code> in your environment.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Check historical cache in BotState for context
+    state = get_state(context.application)
+    historical_match = None
+    last_seen_time = None
+    if state and state.network_inventory:
+        for _ip, scans in state.network_inventory.items():
+            for s in reversed(scans):
+                if _normalize_mac(s.mac) == target_mac:
+                    historical_match = s
+                    last_seen_time = s.scanned_at
+                    break
+            if historical_match:
+                break
+
+    targets_str = ", ".join(targets)
+    status_msg = await update.message.reply_text(
+        f"🔍 Scanning <code>{html.escape(targets_str)}</code> for MAC <code>{html.escape(target_mac.upper())}</code>...",
+        parse_mode=ParseMode.HTML,
+    )
+
+    _, recorder = get_state_and_recorder(context)
+    try:
+        found_device, all_devices, summary = await network_inventory.find_device_by_mac(
+            target_mac,
+            targets,
+            timeout_s=min(config.NETWORK_INVENTORY_SCAN_TIMEOUT_S, 60),
+        )
+    except Exception as exc:
+        await record_error(
+            recorder,
+            "scanmac",
+            f"MAC scan failed for {target_mac}",
+            exc,
+            status_msg.edit_text,
+        )
+        return
+
+    if found_device:
+        # Record newly verified device into inventory
+        if state:
+            state.network_inventory.setdefault(found_device.ip, []).append(found_device)
+            state.prune_network_inventory(
+                retention_days=config.NETWORK_INVENTORY_RETENTION_DAYS,
+                max_scans_per_device=config.NETWORK_INVENTORY_MAX_SCANS_PER_DEVICE,
+            )
+            try:
+                state.save_network_inventory()
+            except Exception as save_err:
+                logger.debug(
+                    "Failed to save network inventory after scanmac: %s", save_err
+                )
+
+        lines = [
+            "🎯 <b>Device Found!</b>",
+            "",
+            f"• <b>MAC:</b> <code>{html.escape(target_mac.upper())}</code>",
+            f"• <b>IP:</b> <code>{html.escape(found_device.ip)}</code>",
+            f"• <b>Status:</b> 🟢 {html.escape(found_device.status or 'up')}",
+        ]
+        if host_label:
+            lines.append(f"• <b>Host:</b> <code>{html.escape(host_label)}</code>")
+        elif found_device.hostname:
+            lines.append(
+                f"• <b>Hostname:</b> <code>{html.escape(found_device.hostname)}</code>"
+            )
+
+        if found_device.vendor:
+            lines.append(f"• <b>Vendor:</b> {html.escape(found_device.vendor)}")
+
+        if found_device.services:
+            ports = ", ".join(
+                f"{svc.port}/{svc.protocol}"
+                + (f" ({svc.service})" if svc.service else "")
+                for svc in found_device.services[:5]
+            )
+            lines.append(f"• <b>Open Ports:</b> <code>{html.escape(ports)}</code>")
+
+        lines.append(
+            f"• <b>Scanned Network:</b> <code>{html.escape(targets_str)}</code>"
+        )
+        if summary.scanner:
+            lines.append(
+                f"• <b>Scanner:</b> <code>{html.escape(summary.scanner)}</code>"
+            )
+
+        await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    else:
+        lines = [
+            "🔍 <b>MAC Address Not Found</b>",
+            "",
+            f"MAC <code>{html.escape(target_mac.upper())}</code> was not detected on <code>{html.escape(targets_str)}</code>.",
+            f"Active hosts seen: <code>{len(all_devices)}</code>",
+        ]
+        if summary.error:
+            lines.append(f"⚠️ Scan notice: <code>{html.escape(summary.error)}</code>")
+
+        if historical_match and last_seen_time:
+            ts = datetime.fromtimestamp(last_seen_time).strftime("%Y-%m-%d %H:%M")
+            lines.append(
+                f"\n💡 <i>Previously seen at <code>{html.escape(historical_match.ip)}</code> on {ts}</i>"
+            )
+
+        await status_msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 async def cmd_wifiqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

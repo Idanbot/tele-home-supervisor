@@ -188,3 +188,97 @@ def test_bot_state_inventory_lifecycle_persists_and_prunes(tmp_path: Path) -> No
     assert loaded.network_inventory_last_summary is not None
     assert loaded.network_inventory_last_summary.scan_id == "new"
     assert loaded.latest_network_inventory()[0].ip == "192.168.1.20"
+
+
+def test_normalize_mac():
+    assert network_inventory.normalize_mac("AA:BB:CC:DD:EE:FF") == "aa:bb:cc:dd:ee:ff"
+    assert network_inventory.normalize_mac("aa-bb-cc-dd-ee-ff") == "aa:bb:cc:dd:ee:ff"
+    assert network_inventory.normalize_mac("aabb.ccdd.eeff") == "aa:bb:cc:dd:ee:ff"
+    assert network_inventory.normalize_mac("aabbccddeeff") == "aa:bb:cc:dd:ee:ff"
+    assert network_inventory.normalize_mac("invalid") is None
+    assert network_inventory.normalize_mac("") is None
+    assert network_inventory.normalize_mac("AA:BB:CC") is None
+
+
+def test_read_arp_table(tmp_path: Path):
+    arp_file = tmp_path / "arp"
+    arp_file.write_text(
+        "IP address       HW type     Flags       HW address            Mask     Device\n"
+        "192.168.1.10     0x1         0x2         aa:bb:cc:dd:ee:ff     *        eth0\n"
+        "192.168.1.11     0x1         0x0         00:00:00:00:00:00     *        eth0\n"
+        "192.168.1.12     0x1         0x2         11-22-33-44-55-66     *        eth0\n"
+    )
+    table = network_inventory.read_arp_table(str(arp_file))
+    assert table == {
+        "192.168.1.10": "aa:bb:cc:dd:ee:ff",
+        "192.168.1.12": "11:22:33:44:55:66",
+    }
+    # Nonexistent file returns empty dict
+    assert network_inventory.read_arp_table(str(tmp_path / "nonexistent")) == {}
+
+
+@pytest.mark.asyncio
+async def test_find_device_by_mac_direct(monkeypatch, tmp_path: Path):
+    dummy_summary = NetworkInventoryScanSummary(
+        scan_id="s1", scanned_at=100.0, targets=["192.168.1.0/24"], devices_seen=1
+    )
+    dummy_device = NetworkDeviceScan(
+        scan_id="s1",
+        scanned_at=100.0,
+        ip="192.168.1.42",
+        mac="AA:BB:CC:DD:EE:FF",
+        hostname="my-pi",
+    )
+
+    async def fake_scan(targets, nmap_args=None, timeout_s=45):
+        return dummy_summary, [dummy_device]
+
+    monkeypatch.setattr(network_inventory, "scan_network_inventory", fake_scan)
+
+    dev, devices, summary = await network_inventory.find_device_by_mac(
+        "aa:bb:cc:dd:ee:ff", ["192.168.1.0/24"]
+    )
+    assert dev is not None
+    assert dev.ip == "192.168.1.42"
+    assert summary.scan_id == "s1"
+
+    # Test not found
+    dev_nf, _, _ = await network_inventory.find_device_by_mac(
+        "11:22:33:44:55:66",
+        ["192.168.1.0/24"],
+        arp_path=str(tmp_path / "nonexistent_arp"),
+    )
+    assert dev_nf is None
+
+    # Test invalid mac raises
+    with pytest.raises(ValueError):
+        await network_inventory.find_device_by_mac("invalid_mac", ["192.168.1.0/24"])
+
+
+@pytest.mark.asyncio
+async def test_find_device_by_mac_via_arp(monkeypatch, tmp_path: Path):
+    dummy_summary = NetworkInventoryScanSummary(
+        scan_id="s2", scanned_at=200.0, targets=["192.168.1.0/24"], devices_seen=1
+    )
+    # Scan found an IP but without MAC
+    dummy_device = NetworkDeviceScan(
+        scan_id="s2", scanned_at=200.0, ip="192.168.1.50", mac=""
+    )
+
+    arp_file = tmp_path / "arp"
+    arp_file.write_text(
+        "IP address       HW type     Flags       HW address            Mask     Device\n"
+        "192.168.1.50     0x1         0x2         aa:bb:cc:dd:ee:ff     *        eth0\n"
+    )
+
+    async def fake_scan(targets, nmap_args=None, timeout_s=45):
+        return dummy_summary, [dummy_device]
+
+    monkeypatch.setattr(network_inventory, "scan_network_inventory", fake_scan)
+
+    dev, devices, summary = await network_inventory.find_device_by_mac(
+        "aa:bb:cc:dd:ee:ff", ["192.168.1.0/24"], arp_path=str(arp_file)
+    )
+    assert dev is not None
+    assert dev.ip == "192.168.1.50"
+    assert dev.mac == "aa:bb:cc:dd:ee:ff"

@@ -227,6 +227,14 @@ _NETWORK_COMMANDS = (
         "latest scheduled home network inventory",
         "cmd_netinventory",
     ),
+    CommandSpec(
+        "scanmac",
+        "Network",
+        "/scanmac <mac> [target]",
+        "scan networks for a specific MAC address",
+        "cmd_scanmac",
+        aliases=("findmac",),
+    ),
 )
 
 _TORRENTS_COMMANDS = (

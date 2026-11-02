@@ -138,3 +138,144 @@ def test_wol_resolution_helpers(monkeypatch):
     assert env == {"SSHPASS": "secret"}
     assert network._normalize_mac("AA-BB-CC-DD-EE-FF") == "aa:bb:cc:dd:ee:ff"
     assert network._looks_like_ipv4("256.1.1.1") is False
+
+
+@pytest.mark.asyncio
+async def test_cmd_scanmac_validation_and_usage(monkeypatch):
+    monkeypatch.setattr(network, "guard_sensitive", allow_guard)
+    update = DummyUpdate(chat_id=1, user_id=1)
+
+    # 1. No args -> usage
+    context = DummyContext(args=[])
+    await network.cmd_scanmac(update, context)
+    assert "Usage:" in update.message.replies[-1]
+
+    # 2. Invalid MAC -> error
+    context = DummyContext(args=["not-a-mac"])
+    await network.cmd_scanmac(update, context)
+    assert "Invalid MAC address" in update.message.replies[-1]
+
+    # 3. Managed host without MAC
+    no_mac_host = ManagedHost(name="nohost", ping_host="192.168.1.55", mac="")
+    monkeypatch.setattr(
+        network.config,
+        "get_managed_host",
+        lambda name: no_mac_host if name == "nohost" else None,
+    )
+    context = DummyContext(args=["nohost"])
+    await network.cmd_scanmac(update, context)
+    assert "has no MAC address configured" in update.message.replies[-1]
+
+    # 4. Valid MAC but no targets configured and unknown LAN
+    monkeypatch.setattr(network.config, "NETWORK_INVENTORY_TARGETS", [])
+    monkeypatch.setattr(
+        network.services.utils, "get_primary_ip", AsyncMock(return_value="unknown")
+    )
+    context = DummyContext(args=["AA:BB:CC:DD:EE:FF"])
+    await network.cmd_scanmac(update, context)
+    assert "No network targets configured" in update.message.replies[-1]
+
+
+@pytest.mark.asyncio
+async def test_cmd_scanmac_found_and_not_found(monkeypatch):
+    monkeypatch.setattr(network, "guard_sensitive", allow_guard)
+    update = DummyUpdate(chat_id=1, user_id=1)
+    context = DummyContext(args=["AA:BB:CC:DD:EE:FF", "192.168.1.0/24"])
+
+    summary = NetworkInventoryScanSummary(
+        scan_id="s1",
+        scanned_at=1_700_000_000,
+        targets=["192.168.1.0/24"],
+        devices_seen=1,
+        scanner="nmap",
+    )
+    found_dev = NetworkDeviceScan(
+        scan_id="s1",
+        scanned_at=1_700_000_000,
+        ip="192.168.1.42",
+        mac="aa:bb:cc:dd:ee:ff",
+        status="up",
+        hostname="pi.local",
+        vendor="Raspberry Pi",
+        services=[NetworkService(port=22, protocol="tcp", service="ssh")],
+    )
+
+    # 1. Device found
+    monkeypatch.setattr(
+        network.network_inventory,
+        "find_device_by_mac",
+        AsyncMock(return_value=(found_dev, [found_dev], summary)),
+    )
+    await network.cmd_scanmac(update, context)
+    reply = update.message.replies[-1]
+    assert "Device Found!" in reply
+    assert "192.168.1.42" in reply
+    assert "AA:BB:CC:DD:EE:FF" in reply
+    assert "Raspberry Pi" in reply
+    assert "22/tcp (ssh)" in reply
+
+    # 1b. Device found via managed host name with auto-derived LAN subnet
+    managed_pc = ManagedHost(
+        name="pc", ping_host="192.168.1.42", mac="AA:BB:CC:DD:EE:FF"
+    )
+    monkeypatch.setattr(
+        network.config,
+        "get_managed_host",
+        lambda name: managed_pc if name == "pc" else None,
+    )
+    monkeypatch.setattr(network.config, "NETWORK_INVENTORY_TARGETS", [])
+    monkeypatch.setattr(
+        network.services.utils,
+        "get_primary_ip",
+        AsyncMock(return_value="192.168.1.100"),
+    )
+    update_pc = DummyUpdate(chat_id=1, user_id=1)
+    context_pc = DummyContext(args=["pc"])
+    await network.cmd_scanmac(update_pc, context_pc)
+    reply_pc = update_pc.message.replies[-1]
+    assert "Device Found!" in reply_pc
+    assert "Host:" in reply_pc
+    assert "pc" in reply_pc
+    assert "192.168.1.0/24" in reply_pc
+
+    # 2. Device not found (with historical last seen)
+    state = get_state(context.application)
+    state.network_inventory = {"192.168.1.42": [found_dev]}
+    monkeypatch.setattr(
+        network.network_inventory,
+        "find_device_by_mac",
+        AsyncMock(return_value=(None, [found_dev], summary)),
+    )
+    update2 = DummyUpdate(chat_id=1, user_id=1)
+    context2 = DummyContext(args=["11:22:33:44:55:66", "192.168.1.0/24"])
+    await network.cmd_scanmac(update2, context2)
+    reply2 = update2.message.replies[-1]
+    assert "MAC Address Not Found" in reply2
+
+    # Device not found but target MAC matches historical record
+    update3 = DummyUpdate(chat_id=1, user_id=1)
+    context.args = ["AA:BB:CC:DD:EE:FF", "192.168.1.0/24"]
+    await network.cmd_scanmac(update3, context)
+    reply3 = update3.message.replies[-1]
+    assert "MAC Address Not Found" in reply3
+    assert "Previously seen at" in reply3
+    assert "192.168.1.42" in reply3
+
+    # 3. Exception in scan -> record_error called
+    monkeypatch.setattr(
+        network.network_inventory,
+        "find_device_by_mac",
+        AsyncMock(side_effect=RuntimeError("nmap crashed")),
+    )
+    recorded = []
+
+    async def fake_record_error(recorder, cmd, desc, exc, edit_fn):
+        recorded.append((cmd, desc, str(exc)))
+        await edit_fn(f"Error: {exc}")
+
+    monkeypatch.setattr(network, "record_error", fake_record_error)
+    update4 = DummyUpdate(chat_id=1, user_id=1)
+    context4 = DummyContext(args=["AA:BB:CC:DD:EE:FF", "192.168.1.0/24"])
+    await network.cmd_scanmac(update4, context4)
+    assert len(recorded) == 1
+    assert recorded[0][0] == "scanmac"
