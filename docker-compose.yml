@@ -74,6 +74,7 @@ services:
     volumes:
       - ${MEDIA_PATH:-/srv/media}:/srv/media:ro
       - ${THERMAL_PATH:-/sys/class/thermal/thermal_zone0}:/host_thermal:ro
+      - ${HOST_ARP_PATH:-/proc/net/arp}:/host_proc/net/arp:ro
       - telebot_data:/app/data
 
     logging:

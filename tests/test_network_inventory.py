@@ -217,6 +217,17 @@ def test_read_arp_table(tmp_path: Path):
     assert network_inventory.read_arp_table(str(tmp_path / "nonexistent")) == {}
 
 
+def test_read_arp_table_host_env(monkeypatch, tmp_path: Path):
+    arp_file = tmp_path / "host_arp"
+    arp_file.write_text(
+        "IP address       HW type     Flags       HW address            Mask     Device\n"
+        "192.168.1.10     0x1         0x2         aa:bb:cc:dd:ee:ff     *        eth0\n"
+    )
+    monkeypatch.setenv("HOST_ARP_PATH", str(arp_file))
+    table = network_inventory.read_arp_table()
+    assert table == {"192.168.1.10": "aa:bb:cc:dd:ee:ff"}
+
+
 @pytest.mark.asyncio
 async def test_find_device_by_mac_direct(monkeypatch, tmp_path: Path):
     dummy_summary = NetworkInventoryScanSummary(

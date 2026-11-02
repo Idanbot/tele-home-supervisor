@@ -128,18 +128,9 @@ async def cmd_scanmac(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Determine target networks
     if len(context.args) > 1:
         targets = [arg.strip() for arg in context.args[1:] if arg.strip()]
-    elif config.NETWORK_INVENTORY_TARGETS:
-        targets = list(config.NETWORK_INVENTORY_TARGETS)
     else:
-        # Fall back to deriving subnet from primary LAN IP
         lan_ip = await services.utils.get_primary_ip()
-        if lan_ip and lan_ip != "unknown" and _looks_like_ipv4(lan_ip):
-            try:
-                targets = [str(ipaddress.ip_network(f"{lan_ip}/24", strict=False))]
-            except ValueError:
-                targets = []
-        else:
-            targets = []
+        targets = _resolve_default_scan_targets(lan_ip)
 
     if not targets:
         await update.message.reply_text(
@@ -790,20 +781,58 @@ def _legacy_defaults() -> tuple[str, str | None]:
     return default_ip, default_mac
 
 
-def _resolve_mac_from_arp(ip: str) -> str | None:
-    """Try to find MAC address for a given IP in the system ARP cache."""
-    try:
-        with open("/proc/net/arp") as f:
-            for line in f.readlines()[1:]:
-                parts = line.split()
-                if len(parts) >= 4 and parts[0] == ip:
-                    res = parts[3]
-                    if res != "00:00:00:00:00:00":
-                        return res
-    except OSError as exc:
-        logger.debug("Failed to read /proc/net/arp while resolving %s: %s", ip, exc)
+def _resolve_default_scan_targets(lan_ip: str | None = None) -> list[str]:
+    """Resolve default target networks, escaping Docker bridge to host LAN if needed."""
+    if config.NETWORK_INVENTORY_TARGETS:
+        return list(config.NETWORK_INVENTORY_TARGETS)
 
-    return None
+    # 1. Deduce physical LAN from WOL_BROADCAST_IP (e.g. 192.168.1.255 -> 192.168.1.0/24)
+    if config.WOL_BROADCAST_IP and config.WOL_BROADCAST_IP != "255.255.255.255":
+        try:
+            return [
+                str(ipaddress.ip_network(f"{config.WOL_BROADCAST_IP}/24", strict=False))
+            ]
+        except ValueError:
+            pass
+
+    # 2. Deduce physical LAN from managed hosts
+    for host in config.MANAGED_HOSTS:
+        candidate_ip = (host.ping_host or host.wol_broadcast_ip or "").strip()
+        if (
+            candidate_ip
+            and not candidate_ip.startswith("127.")
+            and not candidate_ip.startswith("172.")
+        ):
+            try:
+                return [str(ipaddress.ip_network(f"{candidate_ip}/24", strict=False))]
+            except ValueError:
+                pass
+
+    # 3. Deduce physical LAN from ALERT_PING_LAN_TARGETS
+    for target in config.ALERT_PING_LAN_TARGETS:
+        t = target.strip()
+        if t and not t.startswith("127.") and not t.startswith("172."):
+            try:
+                if "/" in t:
+                    return [str(ipaddress.ip_network(t, strict=False))]
+                return [str(ipaddress.ip_network(f"{t}/24", strict=False))]
+            except ValueError:
+                pass
+
+    # 4. Fall back to container LAN IP
+    if lan_ip and lan_ip != "unknown" and _looks_like_ipv4(lan_ip):
+        try:
+            return [str(ipaddress.ip_network(f"{lan_ip}/24", strict=False))]
+        except ValueError:
+            pass
+
+    return []
+
+
+def _resolve_mac_from_arp(ip: str) -> str | None:
+    """Try to find MAC address for a given IP in the system or host ARP cache."""
+    table = network_inventory.read_arp_table()
+    return table.get(ip)
 
 
 def _normalize_mac(mac: str) -> str | None:

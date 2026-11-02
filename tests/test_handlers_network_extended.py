@@ -279,3 +279,39 @@ async def test_cmd_scanmac_found_and_not_found(monkeypatch):
     await network.cmd_scanmac(update4, context4)
     assert len(recorded) == 1
     assert recorded[0][0] == "scanmac"
+
+
+def test_resolve_default_scan_targets(monkeypatch):
+    monkeypatch.setattr(network.config, "NETWORK_INVENTORY_TARGETS", [])
+    monkeypatch.setattr(network.config, "MANAGED_HOSTS", [])
+    monkeypatch.setattr(network.config, "ALERT_PING_LAN_TARGETS", [])
+    monkeypatch.setattr(network.config, "WOL_BROADCAST_IP", "")
+
+    # 1. From WOL_BROADCAST_IP
+    monkeypatch.setattr(network.config, "WOL_BROADCAST_IP", "192.168.10.255")
+    assert network._resolve_default_scan_targets() == ["192.168.10.0/24"]
+
+    # 2. From MANAGED_HOSTS when WOL_BROADCAST_IP is unset
+    monkeypatch.setattr(network.config, "WOL_BROADCAST_IP", "")
+    managed_pc = ManagedHost(name="pc", ping_host="192.168.20.5")
+    monkeypatch.setattr(network.config, "MANAGED_HOSTS", [managed_pc])
+    assert network._resolve_default_scan_targets() == ["192.168.20.0/24"]
+
+    # 3. From ALERT_PING_LAN_TARGETS
+    monkeypatch.setattr(network.config, "MANAGED_HOSTS", [])
+    monkeypatch.setattr(network.config, "ALERT_PING_LAN_TARGETS", ["192.168.30.1"])
+    assert network._resolve_default_scan_targets() == ["192.168.30.0/24"]
+
+    # 4. Fallback to LAN IP
+    monkeypatch.setattr(network.config, "ALERT_PING_LAN_TARGETS", [])
+    assert network._resolve_default_scan_targets("192.168.40.10") == ["192.168.40.0/24"]
+
+
+def test_resolve_mac_from_arp(monkeypatch):
+    monkeypatch.setattr(
+        network.network_inventory,
+        "read_arp_table",
+        lambda: {"192.168.1.10": "aa:bb:cc:dd:ee:ff"},
+    )
+    assert network._resolve_mac_from_arp("192.168.1.10") == "aa:bb:cc:dd:ee:ff"
+    assert network._resolve_mac_from_arp("192.168.1.99") is None

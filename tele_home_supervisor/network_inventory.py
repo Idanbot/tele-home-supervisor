@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import os
 import re
 import shutil
 import time
@@ -71,8 +72,23 @@ def normalize_mac(mac: str) -> str | None:
     return ":".join(clean_mac[i : i + 2] for i in range(0, 12, 2)).lower()
 
 
-def read_arp_table(arp_path: str = "/proc/net/arp") -> dict[str, str]:
-    """Return mapping of IPv4 -> normalized MAC from system ARP cache."""
+def read_arp_table(arp_path: str | None = None) -> dict[str, str]:
+    """Return mapping of IPv4 -> normalized MAC from system or host ARP cache."""
+    if arp_path is None:
+        candidates = [
+            os.environ.get("HOST_ARP_PATH", ""),
+            "/host_proc/net/arp",
+            "/host/proc/net/arp",
+            "/host_arp",
+            "/proc/net/arp",
+        ]
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                arp_path = candidate
+                break
+        if not arp_path:
+            arp_path = "/proc/net/arp"
+
     table: dict[str, str] = {}
     try:
         with open(arp_path) as f:
@@ -96,7 +112,7 @@ async def find_device_by_mac(
     *,
     nmap_args: list[str] | None = None,
     timeout_s: int = 45,
-    arp_path: str = "/proc/net/arp",
+    arp_path: str | None = None,
 ) -> tuple[
     NetworkDeviceScan | None, list[NetworkDeviceScan], NetworkInventoryScanSummary
 ]:
