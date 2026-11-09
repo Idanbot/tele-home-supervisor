@@ -5,6 +5,13 @@ from __future__ import annotations
 from .models.command_spec import CommandSpec, Group
 
 _INFO_COMMANDS = (
+    CommandSpec(
+        "security",
+        "Info",
+        "/security [ban <user_id>]",
+        "owner-only security activity",
+        "cmd_security",
+    ),
     CommandSpec("start", "Info", "/start", "show help", "cmd_start"),
     CommandSpec("help", "Info", "/help", "this menu", "cmd_help"),
     CommandSpec("whoami", "Info", "/whoami", "show chat and user info", "cmd_whoami"),
@@ -170,6 +177,7 @@ _DOCKER_COMMANDS = (
 )
 
 _NETWORK_COMMANDS = (
+    CommandSpec("pc1", "Network", "/pc1", "PC1 status, wake and MAC scan", "cmd_pc1"),
     CommandSpec(
         "ping",
         "Network",

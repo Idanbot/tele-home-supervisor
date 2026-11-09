@@ -11,13 +11,17 @@ from . import (
     meta,
     network,
     notifications,
+    pc,
     release_watches,
+    security,
     system,
     torrents,
 )
 from .common import rate_limit
 
 # Meta
+cmd_security = rate_limit(security.cmd_security, name="security")
+cmd_pc1 = rate_limit(pc.cmd_pc1, name="pc1")
 cmd_start = rate_limit(meta.cmd_start, name="start")
 cmd_help = rate_limit(meta.cmd_help, name="help")
 cmd_whoami = rate_limit(meta.cmd_whoami, name="whoami")

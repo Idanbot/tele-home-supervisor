@@ -894,7 +894,8 @@ async def _send_wol_packet(mac: str, *, broadcast_ips: list[str], port: int) -> 
                         logger.debug("Failed to send WOL to %s:%d: %s", ip, p, e)
         return sent
 
-    await asyncio.to_thread(_send)
+    if not await asyncio.to_thread(_send):
+        raise OSError("No Wake-on-LAN packet could be sent to any broadcast target")
 
 
 def _resolve_host_ssh_password(host: ManagedHost) -> str:

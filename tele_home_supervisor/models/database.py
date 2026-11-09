@@ -8,9 +8,21 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
+    3: (
+        """CREATE TABLE unauthorized_attempts (
+            chat_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+            user_name TEXT NOT NULL, action TEXT NOT NULL,
+            first_seen REAL NOT NULL, last_seen REAL NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 1,
+            notified_at REAL NOT NULL DEFAULT 0,
+            notified_attempts INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (chat_id, user_id)
+        )""",
+        "CREATE INDEX unauthorized_last_seen_idx ON unauthorized_attempts(last_seen)",
+    ),
     1: (
         """
         CREATE TABLE state_documents (

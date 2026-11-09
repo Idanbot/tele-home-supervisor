@@ -14,7 +14,7 @@ import logging
 from telegram.constants import ParseMode
 
 # Sub-module handlers
-from . import ai, cb_docker, cb_media, cb_torrents, notifications
+from . import ai, cb_docker, cb_media, cb_torrents, notifications, pc
 from . import alerts as alerts_handler
 
 # ---------------------------------------------------------------------------
@@ -111,6 +111,9 @@ async def handle_callback_query(update, context) -> None:
         return
 
     try:
+        if data.startswith("pc1:"):
+            await pc.handle_pc_callback(update, context)
+            return
         # --- Alerts ----------------------------------------------------------
         if data.startswith("alerts:"):
             if not await guard_sensitive(update, context):

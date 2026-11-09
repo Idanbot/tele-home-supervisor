@@ -72,7 +72,7 @@ def test_upgrade_from_v1_preserves_existing_data(tmp_path) -> None:
 
     assert json.loads(payload)["gameoffers_muted"] == [7]
     assert network_table is not None
-    assert database.schema_version(path) == 2
+    assert database.schema_version(path) == database.SCHEMA_VERSION
 
 
 def test_newer_database_schema_is_rejected(tmp_path) -> None:

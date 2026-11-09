@@ -92,6 +92,39 @@ docker compose up -d
 
 ## ⚙️ Configuration Reference
 
+### PC1 Controls and Security Activity
+
+Use `/pc1` for a status message with **Wake**, **Scan**, and **Refresh** buttons.
+Configure a managed host named `pc1`, or add `pc1` to an existing host's `aliases`
+in `MANAGED_HOSTS_JSON`. Set its `mac`, `ping_host`, and `wol_broadcast_ip` to
+your PC's MAC, LAN address, and LAN broadcast address. For example:
+
+```dotenv
+MANAGED_HOSTS_JSON=[{"name":"pc1","ping_host":"192.168.1.10","mac":"AA:BB:CC:DD:EE:FF","wol_broadcast_ip":"192.168.1.255"}]
+NETWORK_INVENTORY_TARGETS=192.168.1.0/24
+```
+
+Replace these example addresses with your LAN settings. `/pc1` requires the same
+authorization as `/wol`, including `/auth`. Wake checks for ping responses for up
+to 60 seconds in the background. Ping reachability is an observation, not proof
+of the machine's power state. Scan searches by MAC and persists the found IP and
+timestamp in the existing network inventory. Status prefers the latest recorded
+address for that MAC. LAN broadcasts and MAC discovery depend on Docker's network
+connectivity; on a bridge network, check that directed broadcasts reach the LAN
+and use the existing host ARP mount for discovery. A missing MAC result does not
+prove the PC is offline.
+
+Use the owner-only `/security` command to review the latest 10 unauthorized
+identities, with first/last timestamps, attempt counts, and the latest command.
+`/security ban <user_id>` uses the existing persistent ban list. Owner alerts
+go to `OWNER_ID`: the first attempt alerts immediately, and subsequent alerts
+include the accumulated count when another attempt arrives after five minutes.
+Suppressed attempts are still recorded. Command arguments, message contents,
+and callback parameters are excluded from history. Records and alert cooldowns
+survive container restarts in the existing SQLite database on `telebot_data`.
+Activity older than 90 days is pruned on reads/writes, with a maximum of 1,000
+user/chat identities. The schema migration runs automatically at startup.
+
 ### Core & Security
 | Variable | Required | Description |
 |:---|:---:|:---|

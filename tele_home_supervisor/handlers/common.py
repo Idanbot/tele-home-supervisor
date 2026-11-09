@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import html
 import logging
@@ -12,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from telegram.constants import ParseMode
 
-from .. import config, messages
+from .. import config, messages, security
 from ..models.audit import AuditEntry
 from ..state import BOT_STATE_KEY, BotState, DebugRecorder
 
@@ -184,16 +185,16 @@ def _unauthorized_interaction_name(update) -> str:
     query = getattr(update, "callback_query", None)
     callback_data = getattr(query, "data", None)
     if callback_data:
-        return f"callback: {str(callback_data)[:120]}"
+        return f"callback: {str(callback_data).split(':', 1)[0][:80]}"
 
     message = getattr(update, "effective_message", None) or getattr(
         update, "message", None
     )
     text = getattr(message, "text", None) or getattr(message, "caption", None)
-    if text:
+    if text and str(text).strip().startswith("/"):
         command = str(text).strip().split(maxsplit=1)[0]
         return command[:120]
-    return "non-text message"
+    return "message"
 
 
 async def notify_owner_unauthorized_attempt(
@@ -203,13 +204,9 @@ async def notify_owner_unauthorized_attempt(
 ) -> None:
     """Notify the configured owner about a rate-limited unauthorized interaction."""
     owner_id = config.OWNER_ID
-    if owner_id is None:
-        return
     app = getattr(context, "application", None)
     bot = getattr(app, "bot", None)
     send_message = getattr(bot, "send_message", None)
-    if not callable(send_message):
-        return
 
     chat = getattr(update, "effective_chat", None)
     user = getattr(update, "effective_user", None)
@@ -217,7 +214,27 @@ async def notify_owner_unauthorized_attempt(
     user_id = getattr(user, "id", None)
     if state is None and app is not None:
         state = get_state(app)
-    if state is not None:
+    attempts = 1
+    persisted = False
+    if state is not None and chat_id is not None:
+        try:
+            notify, attempts = await asyncio.to_thread(
+                security.record_attempt,
+                state._database_file,
+                chat_id,
+                user_id if user_id is not None else 0,
+                _format_user_name(user),
+                _unauthorized_interaction_name(update),
+                time.time(),
+            )
+            persisted = True
+            if not notify:
+                return
+        except Exception as exc:
+            logger.warning("Failed to persist unauthorized attempt: %s", exc)
+    if owner_id is None or not callable(send_message):
+        return
+    if state is not None and not persisted:
         key = (chat_id, user_id)
         now = time.time()
         notices = state._last_unauthorized_notice_ts
@@ -244,6 +261,7 @@ async def notify_owner_unauthorized_attempt(
         f"Username: {html.escape(username_text)}",
         f"Chat: <code>{html.escape(str(chat_id))}</code> ({html.escape(str(chat_type))})",
         f"Attempt: <code>{html.escape(_unauthorized_interaction_name(update))}</code>",
+        f"Attempts since previous alert: {attempts}",
     ]
     try:
         await send_message(
